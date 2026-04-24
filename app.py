@@ -498,6 +498,10 @@ def main() -> None:
         st.header("Google Drive")
         with st.expander("Rutas configuradas", expanded=False):
             st.dataframe(validate_paths(), use_container_width=True, hide_index=True)
+            st.caption(
+                "La cache local solo copia catálogos individuales. "
+                "CUTOUT_BASE y LENS_IMG_BASE no se copian; las imágenes se leen bajo demanda."
+            )
 
         st.header("Lentes")
         only_grade_a = st.checkbox("Usar solo lentes grade A", value=True)
@@ -543,6 +547,7 @@ def main() -> None:
         st.info("Pulsa **Ejecutar clusterización** para generar los clusters BIRCH.")
         st.stop()
 
+    # Solo cacheamos catálogos individuales. Las carpetas de imágenes se leen bajo demanda.
     prepare_catalog_cache([PARQUET_PATH, LENS_PATH])
 
     params = st.session_state["cluster_params"]

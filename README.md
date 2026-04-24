@@ -40,6 +40,7 @@ export LENS_IMG_BASE="/content/drive/MyDrive/catalogues/strong_lensing_catalogue
 - Marca visualmente lentes y no lentes.
 - Muestra detalles del objeto seleccionado, incluyendo una lectura puntual de `MORPH_PATH`.
 - Muestra imágenes del objeto seleccionado cuando existen en `CUTOUT_BASE` o `LENS_IMG_BASE`.
+- No copia ni cachea `CUTOUT_BASE` ni `LENS_IMG_BASE`; esas carpetas de imágenes se consultan bajo demanda.
 
 ## Entorno local
 
@@ -56,7 +57,7 @@ pip install -r requirements.txt
 
 La ruta `/content/drive/...` es típica de Google Colab. Si ejecutas fuera de Colab, monta Google Drive o sobrescribe las variables de entorno anteriores para apuntar al mount real.
 
-Por defecto la app copia los catálogos necesarios para clusterizar desde Google Drive Desktop a una cache local fuera del repositorio, en `~/.cache/euclid-umap-explorer`, mostrando un estado y barra de progreso durante la copia. Esto evita timeouts de `pyarrow` al leer parquet desde el filesystem virtual de Drive. Puedes cambiar la cache con `EUCLID_CACHE_DIR` o desactivarla con `EUCLID_USE_LOCAL_CACHE=0`.
+Por defecto la app copia solo los catálogos necesarios para clusterizar (`PARQUET_PATH` y `LENS_PATH`) desde Google Drive Desktop a una cache local fuera del repositorio, en `~/.cache/euclid-umap-explorer`, mostrando un estado y barra de progreso durante la copia. Las carpetas `CUTOUT_BASE` y `LENS_IMG_BASE` no se copian nunca. Esto evita timeouts de `pyarrow` al leer parquet desde el filesystem virtual de Drive. Puedes cambiar la cache con `EUCLID_CACHE_DIR` o desactivarla con `EUCLID_USE_LOCAL_CACHE=0`.
 
 ```bash
 streamlit run app.py
