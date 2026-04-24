@@ -148,15 +148,15 @@ def prepare_catalog_cache(paths: list[str]) -> None:
                 continue
 
             copied_any = True
-            st.write(f"Copiando `{source.name}` ({format_bytes(size)}) desde Google Drive...")
+            st.write(f"Copiando `{source.name}` ({format_bytes(size)}) desde el origen configurado...")
             progress = st.progress(0.0, text=f"0 B / {format_bytes(size)}")
             try:
                 cached_input_path(path, progress=progress)
             except TimeoutError as exc:
                 progress.empty()
                 st.error(
-                    "Google Drive Desktop ha agotado el tiempo al servir este fichero. "
-                    "Márcalo como disponible sin conexión en Finder y vuelve a intentarlo."
+                    "El origen de datos ha agotado el tiempo al servir este fichero. "
+                    "Si usas una unidad sincronizada, márcalo como disponible sin conexión y vuelve a intentarlo."
                 )
                 status.update(label="No se pudo copiar un catálogo", state="error")
                 raise exc
@@ -183,7 +183,10 @@ def detect_pca_columns(df: pd.DataFrame) -> list[str]:
 
 
 def normalize_object_ids(series: pd.Series) -> pd.Series:
-    return series.astype("string").str.strip()
+    normalized = series.astype("string").str.strip()
+    normalized = normalized.str.replace(r"\.0$", "", regex=True)
+    normalized = normalized.str.strip("'\"")
+    return normalized
 
 
 def ensure_object_id_from_id_str(df: pd.DataFrame) -> pd.DataFrame:
@@ -243,7 +246,15 @@ def merge_lens_flags(work_df: pd.DataFrame, lens_df: pd.DataFrame) -> pd.DataFra
     lens_meta = lens_meta.rename(columns=rename_map)
 
     merged = work_df.merge(lens_meta, on="object_id", how="left")
-    merged["is_lens"] = merged["object_id"].isin(set(lens_df["object_id"]))
+    lens_object_ids = set(normalize_object_ids(lens_df["object_id"]).dropna())
+    merged["is_lens"] = normalize_object_ids(merged["object_id"]).isin(lens_object_ids)
+
+    if "id_str" in work_df.columns and "id_str" in lens_df.columns:
+        lens_id_strs = set(lens_df["id_str"].astype("string").str.strip().dropna())
+        merged["is_lens"] = merged["is_lens"] | (
+            merged["id_str"].astype("string").str.strip().isin(lens_id_strs)
+        )
+
     return merged
 
 
@@ -310,9 +321,12 @@ def build_cluster_summary(clustered_df: pd.DataFrame) -> pd.DataFrame:
             n_lenses=("is_lens", "sum"),
         )
         .reset_index()
-        .sort_values(["n_lenses", "n_objects", "cluster"], ascending=[False, False, True])
     )
     summary_df["lens_rate"] = summary_df["n_lenses"] / summary_df["n_objects"]
+    summary_df = summary_df.sort_values(
+        ["lens_rate", "n_lenses", "n_objects", "cluster"],
+        ascending=[False, False, False, True],
+    )
     return summary_df
 
 
@@ -320,14 +334,40 @@ def format_cluster_option(row: pd.Series) -> str:
     return (
         f"Cluster {int(row['cluster'])} | "
         f"{int(row['n_objects']):,} objetos | "
-        f"{int(row['n_lenses']):,} lentes"
+        f"{int(row['n_lenses']):,} lentes | "
+        f"{row['lens_rate'] * 100:.3f}%"
     )
 
 
 def sample_for_display(df: pd.DataFrame, max_objects: int) -> pd.DataFrame:
     if len(df) <= max_objects:
         return df.copy()
-    return df.sample(n=max_objects, random_state=42).copy()
+
+    working = df.copy()
+    working["_sample_priority"] = 0
+
+    if "is_lens" in working.columns:
+        working.loc[working["is_lens"], "_sample_priority"] = 1
+    if "is_canonical" in working.columns:
+        working.loc[working["is_canonical"], "_sample_priority"] = 2
+    if "is_anomaly" in working.columns:
+        working.loc[working["is_anomaly"], "_sample_priority"] = 2
+
+    priority_df = working[working["_sample_priority"] > 0].sort_values(
+        ["_sample_priority"],
+        ascending=False,
+    )
+    if len(priority_df) >= max_objects:
+        return priority_df.head(max_objects).drop(columns=["_sample_priority"]).copy()
+
+    remaining_df = working[working["_sample_priority"] == 0]
+    n_remaining = max_objects - len(priority_df)
+    sampled_remaining = remaining_df.sample(
+        n=min(n_remaining, len(remaining_df)),
+        random_state=42,
+    )
+    sampled = pd.concat([priority_df, sampled_remaining], ignore_index=True)
+    return sampled.drop(columns=["_sample_priority"]).copy()
 
 
 @st.cache_data(show_spinner=True)
@@ -354,6 +394,58 @@ def compute_umap_embedding(
     clean["umap_1"] = embedding[:, 0]
     clean["umap_2"] = embedding[:, 1]
     return clean
+
+
+def add_cluster_extreme_roles(
+    data: pd.DataFrame,
+    selected_features: list[str],
+) -> pd.DataFrame:
+    marked = data.copy()
+    marked["is_canonical"] = False
+    marked["is_anomaly"] = False
+    marked["point_role"] = np.where(marked["is_lens"], "Lens", "No lens")
+
+    clean = marked.dropna(subset=selected_features).copy()
+    if len(clean) < 2:
+        return marked
+
+    scaled = StandardScaler().fit_transform(clean[selected_features])
+    centroid = scaled.mean(axis=0, keepdims=True)
+    distances = np.linalg.norm(scaled - centroid, axis=1)
+
+    canonical_index = clean.index[int(np.argmin(distances))]
+    anomaly_index = clean.index[int(np.argmax(distances))]
+
+    marked.loc[canonical_index, "is_canonical"] = True
+    marked.loc[anomaly_index, "is_anomaly"] = True
+    marked.loc[canonical_index, "point_role"] = "Canonical"
+    marked.loc[anomaly_index, "point_role"] = "Anomaly"
+    marked["dist_to_cluster_centroid"] = np.nan
+    marked.loc[clean.index, "dist_to_cluster_centroid"] = distances
+    return marked
+
+
+def build_umap_signature(
+    selected_cluster: int,
+    selected_features: list[str],
+    n_neighbors: int,
+    min_dist: float,
+    max_objects: int,
+    cluster_params: dict,
+) -> tuple:
+    return (
+        PARQUET_PATH,
+        LENS_PATH,
+        bool(cluster_params["only_grade_a"]),
+        float(cluster_params["threshold"]),
+        int(cluster_params["branching_factor"]),
+        int(cluster_params["batch_size"]),
+        int(selected_cluster),
+        tuple(selected_features),
+        int(n_neighbors),
+        round(float(min_dist), 4),
+        int(max_objects),
+    )
 
 
 def morphology_cutout_path(id_str: object) -> Path | None:
@@ -447,7 +539,10 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
         "object_id": row.get("object_id", ""),
         "cluster": row.get("cluster", ""),
         "is_lens": bool(row.get("is_lens", False)),
+        "is_canonical": bool(row.get("is_canonical", False)),
+        "is_anomaly": bool(row.get("is_anomaly", False)),
         "lens_grade": row.get("lens_grade", ""),
+        "dist_to_cluster_centroid": row.get("dist_to_cluster_centroid", np.nan),
         "umap_1": row.get("umap_1", np.nan),
         "umap_2": row.get("umap_2", np.nan),
     }
@@ -478,7 +573,7 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
     lens_path = lens_image_path(row.get("lens_id_str"))
 
     if cutout_path is None and lens_path is None:
-        st.info("No se encontró imagen asociada en las rutas configuradas de Google Drive.")
+        st.info("No se encontró imagen asociada en las rutas configuradas.")
         return
 
     if cutout_path is not None:
@@ -511,12 +606,8 @@ def main() -> None:
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     st.title(APP_TITLE)
 
-    st.caption(
-        "Visualización UMAP por cluster usando catálogos montados desde Google Drive."
-    )
-
     with st.sidebar:
-        st.header("Google Drive")
+        st.header("Datos")
         with st.expander("Rutas configuradas", expanded=False):
             st.dataframe(validate_paths(), use_container_width=True, hide_index=True)
             st.caption(
@@ -548,7 +639,7 @@ def main() -> None:
     missing = [path for path in required if not path_exists(path)]
     if missing:
         st.error(
-            "No se encuentran los ficheros necesarios. Monta Google Drive o ajusta "
+            "No se encuentran los ficheros necesarios. Revisa "
             "las variables de entorno MORPH_PATH, PARQUET_PATH, LENS_PATH, "
             "CUTOUT_BASE y LENS_IMG_BASE."
         )
@@ -583,15 +674,15 @@ def main() -> None:
         )
     except TimeoutError as exc:
         st.error(
-            "Google Drive Desktop ha agotado el tiempo leyendo un catálogo. "
-            "Marca los ficheros como disponibles sin conexión o copia primero a la cache local."
+            "El origen de datos ha agotado el tiempo leyendo un catálogo. "
+            "Si usas una unidad sincronizada, marca los ficheros como disponibles sin conexión o copia primero a la cache local."
         )
         st.exception(exc)
         st.stop()
     except OSError as exc:
         st.error(
             "No se pudo leer un catálogo desde las rutas configuradas. "
-            "Si estás usando Google Drive Desktop, comprueba que los ficheros estén disponibles sin conexión."
+            "Si usas una unidad sincronizada, comprueba que los ficheros estén disponibles sin conexión."
         )
         st.exception(exc)
         st.stop()
@@ -643,35 +734,72 @@ def main() -> None:
         st.stop()
 
     cluster_df = clustered_df[clustered_df["cluster"] == selected_cluster].copy()
-    display_df = sample_for_display(cluster_df, int(max_objects))
-
-    if len(display_df) < 3:
-        st.warning("Se necesitan al menos 3 objetos para calcular UMAP.")
-        st.stop()
-
-    embedding_df = compute_umap_embedding(
-        display_df,
-        selected_features,
+    umap_signature = build_umap_signature(
+        selected_cluster=selected_cluster,
+        selected_features=selected_features,
         n_neighbors=n_neighbors,
         min_dist=min_dist,
+        max_objects=int(max_objects),
+        cluster_params=params,
+    )
+    stored_signature = st.session_state.get("umap_signature")
+    needs_recalculation = stored_signature != umap_signature
+
+    button_label = "Calcular UMAP" if stored_signature is None else "Recalcular UMAP"
+    recalculate_umap = st.sidebar.button(
+        button_label,
+        type="primary" if needs_recalculation else "secondary",
+        disabled=(not selected_features) or (not needs_recalculation and "umap_embedding_df" in st.session_state),
     )
 
-    if embedding_df.empty:
-        st.warning("No quedan objetos con valores completos para las componentes seleccionadas.")
+    if recalculate_umap:
+        cluster_df = add_cluster_extreme_roles(cluster_df, selected_features)
+        display_df = sample_for_display(cluster_df, int(max_objects))
+
+        if len(display_df) < 3:
+            st.warning("Se necesitan al menos 3 objetos para calcular UMAP.")
+            st.stop()
+
+        embedding_df = compute_umap_embedding(
+            display_df,
+            selected_features,
+            n_neighbors=n_neighbors,
+            min_dist=min_dist,
+        )
+
+        if embedding_df.empty:
+            st.warning("No quedan objetos con valores completos para las componentes seleccionadas.")
+            st.stop()
+
+        embedding_df = embedding_df.reset_index(drop=True)
+        embedding_df["point_index"] = embedding_df.index
+        st.session_state["umap_embedding_df"] = embedding_df
+        st.session_state["umap_signature"] = umap_signature
+        needs_recalculation = False
+
+    if needs_recalculation or "umap_embedding_df" not in st.session_state:
+        st.info("Pulsa **Calcular UMAP** o **Recalcular UMAP** para actualizar la visualización.")
         st.stop()
 
-    embedding_df = embedding_df.reset_index(drop=True)
-    embedding_df["point_index"] = embedding_df.index
-    embedding_df["lens_label"] = np.where(embedding_df["is_lens"], "Lens", "No lens")
+    embedding_df = st.session_state["umap_embedding_df"]
 
-    cluster_left, cluster_middle, cluster_right = st.columns(3)
+    cluster_left, cluster_middle, cluster_right, cluster_fourth = st.columns(4)
     cluster_left.metric("Objetos del cluster", f"{len(cluster_df):,}")
     cluster_middle.metric("Objetos en UMAP", f"{len(embedding_df):,}")
     cluster_right.metric("Lentes en UMAP", f"{int(embedding_df['is_lens'].sum()):,}")
+    cluster_fourth.metric("Extremos", "2")
 
     hover_columns = [
         column
-        for column in ("id_str", "object_id", "cluster", "lens_label", "lens_grade")
+        for column in (
+            "id_str",
+            "object_id",
+            "cluster",
+            "point_role",
+            "is_lens",
+            "lens_grade",
+            "dist_to_cluster_centroid",
+        )
         if column in embedding_df.columns
     ]
 
@@ -679,16 +807,41 @@ def main() -> None:
         embedding_df,
         x="umap_1",
         y="umap_2",
-        color="lens_label",
-        symbol="lens_label",
+        color="point_role",
+        symbol="point_role",
         custom_data=["point_index"],
         hover_data=hover_columns,
-        color_discrete_map={"Lens": "#d62728", "No lens": "#1f77b4"},
-        symbol_map={"Lens": "star", "No lens": "circle"},
-        labels={"umap_1": "UMAP 1", "umap_2": "UMAP 2", "lens_label": "Tipo"},
+        color_discrete_map={
+            "No lens": "#4c78a8",
+            "Lens": "#d62728",
+            "Canonical": "#2ca02c",
+            "Anomaly": "#111111",
+        },
+        symbol_map={
+            "No lens": "circle",
+            "Lens": "star",
+            "Canonical": "diamond",
+            "Anomaly": "x",
+        },
+        category_orders={
+            "point_role": ["No lens", "Lens", "Canonical", "Anomaly"],
+        },
+        labels={"umap_1": "UMAP 1", "umap_2": "UMAP 2", "point_role": "Tipo"},
         height=680,
     )
-    fig.update_traces(marker={"size": 7, "opacity": 0.75})
+    fig.update_traces(marker={"size": 7, "opacity": 0.72})
+    fig.update_traces(
+        marker={"size": 12, "opacity": 0.98, "line": {"width": 1.5, "color": "white"}},
+        selector={"name": "Lens"},
+    )
+    fig.update_traces(
+        marker={"size": 14, "opacity": 1.0, "line": {"width": 2, "color": "white"}},
+        selector={"name": "Canonical"},
+    )
+    fig.update_traces(
+        marker={"size": 14, "opacity": 1.0, "line": {"width": 2, "color": "#ffcc00"}},
+        selector={"name": "Anomaly"},
+    )
     fig.update_layout(
         title=f"Cluster {selected_cluster} | UMAP",
         legend_title_text="Objeto",
