@@ -1,87 +1,52 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Iterable
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.dataset as ds
 import plotly.express as px
 import streamlit as st
 import umap
 from PIL import Image
+from sklearn.cluster import Birch
 from sklearn.preprocessing import StandardScaler
 
 
 APP_TITLE = "Euclid UMAP Explorer"
-BASE_DIR = Path(__file__).resolve().parent
-MORPHOLOGY_DIR = BASE_DIR / "data" / "morphology"
-STRONG_LENSES_DIR = BASE_DIR / "data" / "strong_lenses"
-CUTOUTS_DIR = BASE_DIR / "data" / "cutouts"
 
-CATALOG_EXTENSIONS = {".csv", ".parquet", ".pq", ".feather"}
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
-ID_COLUMN_CANDIDATES = ("object_id", "OBJECT_ID", "obj_id", "id", "ID")
+MORPH_PATH = os.getenv(
+    "MORPH_PATH",
+    "/content/drive/MyDrive/catalogues/morphology_catalogue/morphology_catalogue.parquet",
+)
+CUTOUT_BASE = os.getenv(
+    "CUTOUT_BASE",
+    "/content/drive/MyDrive/catalogues/morphology_catalogue/cutouts_jpg_gz_arcsinh_vis_only",
+)
+PARQUET_PATH = os.getenv(
+    "PARQUET_PATH",
+    "/content/drive/MyDrive/catalogues/morphology_catalogue/representations_pca_40.parquet",
+)
+LENS_PATH = os.getenv(
+    "LENS_PATH",
+    "/content/drive/MyDrive/catalogues/strong_lensing_catalogue/q1_discovery_engine_lens_catalog.csv",
+)
+LENS_IMG_BASE = os.getenv(
+    "LENS_IMG_BASE",
+    "/content/drive/MyDrive/catalogues/strong_lensing_catalogue/lens",
+)
 
-
-def list_catalog_files(directory: Path) -> list[Path]:
-    """Return supported local catalogue files from a data directory."""
-    if not directory.exists():
-        return []
-    return sorted(
-        path
-        for path in directory.iterdir()
-        if path.is_file() and path.suffix.lower() in CATALOG_EXTENSIONS
-    )
-
-
-@st.cache_data(show_spinner=False)
-def load_catalog(path: str) -> pd.DataFrame:
-    """Load a local catalogue file.
-
-    This is intentionally isolated so future versions can swap local files for
-    Google Drive, Google Cloud Storage, or signed URL loaders.
-    """
-    file_path = Path(path)
-    suffix = file_path.suffix.lower()
-
-    if suffix == ".csv":
-        return pd.read_csv(file_path)
-    if suffix in {".parquet", ".pq"}:
-        return pd.read_parquet(file_path)
-    if suffix == ".feather":
-        return pd.read_feather(file_path)
-
-    raise ValueError(f"Unsupported catalogue format: {file_path.suffix}")
-
-
-def find_id_column(df: pd.DataFrame) -> str | None:
-    for candidate in ID_COLUMN_CANDIDATES:
-        if candidate in df.columns:
-            return candidate
-    normalized = {column.lower(): column for column in df.columns}
-    return normalized.get("object_id")
-
-
-def normalize_object_ids(series: pd.Series) -> pd.Series:
-    return series.astype("string").str.strip()
-
-
-def add_lens_flag(morphology: pd.DataFrame, lenses: pd.DataFrame) -> pd.DataFrame:
-    if "object_id" not in morphology.columns:
-        raise ValueError("The morphology catalogue must contain an object_id column.")
-
-    lens_id_column = find_id_column(lenses)
-    if lens_id_column is None:
-        raise ValueError(
-            "The strong lensing catalogue must contain an object_id-like column."
-        )
-
-    lens_ids = set(normalize_object_ids(lenses[lens_id_column]).dropna())
-    merged = morphology.copy()
-    merged["_object_id_key"] = normalize_object_ids(merged["object_id"])
-    merged["is_lens"] = merged["_object_id_key"].isin(lens_ids)
-    merged = merged.drop(columns=["_object_id_key"])
-    return merged
+DEFAULT_CLUSTER_FEATURES = [
+    "feat_pca_1",
+    "feat_pca_12",
+    "feat_pca_6",
+    "feat_pca_10",
+    "feat_pca_13",
+    "feat_pca_27",
+]
 
 
 def detect_pca_columns(df: pd.DataFrame) -> list[str]:
@@ -91,29 +56,152 @@ def detect_pca_columns(df: pd.DataFrame) -> list[str]:
         except ValueError:
             return 10_000
 
-    pca_columns = [column for column in df.columns if column.startswith("feat_pca_")]
-    return sorted(pca_columns, key=pca_index)
-
-
-def detect_numeric_feature_columns(df: pd.DataFrame) -> list[str]:
-    excluded = {"cluster", "is_lens"}
-    excluded.update(
-        column
-        for column in df.columns
-        if column.lower() == "id"
-        or column.lower() == "object_id"
-        or column.lower().endswith("_id")
+    return sorted(
+        [column for column in df.columns if column.startswith("feat_pca_")],
+        key=pca_index,
     )
-    excluded.update({"id_str", "hdf5_loc"})
-
-    numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
-    return [column for column in numeric_columns if column not in excluded]
 
 
-def select_cluster(df: pd.DataFrame, cluster_value: object | None) -> pd.DataFrame:
-    if cluster_value is None or "cluster" not in df.columns:
-        return df
-    return df[df["cluster"].astype("string") == str(cluster_value)]
+def normalize_object_ids(series: pd.Series) -> pd.Series:
+    return series.astype("string").str.strip()
+
+
+def ensure_object_id_from_id_str(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    if "object_id" not in df.columns:
+        if "id_str" not in df.columns:
+            raise ValueError("El parquet PCA debe contener id_str u object_id.")
+        df["object_id"] = df["id_str"].astype("string").str.split("_").str[-1]
+    df["object_id"] = normalize_object_ids(df["object_id"])
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def load_pca_catalog(parquet_path: str) -> tuple[pd.DataFrame, list[str]]:
+    df = pd.read_parquet(parquet_path)
+    df = ensure_object_id_from_id_str(df)
+    feature_cols = detect_pca_columns(df)
+
+    if not feature_cols:
+        raise ValueError("No se encontraron columnas feat_pca_* en el parquet PCA.")
+
+    keep_cols = ["id_str", "object_id", "hdf5_loc", *feature_cols]
+    keep_cols = [column for column in keep_cols if column in df.columns]
+
+    work_df = (
+        df[keep_cols]
+        .dropna(subset=feature_cols)
+        .reset_index(drop=True)
+        .copy()
+    )
+    return work_df, feature_cols
+
+
+@st.cache_data(show_spinner=False)
+def load_lens_catalog(lens_path: str, only_grade_a: bool) -> pd.DataFrame:
+    lens_df = pd.read_csv(lens_path, dtype={"object_id": "string"})
+    if "object_id" not in lens_df.columns:
+        raise ValueError("El catálogo de lentes debe contener object_id.")
+
+    lens_df = lens_df.copy()
+    lens_df["object_id"] = normalize_object_ids(lens_df["object_id"])
+
+    if only_grade_a and "grade" in lens_df.columns:
+        lens_df = lens_df[lens_df["grade"].astype(str).str.upper() == "A"].copy()
+
+    columns = [column for column in ("object_id", "id_str", "grade") if column in lens_df.columns]
+    return lens_df[columns].dropna(subset=["object_id"]).drop_duplicates("object_id")
+
+
+def merge_lens_flags(work_df: pd.DataFrame, lens_df: pd.DataFrame) -> pd.DataFrame:
+    lens_meta = lens_df.copy()
+    rename_map = {}
+    if "id_str" in lens_meta.columns:
+        rename_map["id_str"] = "lens_id_str"
+    if "grade" in lens_meta.columns:
+        rename_map["grade"] = "lens_grade"
+    lens_meta = lens_meta.rename(columns=rename_map)
+
+    merged = work_df.merge(lens_meta, on="object_id", how="left")
+    merged["is_lens"] = merged["object_id"].isin(set(lens_df["object_id"]))
+    return merged
+
+
+@st.cache_data(show_spinner=True)
+def run_birch_clustering(
+    parquet_path: str,
+    lens_path: str,
+    only_grade_a: bool,
+    threshold: float,
+    branching_factor: int,
+    batch_size: int,
+) -> tuple[pd.DataFrame, list[str]]:
+    work_df, feature_cols = load_pca_catalog(parquet_path)
+    lens_df = load_lens_catalog(lens_path, only_grade_a)
+
+    scaler = StandardScaler()
+    for start in range(0, len(work_df), batch_size):
+        end = min(start + batch_size, len(work_df))
+        x_batch = work_df.iloc[start:end][feature_cols].to_numpy(
+            dtype=np.float32,
+            copy=True,
+        )
+        scaler.partial_fit(x_batch)
+
+    cluster_model = Birch(
+        threshold=threshold,
+        branching_factor=branching_factor,
+        n_clusters=None,
+        compute_labels=False,
+    )
+    for start in range(0, len(work_df), batch_size):
+        end = min(start + batch_size, len(work_df))
+        x_batch = work_df.iloc[start:end][feature_cols].to_numpy(
+            dtype=np.float32,
+            copy=True,
+        )
+        x_batch = scaler.transform(x_batch, copy=False)
+        cluster_model.partial_fit(x_batch)
+
+    cluster_model.partial_fit()
+
+    labels = np.empty(len(work_df), dtype=np.int32)
+    for start in range(0, len(work_df), batch_size):
+        end = min(start + batch_size, len(work_df))
+        x_batch = work_df.iloc[start:end][feature_cols].to_numpy(
+            dtype=np.float32,
+            copy=True,
+        )
+        x_batch = scaler.transform(x_batch, copy=False)
+        labels[start:end] = cluster_model.predict(x_batch)
+
+    clustered_df = work_df.copy()
+    clustered_df["cluster"] = labels
+    clustered_df = merge_lens_flags(clustered_df, lens_df)
+    clustered_df.attrs["n_subclusters"] = len(cluster_model.subcluster_centers_)
+    return clustered_df, feature_cols
+
+
+def build_cluster_summary(clustered_df: pd.DataFrame) -> pd.DataFrame:
+    summary_df = (
+        clustered_df.groupby("cluster")
+        .agg(
+            n_objects=("object_id", "size"),
+            n_lenses=("is_lens", "sum"),
+        )
+        .reset_index()
+        .sort_values(["n_lenses", "n_objects", "cluster"], ascending=[False, False, True])
+    )
+    summary_df["lens_rate"] = summary_df["n_lenses"] / summary_df["n_objects"]
+    return summary_df
+
+
+def format_cluster_option(row: pd.Series) -> str:
+    return (
+        f"Cluster {int(row['cluster'])} | "
+        f"{int(row['n_objects']):,} objetos | "
+        f"{int(row['n_lenses']):,} lentes"
+    )
 
 
 def sample_for_display(df: pd.DataFrame, max_objects: int) -> pd.DataFrame:
@@ -143,27 +231,58 @@ def compute_umap_embedding(
         random_state=42,
     )
     embedding = reducer.fit_transform(scaled)
-    clean["umap_x"] = embedding[:, 0]
-    clean["umap_y"] = embedding[:, 1]
+    clean["umap_1"] = embedding[:, 0]
+    clean["umap_2"] = embedding[:, 1]
     return clean
 
 
-def find_cutout_path(row: pd.Series) -> Path | None:
-    identifiers: list[str] = []
-    for column in ("id_str", "object_id"):
-        value = row.get(column)
-        if pd.notna(value):
-            identifiers.append(str(value).strip())
-
-    if not identifiers or not CUTOUTS_DIR.exists():
+def morphology_cutout_path(id_str: object) -> Path | None:
+    if pd.isna(id_str):
         return None
 
-    for identifier in identifiers:
-        for extension in IMAGE_EXTENSIONS:
-            candidate = CUTOUTS_DIR / f"{identifier}{extension}"
-            if candidate.exists():
-                return candidate
-    return None
+    parts = str(id_str).rsplit("_", maxsplit=2)
+    if len(parts) < 3:
+        return None
+
+    tile_index = parts[-2]
+    object_id = parts[-1].replace("-", "NEG")
+    filename = f"{tile_index}_{object_id}_gz_arcsinh_vis_only.jpg"
+    path = Path(CUTOUT_BASE) / tile_index / filename
+    return path if path.exists() else None
+
+
+def lens_image_path(lens_id_str: object) -> Path | None:
+    if pd.isna(lens_id_str):
+        return None
+    path = Path(LENS_IMG_BASE) / str(lens_id_str) / "rgb_1.png"
+    return path if path.exists() else None
+
+
+@st.cache_data(show_spinner=False)
+def load_morphology_object(morph_path: str, object_id: str) -> pd.DataFrame:
+    path = Path(morph_path)
+    if not path.exists() or not object_id:
+        return pd.DataFrame()
+
+    dataset = ds.dataset(path, format="parquet")
+    if "object_id" not in dataset.schema.names:
+        return pd.DataFrame()
+
+    field_type = dataset.schema.field("object_id").type
+    filter_value: object = object_id
+    if pa.types.is_integer(field_type):
+        try:
+            filter_value = int(object_id)
+        except ValueError:
+            return pd.DataFrame()
+
+    table = dataset.to_table(filter=ds.field("object_id") == filter_value)
+    if table.num_rows == 0 and not pa.types.is_string(field_type):
+        table = dataset.to_table(filter=ds.field("object_id") == object_id)
+    if table.num_rows == 0:
+        return pd.DataFrame()
+
+    return table.slice(0, 1).to_pandas()
 
 
 def selected_point_index(event: object) -> int | None:
@@ -188,6 +307,15 @@ def selected_point_index(event: object) -> int | None:
         return None
 
 
+def show_image(path: Path, caption: str) -> None:
+    try:
+        image = Image.open(path)
+    except Exception as exc:
+        st.warning(f"No se pudo abrir {path.name}: {exc}")
+        return
+    st.image(image, caption=caption, use_container_width=True)
+
+
 def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
     st.subheader("Objeto seleccionado")
 
@@ -196,33 +324,63 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
         "object_id": row.get("object_id", ""),
         "cluster": row.get("cluster", ""),
         "is_lens": bool(row.get("is_lens", False)),
-        "umap_x": row.get("umap_x", np.nan),
-        "umap_y": row.get("umap_y", np.nan),
+        "lens_grade": row.get("lens_grade", ""),
+        "umap_1": row.get("umap_1", np.nan),
+        "umap_2": row.get("umap_2", np.nan),
     }
     st.dataframe(pd.DataFrame([details]), use_container_width=True, hide_index=True)
 
-    st.markdown("**Variables usadas en UMAP**")
+    st.markdown("**Componentes PCA usadas**")
     st.dataframe(
         pd.DataFrame(
-            [{"variable": feature, "value": row.get(feature)} for feature in selected_features]
+            [{"feature": feature, "value": row.get(feature)} for feature in selected_features]
         ),
         use_container_width=True,
         hide_index=True,
     )
 
-    cutout_path = find_cutout_path(row)
-    if cutout_path is None:
-        st.info("No se encontró una imagen local asociada en data/cutouts/.")
+    morphology_df = load_morphology_object(MORPH_PATH, str(row.get("object_id", "")))
+    if not morphology_df.empty:
+        with st.expander("Fila del catálogo morfológico", expanded=False):
+            morph_display = (
+                morphology_df.iloc[0]
+                .dropna()
+                .astype(str)
+                .reset_index()
+                .rename(columns={"index": "campo", 0: "valor"})
+            )
+            st.dataframe(morph_display, use_container_width=True, hide_index=True)
+
+    cutout_path = morphology_cutout_path(row.get("id_str"))
+    lens_path = lens_image_path(row.get("lens_id_str"))
+
+    if cutout_path is None and lens_path is None:
+        st.info("No se encontró imagen asociada en las rutas configuradas de Google Drive.")
         return
 
-    image = Image.open(cutout_path)
-    st.image(image, caption=cutout_path.name, use_container_width=True)
+    if cutout_path is not None:
+        show_image(cutout_path, f"Cutout morfológico: {cutout_path.name}")
+    if lens_path is not None:
+        show_image(lens_path, f"Imagen strong lens: {lens_path.name}")
 
 
-def render_empty_state() -> None:
-    st.info(
-        "Coloca los catálogos descargados manualmente en data/morphology/ "
-        "y data/strong_lenses/ para empezar."
+def validate_paths() -> pd.DataFrame:
+    rows = [
+        ("MORPH_PATH", MORPH_PATH),
+        ("PARQUET_PATH", PARQUET_PATH),
+        ("CUTOUT_BASE", CUTOUT_BASE),
+        ("LENS_PATH", LENS_PATH),
+        ("LENS_IMG_BASE", LENS_IMG_BASE),
+    ]
+    return pd.DataFrame(
+        [
+            {
+                "name": name,
+                "path": path,
+                "exists": Path(path).exists(),
+            }
+            for name, path in rows
+        ]
     )
 
 
@@ -230,119 +388,171 @@ def main() -> None:
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     st.title(APP_TITLE)
 
-    morphology_files = list_catalog_files(MORPHOLOGY_DIR)
-    lens_files = list_catalog_files(STRONG_LENSES_DIR)
-
-    if not morphology_files or not lens_files:
-        render_empty_state()
-        st.stop()
+    st.caption(
+        "Visualización UMAP por cluster usando catálogos montados desde Google Drive."
+    )
 
     with st.sidebar:
-        st.header("Datos")
-        morphology_path = st.selectbox(
-            "Catálogo morfológico",
-            morphology_files,
-            format_func=lambda path: path.name,
-        )
-        lens_path = st.selectbox(
-            "Catálogo strong lenses",
-            lens_files,
-            format_func=lambda path: path.name,
-        )
+        st.header("Google Drive")
+        with st.expander("Rutas configuradas", expanded=False):
+            st.dataframe(validate_paths(), use_container_width=True, hide_index=True)
 
-    try:
-        morphology_df = load_catalog(str(morphology_path))
-        lens_df = load_catalog(str(lens_path))
-        data = add_lens_flag(morphology_df, lens_df)
-    except Exception as exc:
-        st.error(f"No se pudieron cargar o cruzar los catálogos: {exc}")
+        st.header("Lentes")
+        only_grade_a = st.checkbox("Usar solo lentes grade A", value=True)
+
+        st.header("Clusterización BIRCH")
+        threshold = st.number_input("threshold", min_value=0.1, value=8.0, step=0.1)
+        branching_factor = st.number_input(
+            "branching_factor",
+            min_value=2,
+            value=2,
+            step=1,
+        )
+        batch_size = st.number_input(
+            "batch_size",
+            min_value=1_000,
+            max_value=250_000,
+            value=25_000,
+            step=1_000,
+        )
+        run_clustering = st.button("Ejecutar clusterización", type="primary")
+
+    required = [PARQUET_PATH, LENS_PATH]
+    missing = [path for path in required if not Path(path).exists()]
+    if missing:
+        st.error(
+            "No se encuentran los ficheros necesarios. Monta Google Drive o ajusta "
+            "las variables de entorno MORPH_PATH, PARQUET_PATH, LENS_PATH, "
+            "CUTOUT_BASE y LENS_IMG_BASE."
+        )
+        st.code("\n".join(missing), language="text")
         st.stop()
 
-    pca_columns = detect_pca_columns(data)
-    numeric_columns = detect_numeric_feature_columns(data)
-    default_features = pca_columns[: min(10, len(pca_columns))] or numeric_columns[:5]
+    if run_clustering:
+        st.session_state["cluster_ready"] = True
+        st.session_state["cluster_params"] = {
+            "only_grade_a": only_grade_a,
+            "threshold": threshold,
+            "branching_factor": int(branching_factor),
+            "batch_size": int(batch_size),
+        }
+
+    if not st.session_state.get("cluster_ready"):
+        st.info("Pulsa **Ejecutar clusterización** para generar los clusters BIRCH.")
+        st.stop()
+
+    params = st.session_state["cluster_params"]
+    clustered_df, pca_columns = run_birch_clustering(
+        PARQUET_PATH,
+        LENS_PATH,
+        params["only_grade_a"],
+        float(params["threshold"]),
+        int(params["branching_factor"]),
+        int(params["batch_size"]),
+    )
+
+    cluster_summary_df = build_cluster_summary(clustered_df)
+    cluster_summary_df["option"] = cluster_summary_df.apply(format_cluster_option, axis=1)
+
+    left_metric, middle_metric, right_metric = st.columns(3)
+    left_metric.metric("Objetos clusterizados", f"{len(clustered_df):,}")
+    middle_metric.metric("Clusters", f"{clustered_df['cluster'].nunique():,}")
+    right_metric.metric("Lentes", f"{int(clustered_df['is_lens'].sum()):,}")
+
+    with st.expander("Resumen de clusters", expanded=False):
+        summary_display = cluster_summary_df.copy()
+        summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
+        st.dataframe(
+            summary_display[["cluster", "n_objects", "n_lenses", "lens_rate"]],
+            use_container_width=True,
+            hide_index=True,
+        )
 
     with st.sidebar:
         st.header("UMAP")
-        cluster_value = None
-        if "cluster" in data.columns:
-            clusters = sorted(data["cluster"].dropna().astype("string").unique())
-            selected_cluster = st.selectbox("Cluster", ["Todos"] + clusters)
-            cluster_value = None if selected_cluster == "Todos" else selected_cluster
-        else:
-            st.caption("No se encontró columna cluster.")
-
-        filtered = select_cluster(data, cluster_value)
-
-        feature_options = numeric_columns
-        selected_features = st.multiselect(
-            "Variables",
-            feature_options,
-            default=[feature for feature in default_features if feature in feature_options],
+        selected_option = st.selectbox(
+            "Cluster",
+            cluster_summary_df["option"].tolist(),
+        )
+        selected_cluster = int(
+            cluster_summary_df.loc[
+                cluster_summary_df["option"] == selected_option,
+                "cluster",
+            ].iloc[0]
         )
 
-        n_neighbors = st.slider("n_neighbors", 2, 100, 15)
-        min_dist = st.slider("min_dist", 0.0, 1.0, 0.1, step=0.01)
-        max_objects = st.slider("Máximo de objetos", 100, 50_000, 5_000, step=100)
+        default_features = [
+            feature for feature in DEFAULT_CLUSTER_FEATURES if feature in pca_columns
+        ] or pca_columns[: min(6, len(pca_columns))]
+        selected_features = st.multiselect(
+            "Componentes PCA",
+            pca_columns,
+            default=default_features,
+        )
+        n_neighbors = st.slider("n_neighbors", 2, 100, 25)
+        min_dist = st.slider("min_dist", 0.0, 1.0, 0.15, step=0.01)
+        max_objects = st.slider("Máximo de objetos", 100, 100_000, 20_000, step=100)
 
     if not selected_features:
-        st.warning("Selecciona al menos una variable numérica para calcular UMAP.")
+        st.warning("Selecciona al menos una componente PCA para construir UMAP.")
         st.stop()
 
-    display_data = sample_for_display(filtered, max_objects)
+    cluster_df = clustered_df[clustered_df["cluster"] == selected_cluster].copy()
+    display_df = sample_for_display(cluster_df, int(max_objects))
 
-    if len(display_data) < 3:
+    if len(display_df) < 3:
         st.warning("Se necesitan al menos 3 objetos para calcular UMAP.")
         st.stop()
 
     embedding_df = compute_umap_embedding(
-        display_data,
+        display_df,
         selected_features,
         n_neighbors=n_neighbors,
         min_dist=min_dist,
     )
 
     if embedding_df.empty:
-        st.warning("No quedan objetos con valores completos para las variables seleccionadas.")
+        st.warning("No quedan objetos con valores completos para las componentes seleccionadas.")
         st.stop()
 
     embedding_df = embedding_df.reset_index(drop=True)
     embedding_df["point_index"] = embedding_df.index
     embedding_df["lens_label"] = np.where(embedding_df["is_lens"], "Lens", "No lens")
 
-    summary_left, summary_middle, summary_right = st.columns(3)
-    summary_left.metric("Objetos en cluster/filtro", f"{len(filtered):,}")
-    summary_middle.metric("Objetos visualizados", f"{len(embedding_df):,}")
-    summary_right.metric("Lentes visualizados", f"{int(embedding_df['is_lens'].sum()):,}")
+    cluster_left, cluster_middle, cluster_right = st.columns(3)
+    cluster_left.metric("Objetos del cluster", f"{len(cluster_df):,}")
+    cluster_middle.metric("Objetos en UMAP", f"{len(embedding_df):,}")
+    cluster_right.metric("Lentes en UMAP", f"{int(embedding_df['is_lens'].sum()):,}")
 
     hover_columns = [
         column
-        for column in ("id_str", "object_id", "cluster", "lens_label")
+        for column in ("id_str", "object_id", "cluster", "lens_label", "lens_grade")
         if column in embedding_df.columns
     ]
 
     fig = px.scatter(
         embedding_df,
-        x="umap_x",
-        y="umap_y",
+        x="umap_1",
+        y="umap_2",
         color="lens_label",
         symbol="lens_label",
         custom_data=["point_index"],
         hover_data=hover_columns,
         color_discrete_map={"Lens": "#d62728", "No lens": "#1f77b4"},
         symbol_map={"Lens": "star", "No lens": "circle"},
-        labels={"umap_x": "UMAP 1", "umap_y": "UMAP 2", "lens_label": "Tipo"},
+        labels={"umap_1": "UMAP 1", "umap_2": "UMAP 2", "lens_label": "Tipo"},
         height=680,
     )
     fig.update_traces(marker={"size": 7, "opacity": 0.75})
     fig.update_layout(
+        title=f"Cluster {selected_cluster} | UMAP",
         legend_title_text="Objeto",
-        margin={"l": 10, "r": 10, "t": 20, "b": 10},
+        margin={"l": 10, "r": 10, "t": 50, "b": 10},
         clickmode="event+select",
     )
 
-    left, right = st.columns([2, 1])
-    with left:
+    plot_col, detail_col = st.columns([2, 1])
+    with plot_col:
         event = st.plotly_chart(
             fig,
             use_container_width=True,
@@ -352,9 +562,9 @@ def main() -> None:
         )
 
     selected_index = selected_point_index(event)
-    with right:
+    with detail_col:
         if selected_index is None:
-            st.info("Selecciona un punto del mapa para ver sus detalles.")
+            st.info("Selecciona un punto del mapa para ver sus detalles e imagen.")
         else:
             show_object_details(embedding_df.loc[selected_index], selected_features)
 
