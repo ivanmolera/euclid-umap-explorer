@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+.streamlit/secrets.toml
+
+data/morphology/*
+!data/morphology/.gitkeep
+data/strong_lenses/*
+!data/strong_lenses/.gitkeep
+data/cutouts/*
+!data/cutouts/.gitkeep
