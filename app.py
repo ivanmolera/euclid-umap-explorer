@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 from pathlib import Path
 from typing import Iterable
 
@@ -70,7 +69,32 @@ def cache_target_for_path(path: str) -> Path:
     return CACHE_DIR / cache_name
 
 
-def cached_input_path(path: str) -> Path:
+def copy_file_to_cache(source: Path, target: Path, progress=None) -> None:
+    chunk_size = 8 * 1024 * 1024
+    total_size = source.stat().st_size
+    copied = 0
+    tmp_target = target.with_name(f"{target.name}.tmp")
+
+    try:
+        with source.open("rb") as src, tmp_target.open("wb") as dst:
+            while True:
+                chunk = src.read(chunk_size)
+                if not chunk:
+                    break
+                dst.write(chunk)
+                copied += len(chunk)
+                if progress is not None and total_size > 0:
+                    progress.progress(
+                        min(copied / total_size, 1.0),
+                        text=f"{format_bytes(copied)} / {format_bytes(total_size)}",
+                    )
+        tmp_target.replace(target)
+    except Exception:
+        tmp_target.unlink(missing_ok=True)
+        raise
+
+
+def cached_input_path(path: str, progress=None) -> Path:
     source = Path(path)
     if not USE_LOCAL_CACHE or not source.exists() or source.is_dir():
         return source
@@ -80,14 +104,7 @@ def cached_input_path(path: str) -> Path:
         return target
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_target = target.with_name(f"{target.name}.tmp")
-    try:
-        shutil.copyfile(source, tmp_target)
-        tmp_target.replace(target)
-    except Exception:
-        tmp_target.unlink(missing_ok=True)
-        raise
-
+    copy_file_to_cache(source, target, progress=progress)
     return target
 
 
@@ -113,8 +130,19 @@ def prepare_catalog_cache(paths: list[str]) -> None:
                 continue
 
             copied_any = True
-            with st.spinner(f"Copiando {source.name} ({format_bytes(size)}) desde Google Drive..."):
-                cached_input_path(path)
+            st.write(f"Copiando `{source.name}` ({format_bytes(size)}) desde Google Drive...")
+            progress = st.progress(0.0, text=f"0 B / {format_bytes(size)}")
+            try:
+                cached_input_path(path, progress=progress)
+            except TimeoutError as exc:
+                progress.empty()
+                st.error(
+                    "Google Drive Desktop ha agotado el tiempo al servir este fichero. "
+                    "Márcalo como disponible sin conexión en Finder y vuelve a intentarlo."
+                )
+                status.update(label="No se pudo copiar un catálogo", state="error")
+                raise exc
+            progress.empty()
             st.write(f"Copiado: `{source.name}` ({format_bytes(size)})")
 
         if copied_any:
@@ -515,7 +543,7 @@ def main() -> None:
         st.info("Pulsa **Ejecutar clusterización** para generar los clusters BIRCH.")
         st.stop()
 
-    prepare_catalog_cache([PARQUET_PATH, LENS_PATH, MORPH_PATH])
+    prepare_catalog_cache([PARQUET_PATH, LENS_PATH])
 
     params = st.session_state["cluster_params"]
     try:
