@@ -54,6 +54,23 @@ DEFAULT_CLUSTER_FEATURES = [
 ]
 
 
+def inject_plot_cursor_css() -> None:
+    st.markdown(
+        """
+        <style>
+        .js-plotly-plot .plotly .draglayer .drag,
+        .js-plotly-plot .plotly .draglayer .nsewdrag,
+        .js-plotly-plot .plotly .cursor-crosshair,
+        .js-plotly-plot .plotly .cursor-move,
+        .js-plotly-plot .plotly .cursor-pointer {
+            cursor: default !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def is_gcs_path(path: str) -> bool:
     return str(path).startswith("gs://")
 
@@ -124,7 +141,6 @@ def cached_input_path(path: str, progress=None):
 
 def prepare_catalog_cache(paths: list[str]) -> None:
     if not USE_LOCAL_CACHE:
-        st.info("Cache local desactivada con EUCLID_USE_LOCAL_CACHE=0.")
         return
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -604,6 +620,7 @@ def validate_paths() -> pd.DataFrame:
 
 def main() -> None:
     st.set_page_config(page_title=APP_TITLE, layout="wide")
+    inject_plot_cursor_css()
     st.title(APP_TITLE)
 
     with st.sidebar:
@@ -842,11 +859,18 @@ def main() -> None:
         marker={"size": 14, "opacity": 1.0, "line": {"width": 2, "color": "#ffcc00"}},
         selector={"name": "Anomaly"},
     )
+    for trace in fig.data:
+        opacity = getattr(trace.marker, "opacity", None) or 1.0
+        trace.selected = {"marker": {"opacity": opacity}}
+        trace.unselected = {"marker": {"opacity": opacity}}
+
     fig.update_layout(
         title=f"Cluster {selected_cluster} | UMAP",
         legend_title_text="Objeto",
         margin={"l": 10, "r": 10, "t": 50, "b": 10},
         clickmode="event+select",
+        dragmode="zoom",
+        uirevision=st.session_state.get("umap_signature"),
     )
 
     plot_col, detail_col = st.columns([2, 1])
@@ -854,6 +878,11 @@ def main() -> None:
         event = st.plotly_chart(
             fig,
             use_container_width=True,
+            config={
+                "displaylogo": False,
+                "scrollZoom": True,
+                "doubleClick": "reset",
+            },
             on_select="rerun",
             selection_mode="points",
             key="umap_selection",
