@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Iterable
 
+import gcsfs
 import numpy as np
 import pandas as pd
 import pyarrow as pa
@@ -53,6 +54,16 @@ DEFAULT_CLUSTER_FEATURES = [
 ]
 
 
+def is_gcs_path(path: str) -> bool:
+    return str(path).startswith("gs://")
+
+
+def path_exists(path: str) -> bool:
+    if is_gcs_path(path):
+        return gcsfs.GCSFileSystem().exists(path)
+    return Path(path).exists()
+
+
 def format_bytes(size: int) -> str:
     value = float(size)
     for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -94,7 +105,10 @@ def copy_file_to_cache(source: Path, target: Path, progress=None) -> None:
         raise
 
 
-def cached_input_path(path: str, progress=None) -> Path:
+def cached_input_path(path: str, progress=None):
+    if is_gcs_path(path):
+        return path
+
     source = Path(path)
     if not USE_LOCAL_CACHE or not source.exists() or source.is_dir():
         return source
@@ -119,6 +133,10 @@ def prepare_catalog_cache(paths: list[str]) -> None:
     with st.status("Preparando catálogos en cache local", expanded=True) as status:
         st.write(f"Cache: `{CACHE_DIR}`")
         for path in paths:
+            if is_gcs_path(path):
+                st.write(f"Usando catálogo en Cloud Storage: `{path}`")
+                continue
+
             source = Path(path)
             if not source.exists() or source.is_dir():
                 continue
@@ -362,8 +380,11 @@ def lens_image_path(lens_id_str: object) -> Path | None:
 
 @st.cache_data(show_spinner=False)
 def load_morphology_object(morph_path: str, object_id: str) -> pd.DataFrame:
+    if is_gcs_path(morph_path):
+        return pd.DataFrame()
+
     path = cached_input_path(morph_path)
-    if not path.exists() or not object_id:
+    if not Path(path).exists() or not object_id:
         return pd.DataFrame()
 
     dataset = ds.dataset(path, format="parquet")
@@ -479,7 +500,7 @@ def validate_paths() -> pd.DataFrame:
             {
                 "name": name,
                 "path": path,
-                "exists": Path(path).exists(),
+                "exists": path_exists(path),
             }
             for name, path in rows
         ]
@@ -524,7 +545,7 @@ def main() -> None:
         run_clustering = st.button("Ejecutar clusterización", type="primary")
 
     required = [PARQUET_PATH, LENS_PATH]
-    missing = [path for path in required if not Path(path).exists()]
+    missing = [path for path in required if not path_exists(path)]
     if missing:
         st.error(
             "No se encuentran los ficheros necesarios. Monta Google Drive o ajusta "
