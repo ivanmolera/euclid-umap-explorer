@@ -56,6 +56,8 @@ pip install -r requirements.txt
 
 La ruta `/content/drive/...` es típica de Google Colab. Si ejecutas fuera de Colab, monta Google Drive o sobrescribe las variables de entorno anteriores para apuntar al mount real.
 
+Por defecto la app copia los catálogos leídos desde Google Drive Desktop a una cache local fuera del repositorio, en `~/.cache/euclid-umap-explorer`. Esto evita timeouts de `pyarrow` al leer parquet desde el filesystem virtual de Drive. Puedes cambiar la cache con `EUCLID_CACHE_DIR` o desactivarla con `EUCLID_USE_LOCAL_CACHE=0`.
+
 ```bash
 streamlit run app.py
 ```

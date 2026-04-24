@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import Iterable
 
@@ -38,6 +39,10 @@ LENS_IMG_BASE = os.getenv(
     "LENS_IMG_BASE",
     "/content/drive/MyDrive/catalogues/strong_lensing_catalogue/lens",
 )
+CACHE_DIR = Path(
+    os.getenv("EUCLID_CACHE_DIR", Path.home() / ".cache" / "euclid-umap-explorer")
+)
+USE_LOCAL_CACHE = os.getenv("EUCLID_USE_LOCAL_CACHE", "1") != "0"
 
 DEFAULT_CLUSTER_FEATURES = [
     "feat_pca_1",
@@ -47,6 +52,30 @@ DEFAULT_CLUSTER_FEATURES = [
     "feat_pca_13",
     "feat_pca_27",
 ]
+
+
+def cached_input_path(path: str) -> Path:
+    source = Path(path)
+    if not USE_LOCAL_CACHE or not source.exists() or source.is_dir():
+        return source
+
+    stat = source.stat()
+    cache_name = f"{source.stem}-{stat.st_size}-{int(stat.st_mtime)}{source.suffix}"
+    target = CACHE_DIR / cache_name
+
+    if target.exists() and target.stat().st_size == stat.st_size:
+        return target
+
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_target = target.with_name(f"{target.name}.tmp")
+    try:
+        shutil.copyfile(source, tmp_target)
+        tmp_target.replace(target)
+    except Exception:
+        tmp_target.unlink(missing_ok=True)
+        raise
+
+    return target
 
 
 def detect_pca_columns(df: pd.DataFrame) -> list[str]:
@@ -78,7 +107,7 @@ def ensure_object_id_from_id_str(df: pd.DataFrame) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def load_pca_catalog(parquet_path: str) -> tuple[pd.DataFrame, list[str]]:
-    df = pd.read_parquet(parquet_path)
+    df = pd.read_parquet(cached_input_path(parquet_path))
     df = ensure_object_id_from_id_str(df)
     feature_cols = detect_pca_columns(df)
 
@@ -99,7 +128,7 @@ def load_pca_catalog(parquet_path: str) -> tuple[pd.DataFrame, list[str]]:
 
 @st.cache_data(show_spinner=False)
 def load_lens_catalog(lens_path: str, only_grade_a: bool) -> pd.DataFrame:
-    lens_df = pd.read_csv(lens_path, dtype={"object_id": "string"})
+    lens_df = pd.read_csv(cached_input_path(lens_path), dtype={"object_id": "string"})
     if "object_id" not in lens_df.columns:
         raise ValueError("El catálogo de lentes debe contener object_id.")
 
@@ -260,7 +289,7 @@ def lens_image_path(lens_id_str: object) -> Path | None:
 
 @st.cache_data(show_spinner=False)
 def load_morphology_object(morph_path: str, object_id: str) -> pd.DataFrame:
-    path = Path(morph_path)
+    path = cached_input_path(morph_path)
     if not path.exists() or not object_id:
         return pd.DataFrame()
 
@@ -442,14 +471,29 @@ def main() -> None:
         st.stop()
 
     params = st.session_state["cluster_params"]
-    clustered_df, pca_columns = run_birch_clustering(
-        PARQUET_PATH,
-        LENS_PATH,
-        params["only_grade_a"],
-        float(params["threshold"]),
-        int(params["branching_factor"]),
-        int(params["batch_size"]),
-    )
+    try:
+        clustered_df, pca_columns = run_birch_clustering(
+            PARQUET_PATH,
+            LENS_PATH,
+            params["only_grade_a"],
+            float(params["threshold"]),
+            int(params["branching_factor"]),
+            int(params["batch_size"]),
+        )
+    except TimeoutError as exc:
+        st.error(
+            "Google Drive Desktop ha agotado el tiempo leyendo un catálogo. "
+            "Marca los ficheros como disponibles sin conexión o copia primero a la cache local."
+        )
+        st.exception(exc)
+        st.stop()
+    except OSError as exc:
+        st.error(
+            "No se pudo leer un catálogo desde las rutas configuradas. "
+            "Si estás usando Google Drive Desktop, comprueba que los ficheros estén disponibles sin conexión."
+        )
+        st.exception(exc)
+        st.stop()
 
     cluster_summary_df = build_cluster_summary(clustered_df)
     cluster_summary_df["option"] = cluster_summary_df.apply(format_cluster_option, axis=1)
