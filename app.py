@@ -54,16 +54,29 @@ DEFAULT_CLUSTER_FEATURES = [
 ]
 
 
+def format_bytes(size: int) -> str:
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{size} B"
+
+
+def cache_target_for_path(path: str) -> Path:
+    source = Path(path)
+    stat = source.stat()
+    cache_name = f"{source.stem}-{stat.st_size}-{int(stat.st_mtime)}{source.suffix}"
+    return CACHE_DIR / cache_name
+
+
 def cached_input_path(path: str) -> Path:
     source = Path(path)
     if not USE_LOCAL_CACHE or not source.exists() or source.is_dir():
         return source
 
-    stat = source.stat()
-    cache_name = f"{source.stem}-{stat.st_size}-{int(stat.st_mtime)}{source.suffix}"
-    target = CACHE_DIR / cache_name
-
-    if target.exists() and target.stat().st_size == stat.st_size:
+    target = cache_target_for_path(path)
+    if target.exists() and target.stat().st_size == source.stat().st_size:
         return target
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -76,6 +89,38 @@ def cached_input_path(path: str) -> Path:
         raise
 
     return target
+
+
+def prepare_catalog_cache(paths: list[str]) -> None:
+    if not USE_LOCAL_CACHE:
+        st.info("Cache local desactivada con EUCLID_USE_LOCAL_CACHE=0.")
+        return
+
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    copied_any = False
+
+    with st.status("Preparando catálogos en cache local", expanded=True) as status:
+        st.write(f"Cache: `{CACHE_DIR}`")
+        for path in paths:
+            source = Path(path)
+            if not source.exists() or source.is_dir():
+                continue
+
+            size = source.stat().st_size
+            target = cache_target_for_path(path)
+            if target.exists() and target.stat().st_size == size:
+                st.write(f"Ya en cache: `{source.name}` ({format_bytes(size)})")
+                continue
+
+            copied_any = True
+            with st.spinner(f"Copiando {source.name} ({format_bytes(size)}) desde Google Drive..."):
+                cached_input_path(path)
+            st.write(f"Copiado: `{source.name}` ({format_bytes(size)})")
+
+        if copied_any:
+            status.update(label="Catálogos copiados a cache local", state="complete")
+        else:
+            status.update(label="Catálogos ya disponibles en cache local", state="complete")
 
 
 def detect_pca_columns(df: pd.DataFrame) -> list[str]:
@@ -469,6 +514,8 @@ def main() -> None:
     if not st.session_state.get("cluster_ready"):
         st.info("Pulsa **Ejecutar clusterización** para generar los clusters BIRCH.")
         st.stop()
+
+    prepare_catalog_cache([PARQUET_PATH, LENS_PATH, MORPH_PATH])
 
     params = st.session_state["cluster_params"]
     try:
