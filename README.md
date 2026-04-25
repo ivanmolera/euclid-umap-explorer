@@ -1,46 +1,44 @@
 # Euclid UMAP Explorer
 
-Aplicación web en Streamlit para visualizar UMAP sobre clusters de objetos astronómicos Euclid usando el catálogo PCA `representations_pca_40.parquet` y el catálogo de strong lenses.
+Aplicación web en Streamlit para explorar clusters de objetos astronómicos Euclid mediante UMAP, cruzando el catálogo PCA/morfológico con un catálogo de strong lenses.
 
-La app no espera catálogos ni cutouts dentro del repositorio. Los datos se leen desde Google Drive montado, usando las rutas configuradas en `app.py` o variables de entorno.
-
-## Rutas de datos
-
-Valores por defecto:
-
-```python
-MORPH_PATH = "/content/drive/MyDrive/catalogues/morphology_catalogue/morphology_catalogue.parquet"
-CUTOUT_BASE = "/content/drive/MyDrive/catalogues/morphology_catalogue/cutouts_jpg_gz_arcsinh_vis_only"
-PARQUET_PATH = "/content/drive/MyDrive/catalogues/morphology_catalogue/representations_pca_40.parquet"
-LENS_PATH = "/content/drive/MyDrive/catalogues/strong_lensing_catalogue/q1_discovery_engine_lens_catalog.csv"
-LENS_IMG_BASE = "/content/drive/MyDrive/catalogues/strong_lensing_catalogue/lens"
-```
-
-También pueden sobrescribirse con variables de entorno:
-
-```bash
-export MORPH_PATH="/content/drive/MyDrive/catalogues/morphology_catalogue/morphology_catalogue.parquet"
-export CUTOUT_BASE="/content/drive/MyDrive/catalogues/morphology_catalogue/cutouts_jpg_gz_arcsinh_vis_only"
-export PARQUET_PATH="/content/drive/MyDrive/catalogues/morphology_catalogue/representations_pca_40.parquet"
-export LENS_PATH="/content/drive/MyDrive/catalogues/strong_lensing_catalogue/q1_discovery_engine_lens_catalog.csv"
-export LENS_IMG_BASE="/content/drive/MyDrive/catalogues/strong_lensing_catalogue/lens"
-```
+La app está pensada para trabajar con datos pesados fuera del repositorio. Los catálogos e imágenes pueden leerse desde rutas locales o desde Google Cloud Storage usando rutas `gs://`.
 
 ## Funcionalidad
 
-- Carga `representations_pca_40.parquet`.
-- Extrae `object_id` desde `id_str` cuando hace falta.
+- Carga el catálogo PCA `representations_pca_40.parquet`.
 - Detecta automáticamente columnas `feat_pca_*`.
-- Carga el catálogo de lentes y, por defecto, usa candidatas `grade A`.
+- Extrae `object_id` desde `id_str` cuando hace falta.
+- Carga el catálogo de strong lenses y cruza ambos catálogos por `object_id`.
 - Ejecuta clusterización BIRCH solo cuando el usuario pulsa el botón.
-- Usa `StandardScaler.partial_fit` y BIRCH por lotes, siguiendo la lógica de los notebooks.
-- Muestra un desplegable de clusters con `id`, número de objetos y número de lentes.
-- Permite seleccionar componentes PCA para construir UMAP.
-- Calcula UMAP con escalado previo y visualiza el embedding con Plotly.
-- Marca visualmente lentes y no lentes.
-- Muestra detalles del objeto seleccionado, incluyendo una lectura puntual de `MORPH_PATH`.
-- Muestra imágenes del objeto seleccionado cuando existen en `CUTOUT_BASE` o `LENS_IMG_BASE`.
-- No copia ni cachea `CUTOUT_BASE` ni `LENS_IMG_BASE`; esas carpetas de imágenes se consultan bajo demanda.
+- Permite seleccionar un cluster y componentes PCA para construir UMAP.
+- Calcula UMAP con escalado previo mediante `StandardScaler`.
+- Visualiza el embedding con Plotly.
+- Marca visualmente no lentes, lentes, objeto canónico y objeto más anómalo.
+- Permite seleccionar puntos del mapa y ver detalles del objeto.
+- Muestra un indicador claro de `LENTE` / `NO LENTE`.
+- Carga cutouts e imágenes de lentes bajo demanda desde `CUTOUT_BASE` y `LENS_IMG_BASE`.
+
+## Variables de entorno
+
+La app usa estas rutas configurables:
+
+```bash
+export PARQUET_PATH="gs://<bucket>/catalogues/morphology_catalogue/representations_pca_40.parquet"
+export LENS_PATH="gs://<bucket>/catalogues/strong_lensing_catalogue/q1_discovery_engine_lens_catalog.csv"
+export CUTOUT_BASE="gs://<bucket>/catalogues/morphology_catalogue/cutouts_jpg_gz_arcsinh_vis_only"
+export LENS_IMG_BASE="gs://<bucket>/catalogues/strong_lensing_catalogue/lens"
+export EUCLID_USE_LOCAL_CACHE=0
+```
+
+Opcionalmente:
+
+```bash
+export MORPH_PATH="gs://<bucket>/catalogues/morphology_catalogue/morphology_catalogue.parquet"
+export EUCLID_CACHE_DIR="$HOME/.cache/euclid-umap-explorer"
+```
+
+`EUCLID_USE_LOCAL_CACHE=0` desactiva la copia local de catálogos. Es el valor recomendado cuando se leen datos desde `gs://`.
 
 ## Entorno local
 
@@ -53,59 +51,26 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-## Ejecutar
-
-La ruta `/content/drive/...` es típica de Google Colab. Si ejecutas fuera de Colab, monta Google Drive o sobrescribe las variables de entorno anteriores para apuntar al mount real.
-
-Por defecto la app copia solo los catálogos necesarios para clusterizar (`PARQUET_PATH` y `LENS_PATH`) desde Google Drive Desktop a una cache local fuera del repositorio, en `~/.cache/euclid-umap-explorer`, mostrando un estado y barra de progreso durante la copia. Las carpetas `CUTOUT_BASE` y `LENS_IMG_BASE` no se copian nunca. Esto evita timeouts de `pyarrow` al leer parquet desde el filesystem virtual de Drive. Puedes cambiar la cache con `EUCLID_CACHE_DIR` o desactivarla con `EUCLID_USE_LOCAL_CACHE=0`.
+Después configura las variables de entorno y ejecuta:
 
 ```bash
 streamlit run app.py
 ```
 
-## Despliegue en Google Cloud Run
+## Datos
 
-La versión actual asume acceso de filesystem a Google Drive montado. Para Cloud Run, lo recomendable será mover los catálogos y cutouts a Google Cloud Storage o usar URLs firmadas/Drive API antes del despliegue.
+Los datos pesados no deben subirse al repositorio. Mantén fuera de GitHub:
 
-### Importante: uso de gcloud personal
+- catálogos Parquet/CSV grandes,
+- cutouts,
+- imágenes de lentes,
+- cualquier archivo generado por procesos de extracción o sincronización.
 
-Antes de ejecutar cualquier comando de despliegue, comprobar que `gcloud` está usando la configuración personal.
+Si usas rutas locales, puedes configurar las variables de entorno para apuntar a tu filesystem. Si usas Cloud Run, usa un backend accesible por el servicio, por ejemplo Google Cloud Storage.
 
-```bash
-gcloud config configurations list
-gcloud config list
-gcloud auth list
-```
+## Despliegue en Cloud Run
 
-La configuración activa debe ser:
-
-```text
-personal
-```
-
-La cuenta activa debe ser:
-
-```text
-ivan.molera@gmail.com
-```
-
-No usar ninguna configuración, cuenta ni proyecto que no pertenezca al entorno personal.
-
-Si la configuración activa no es `personal`, activar:
-
-```bash
-gcloud config configurations activate personal
-```
-
-Después comprobar que el proyecto activo es el proyecto personal:
-
-```bash
-gcloud config get-value project
-```
-
-No ejecutar ningún comando `gcloud run deploy`, `gcloud builds submit` ni cambios de configuración si la cuenta activa o el proyecto no pertenecen al entorno personal.
-
-Cuando la carga de datos esté migrada a un backend accesible por Cloud Run, el despliegue será:
+Ejemplo de despliegue:
 
 ```bash
 gcloud run deploy euclid-umap-app \
@@ -114,9 +79,22 @@ gcloud run deploy euclid-umap-app \
   --allow-unauthenticated \
   --memory 4Gi \
   --cpu 2 \
-  --timeout 900
+  --timeout 900 \
+  --set-env-vars=PARQUET_PATH=gs://<bucket>/catalogues/morphology_catalogue/representations_pca_40.parquet,LENS_PATH=gs://<bucket>/catalogues/strong_lensing_catalogue/q1_discovery_engine_lens_catalog.csv,CUTOUT_BASE=gs://<bucket>/catalogues/morphology_catalogue/cutouts_jpg_gz_arcsinh_vis_only,LENS_IMG_BASE=gs://<bucket>/catalogues/strong_lensing_catalogue/lens,EUCLID_USE_LOCAL_CACHE=0
 ```
 
-## Datos pesados
+El `Dockerfile` ejecuta Streamlit en el puerto indicado por Cloud Run mediante `$PORT`.
 
-No subir catálogos, imágenes ni cutouts al repositorio GitHub.
+## Estructura
+
+```text
+.
+├── app.py
+├── requirements.txt
+├── Dockerfile
+├── README.md
+└── data/
+    ├── morphology/
+    ├── strong_lenses/
+    └── cutouts/
+```
