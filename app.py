@@ -53,6 +53,8 @@ DEFAULT_CLUSTER_FEATURES = [
     "feat_pca_13",
     "feat_pca_27",
 ]
+DEFAULT_LENS_GRADES = ["A"]
+LENS_GRADE_OPTIONS = ["A", "B", "C"]
 
 
 def inject_plot_cursor_css() -> None:
@@ -278,8 +280,14 @@ def load_pca_catalog(parquet_path: str) -> tuple[pd.DataFrame, list[str]]:
     return work_df, feature_cols
 
 
+def normalize_lens_grades(grades: Iterable[str]) -> tuple[str, ...]:
+    return tuple(
+        sorted({str(grade).strip().upper() for grade in grades if str(grade).strip()})
+    )
+
+
 @st.cache_data(show_spinner=False)
-def load_lens_catalog(lens_path: str, only_grade_a: bool) -> pd.DataFrame:
+def load_lens_catalog(lens_path: str, selected_grades: tuple[str, ...]) -> pd.DataFrame:
     lens_df = pd.read_csv(cached_input_path(lens_path), dtype={"object_id": "string"})
     if "object_id" not in lens_df.columns:
         raise ValueError("El catálogo de lentes debe contener object_id.")
@@ -287,8 +295,10 @@ def load_lens_catalog(lens_path: str, only_grade_a: bool) -> pd.DataFrame:
     lens_df = lens_df.copy()
     lens_df["object_id"] = normalize_object_ids(lens_df["object_id"])
 
-    if only_grade_a and "grade" in lens_df.columns:
-        lens_df = lens_df[lens_df["grade"].astype(str).str.upper() == "A"].copy()
+    if selected_grades and "grade" in lens_df.columns:
+        lens_df = lens_df[
+            lens_df["grade"].astype(str).str.strip().str.upper().isin(selected_grades)
+        ].copy()
 
     columns = [column for column in ("object_id", "id_str", "grade") if column in lens_df.columns]
     return lens_df[columns].dropna(subset=["object_id"]).drop_duplicates("object_id")
@@ -320,13 +330,13 @@ def merge_lens_flags(work_df: pd.DataFrame, lens_df: pd.DataFrame) -> pd.DataFra
 def run_birch_clustering(
     parquet_path: str,
     lens_path: str,
-    only_grade_a: bool,
+    selected_grades: tuple[str, ...],
     threshold: float,
     branching_factor: int,
     batch_size: int,
 ) -> tuple[pd.DataFrame, list[str]]:
     work_df, feature_cols = load_pca_catalog(parquet_path)
-    lens_df = load_lens_catalog(lens_path, only_grade_a)
+    lens_df = load_lens_catalog(lens_path, selected_grades)
 
     scaler = StandardScaler()
     for start in range(0, len(work_df), batch_size):
@@ -494,7 +504,7 @@ def build_umap_signature(
     return (
         PARQUET_PATH,
         LENS_PATH,
-        bool(cluster_params["only_grade_a"]),
+        cluster_lens_grades(cluster_params),
         float(cluster_params["threshold"]),
         int(cluster_params["branching_factor"]),
         int(cluster_params["batch_size"]),
@@ -504,6 +514,14 @@ def build_umap_signature(
         round(float(min_dist), 4),
         int(max_objects),
     )
+
+
+def cluster_lens_grades(cluster_params: dict) -> tuple[str, ...]:
+    if "lens_grades" in cluster_params:
+        return normalize_lens_grades(cluster_params["lens_grades"])
+    if cluster_params.get("only_grade_a", True):
+        return ("A",)
+    return tuple(LENS_GRADE_OPTIONS)
 
 
 @st.cache_data(show_spinner=False)
@@ -741,7 +759,12 @@ def main() -> None:
             )
 
         st.header("Lentes")
-        only_grade_a = st.checkbox("Usar solo lentes grade A", value=True)
+        selected_lens_grades = st.multiselect(
+            "Grados de lentes",
+            LENS_GRADE_OPTIONS,
+            default=DEFAULT_LENS_GRADES,
+        )
+        selected_lens_grades = normalize_lens_grades(selected_lens_grades)
 
         st.header("Clusterización BIRCH")
         threshold = st.number_input("threshold", min_value=0.1, value=8.0, step=0.1)
@@ -772,9 +795,13 @@ def main() -> None:
         st.stop()
 
     if run_clustering:
+        if not selected_lens_grades:
+            st.warning("Selecciona al menos un grado de lentes para clusterizar.")
+            st.stop()
+
         st.session_state["cluster_ready"] = True
         st.session_state["cluster_params"] = {
-            "only_grade_a": only_grade_a,
+            "lens_grades": selected_lens_grades,
             "threshold": threshold,
             "branching_factor": int(branching_factor),
             "batch_size": int(batch_size),
@@ -788,11 +815,12 @@ def main() -> None:
     prepare_catalog_cache([PARQUET_PATH, LENS_PATH])
 
     params = st.session_state["cluster_params"]
+    lens_grades = cluster_lens_grades(params)
     try:
         clustered_df, pca_columns = run_birch_clustering(
             PARQUET_PATH,
             LENS_PATH,
-            params["only_grade_a"],
+            lens_grades,
             float(params["threshold"]),
             int(params["branching_factor"]),
             int(params["batch_size"]),
@@ -819,6 +847,7 @@ def main() -> None:
     left_metric.metric("Objetos clusterizados", f"{len(clustered_df):,}")
     middle_metric.metric("Clusters", f"{clustered_df['cluster'].nunique():,}")
     right_metric.metric("Lentes", f"{int(clustered_df['is_lens'].sum()):,}")
+    st.caption(f"Grados de lentes usados: {', '.join(lens_grades)}")
 
     with st.expander("Resumen de clusters", expanded=False):
         summary_display = cluster_summary_df.copy()

@@ -10,6 +10,7 @@ La app está pensada para trabajar con datos pesados fuera del repositorio. Los 
 - Detecta automáticamente columnas `feat_pca_*`.
 - Extrae `object_id` desde `id_str` cuando hace falta.
 - Carga el catálogo de strong lenses y cruza ambos catálogos por `object_id`.
+- Permite elegir qué grados de lentes usar en el cruce (`A`, `B`, `C`).
 - Ejecuta clusterización BIRCH solo cuando el usuario pulsa el botón.
 - Permite seleccionar un cluster y componentes PCA para construir UMAP.
 - Calcula UMAP con escalado previo mediante `StandardScaler`.
