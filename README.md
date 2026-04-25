@@ -15,7 +15,7 @@ La app está pensada para trabajar con datos pesados fuera del repositorio. Los 
 - Permite seleccionar un cluster y componentes PCA para construir UMAP.
 - Calcula UMAP con escalado previo mediante `StandardScaler`.
 - Visualiza el embedding con Plotly.
-- Marca visualmente no lentes, lentes, objeto canónico y objeto más anómalo.
+- Marca visualmente no lentes, lentes por grado, objeto canónico y objeto más anómalo.
 - Permite seleccionar puntos del mapa y ver detalles del objeto.
 - Muestra un indicador claro de `LENTE` / `NO LENTE`.
 - Carga cutouts e imágenes de lentes bajo demanda desde `CUTOUT_BASE` y `LENS_IMG_BASE`.

@@ -941,6 +941,27 @@ def main() -> None:
     cluster_right.metric("Lentes en UMAP", f"{int(embedding_df['is_lens'].sum()):,}")
     cluster_fourth.metric("Extremos", "2")
 
+    embedding_df = embedding_df.copy()
+    if "lens_grade" in embedding_df.columns:
+        lens_grade_marker = (
+            embedding_df["lens_grade"]
+            .astype("string")
+            .str.strip()
+            .str.upper()
+            .str[:1]
+        )
+        lens_grade_marker = lens_grade_marker.where(
+            lens_grade_marker.isin(LENS_GRADE_OPTIONS),
+            "?",
+        )
+    else:
+        lens_grade_marker = pd.Series("?", index=embedding_df.index)
+    embedding_df["lens_grade_marker"] = np.where(
+        embedding_df["is_lens"],
+        lens_grade_marker.fillna("?"),
+        "",
+    )
+
     hover_columns = [
         column
         for column in (
@@ -961,6 +982,7 @@ def main() -> None:
         y="umap_2",
         color="point_role",
         symbol="point_role",
+        text="lens_grade_marker",
         custom_data=["point_index"],
         hover_data=hover_columns,
         color_discrete_map={
@@ -971,7 +993,7 @@ def main() -> None:
         },
         symbol_map={
             "No lens": "circle",
-            "Lens": "star",
+            "Lens": "circle",
             "Canonical": "diamond",
             "Anomaly": "x",
         },
@@ -983,7 +1005,11 @@ def main() -> None:
     )
     fig.update_traces(marker={"size": 7, "opacity": 0.72})
     fig.update_traces(
-        marker={"size": 12, "opacity": 0.98, "line": {"width": 1.5, "color": "white"}},
+        textposition="middle center",
+        textfont={"size": 10, "color": "white", "family": "Arial Black"},
+    )
+    fig.update_traces(
+        marker={"size": 17, "opacity": 0.98, "line": {"width": 1.5, "color": "white"}},
         selector={"name": "Lens"},
     )
     fig.update_traces(
