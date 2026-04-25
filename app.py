@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from io import BytesIO
 from pathlib import Path
 from typing import Iterable
 
@@ -75,10 +76,23 @@ def is_gcs_path(path: str) -> bool:
     return str(path).startswith("gs://")
 
 
+@st.cache_resource(show_spinner=False)
+def gcs_filesystem() -> gcsfs.GCSFileSystem:
+    return gcsfs.GCSFileSystem()
+
+
 def path_exists(path: str) -> bool:
     if is_gcs_path(path):
-        return gcsfs.GCSFileSystem().exists(path)
+        return gcs_filesystem().exists(path)
     return Path(path).exists()
+
+
+def join_data_path(base: str, *parts: str) -> str:
+    clean_base = str(base).rstrip("/")
+    clean_parts = [str(part).strip("/") for part in parts if str(part).strip("/")]
+    if not clean_parts:
+        return clean_base
+    return f"{clean_base}/{'/'.join(clean_parts)}"
 
 
 def format_bytes(size: int) -> str:
@@ -464,26 +478,54 @@ def build_umap_signature(
     )
 
 
-def morphology_cutout_path(id_str: object) -> Path | None:
+@st.cache_data(show_spinner=False)
+def image_path_exists(path: str) -> bool:
+    return path_exists(path)
+
+
+def normalize_filename_object_id(object_id: object) -> str:
+    value = str(object_id).strip()
+    if value.endswith(".0"):
+        value = value[:-2]
+    if value.startswith("-"):
+        return f"NEG{value[1:]}"
+    return value.replace("-", "NEG")
+
+
+def morphology_cutout_path(id_str: object, object_id: object = None) -> str | None:
     if pd.isna(id_str):
         return None
 
-    parts = str(id_str).rsplit("_", maxsplit=2)
-    if len(parts) < 3:
+    parts = str(id_str).strip().split("_")
+    if len(parts) == 2:
+        tile_index = parts[0]
+        object_id_part = parts[1]
+    elif len(parts) >= 3:
+        tile_index = parts[-2]
+        object_id_part = parts[-1]
+    else:
         return None
 
-    tile_index = parts[-2]
-    object_id = parts[-1].replace("-", "NEG")
-    filename = f"{tile_index}_{object_id}_gz_arcsinh_vis_only.jpg"
-    path = Path(CUTOUT_BASE) / tile_index / filename
-    return path if path.exists() else None
+    candidate_object_ids = [object_id_part]
+    if object_id is not None and not pd.isna(object_id):
+        candidate_object_ids.append(object_id)
+
+    for candidate_object_id in dict.fromkeys(
+        normalize_filename_object_id(candidate) for candidate in candidate_object_ids
+    ):
+        filename = f"{tile_index}_{candidate_object_id}_gz_arcsinh_vis_only.jpg"
+        path = join_data_path(CUTOUT_BASE, tile_index, filename)
+        if image_path_exists(path):
+            return path
+
+    return None
 
 
-def lens_image_path(lens_id_str: object) -> Path | None:
+def lens_image_path(lens_id_str: object) -> str | None:
     if pd.isna(lens_id_str):
         return None
-    path = Path(LENS_IMG_BASE) / str(lens_id_str) / "rgb_1.png"
-    return path if path.exists() else None
+    path = join_data_path(LENS_IMG_BASE, str(lens_id_str), "rgb_1.png")
+    return path if image_path_exists(path) else None
 
 
 @st.cache_data(show_spinner=False)
@@ -538,11 +580,19 @@ def selected_point_index(event: object) -> int | None:
         return None
 
 
-def show_image(path: Path, caption: str) -> None:
+@st.cache_data(show_spinner=False)
+def load_image_bytes(path: str) -> bytes:
+    if is_gcs_path(path):
+        with gcs_filesystem().open(path, "rb") as image_file:
+            return image_file.read()
+    return Path(path).read_bytes()
+
+
+def show_image(path: str, caption: str) -> None:
     try:
-        image = Image.open(path)
+        image = Image.open(BytesIO(load_image_bytes(path)))
     except Exception as exc:
-        st.warning(f"No se pudo abrir {path.name}: {exc}")
+        st.warning(f"No se pudo abrir la imagen: {exc}")
         return
     st.image(image, caption=caption, use_container_width=True)
 
@@ -585,17 +635,19 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
             )
             st.dataframe(morph_display, use_container_width=True, hide_index=True)
 
-    cutout_path = morphology_cutout_path(row.get("id_str"))
+    cutout_path = morphology_cutout_path(row.get("id_str"), row.get("object_id"))
     lens_path = lens_image_path(row.get("lens_id_str"))
+    if lens_path is None and bool(row.get("is_lens", False)):
+        lens_path = lens_image_path(row.get("id_str"))
 
     if cutout_path is None and lens_path is None:
         st.info("No se encontró imagen asociada en las rutas configuradas.")
         return
 
     if cutout_path is not None:
-        show_image(cutout_path, f"Cutout morfológico: {cutout_path.name}")
+        show_image(cutout_path, "Cutout morfológico")
     if lens_path is not None:
-        show_image(lens_path, f"Imagen strong lens: {lens_path.name}")
+        show_image(lens_path, "Imagen strong lens")
 
 
 def validate_paths() -> pd.DataFrame:
