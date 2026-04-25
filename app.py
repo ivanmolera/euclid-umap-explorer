@@ -46,8 +46,6 @@ CACHE_DIR = Path(
 USE_LOCAL_CACHE = os.getenv("EUCLID_USE_LOCAL_CACHE", "1") != "0"
 
 DEFAULT_CLUSTER_FEATURES = [
-    "feat_pca_1",
-    "feat_pca_12",
     "feat_pca_6",
     "feat_pca_10",
     "feat_pca_13",
