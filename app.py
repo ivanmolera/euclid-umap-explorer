@@ -51,7 +51,7 @@ DEFAULT_CLUSTER_FEATURES = [
     "feat_pca_13",
     "feat_pca_27",
 ]
-DEFAULT_LENS_GRADES = ["A"]
+DEFAULT_LENS_GRADES = ["A", "B"]
 LENS_GRADE_OPTIONS = ["A", "B", "C"]
 
 
@@ -403,6 +403,11 @@ def format_cluster_option(row: pd.Series) -> str:
         f"{int(row['n_lenses']):,} lentes | "
         f"{row['lens_rate'] * 100:.3f}%"
     )
+
+
+def default_cluster_option_index(cluster_summary_df: pd.DataFrame) -> int:
+    eligible_positions = np.flatnonzero(cluster_summary_df["n_lenses"].to_numpy() > 1)
+    return int(eligible_positions[0]) if len(eligible_positions) else 0
 
 
 def sample_for_display(df: pd.DataFrame, max_objects: int) -> pd.DataFrame:
@@ -861,6 +866,7 @@ def main() -> None:
         selected_option = st.selectbox(
             "Cluster",
             cluster_summary_df["option"].tolist(),
+            index=default_cluster_option_index(cluster_summary_df),
         )
         selected_cluster = int(
             cluster_summary_df.loc[
@@ -982,7 +988,6 @@ def main() -> None:
         y="umap_2",
         color="point_role",
         symbol="point_role",
-        text="lens_grade_marker",
         custom_data=["point_index"],
         hover_data=hover_columns,
         color_discrete_map={
@@ -1005,10 +1010,6 @@ def main() -> None:
     )
     fig.update_traces(marker={"size": 7, "opacity": 0.72})
     fig.update_traces(
-        textposition="middle center",
-        textfont={"size": 10, "color": "white", "family": "Arial Black"},
-    )
-    fig.update_traces(
         marker={"size": 17, "opacity": 0.98, "line": {"width": 1.5, "color": "white"}},
         selector={"name": "Lens"},
     )
@@ -1024,6 +1025,18 @@ def main() -> None:
         opacity = getattr(trace.marker, "opacity", None) or 1.0
         trace.selected = {"marker": {"opacity": opacity}}
         trace.unselected = {"marker": {"opacity": opacity}}
+
+    for lens_row in embedding_df[embedding_df["lens_grade_marker"] != ""].itertuples():
+        fig.add_annotation(
+            x=lens_row.umap_1,
+            y=lens_row.umap_2,
+            text=lens_row.lens_grade_marker,
+            showarrow=False,
+            font={"size": 10, "color": "white", "family": "Arial Black"},
+            xanchor="center",
+            yanchor="middle",
+            captureevents=False,
+        )
 
     fig.update_layout(
         title=f"Cluster {selected_cluster} | UMAP",
