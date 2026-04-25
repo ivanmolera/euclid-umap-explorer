@@ -66,6 +66,34 @@ def inject_plot_cursor_css() -> None:
         .js-plotly-plot .plotly .cursor-pointer {
             cursor: default !important;
         }
+        .lens-status {
+            border-radius: 8px;
+            font-weight: 700;
+            margin: 0.25rem 0 0.85rem 0;
+            padding: 0.7rem 0.85rem;
+        }
+        .lens-status--yes {
+            background: #fff1f2;
+            border: 1px solid #e11d48;
+            color: #9f1239;
+        }
+        .lens-status--no {
+            background: #f8fafc;
+            border: 1px solid #94a3b8;
+            color: #334155;
+        }
+        .lens-status__label {
+            display: block;
+            font-size: 1rem;
+            line-height: 1.25;
+        }
+        .lens-status__meta {
+            display: block;
+            font-size: 0.82rem;
+            font-weight: 500;
+            line-height: 1.25;
+            margin-top: 0.2rem;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -597,8 +625,36 @@ def show_image(path: str, caption: str) -> None:
     st.image(image, caption=caption, use_container_width=True)
 
 
+def show_lens_status(row: pd.Series) -> None:
+    is_lens = bool(row.get("is_lens", False))
+    lens_grade = row.get("lens_grade", "")
+    lens_grade_text = ""
+    if not pd.isna(lens_grade) and str(lens_grade).strip():
+        lens_grade_text = f"Grade: {lens_grade}"
+
+    if is_lens:
+        label = "LENTE"
+        css_class = "lens-status--yes"
+        meta = lens_grade_text or "Objeto presente en el catálogo de strong lenses."
+    else:
+        label = "NO LENTE"
+        css_class = "lens-status--no"
+        meta = "Objeto no marcado como lente en el catálogo cruzado."
+
+    st.markdown(
+        f"""
+        <div class="lens-status {css_class}">
+            <span class="lens-status__label">{label}</span>
+            <span class="lens-status__meta">{meta}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
     st.subheader("Objeto seleccionado")
+    show_lens_status(row)
 
     details = {
         "id_str": row.get("id_str", ""),
