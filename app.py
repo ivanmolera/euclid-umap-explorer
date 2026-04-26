@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as ds
+import pyarrow.parquet as pq
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -236,6 +237,10 @@ def prepare_catalog_cache(paths: list[str]) -> None:
 
 
 def detect_pca_columns(df: pd.DataFrame) -> list[str]:
+    return detect_pca_column_names(df.columns)
+
+
+def detect_pca_column_names(columns: Iterable[str]) -> list[str]:
     def pca_index(column: str) -> int:
         try:
             return int(column.removeprefix("feat_pca_"))
@@ -243,7 +248,7 @@ def detect_pca_columns(df: pd.DataFrame) -> list[str]:
             return 10_000
 
     return sorted(
-        [column for column in df.columns if column.startswith("feat_pca_")],
+        [column for column in columns if str(column).startswith("feat_pca_")],
         key=pca_index,
     )
 
@@ -259,10 +264,25 @@ def ensure_object_id_from_id_str(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     if "object_id" not in df.columns:
         if "id_str" not in df.columns:
-            raise ValueError("El parquet PCA debe contener id_str u object_id.")
+            raise ValueError("The PCA parquet must contain id_str or object_id.")
         df["object_id"] = df["id_str"].astype("string").str.split("_").str[-1]
     df["object_id"] = normalize_object_ids(df["object_id"])
     return df
+
+
+@st.cache_data(show_spinner=False)
+def load_pca_columns(parquet_path: str) -> list[str]:
+    path = cached_input_path(parquet_path)
+    if is_gcs_path(str(path)):
+        with gcs_filesystem().open(path, "rb") as parquet_file:
+            schema = pq.read_schema(parquet_file)
+    else:
+        schema = pq.read_schema(path)
+
+    feature_cols = detect_pca_column_names(schema.names)
+    if not feature_cols:
+        raise ValueError("No feat_pca_* columns were found in the PCA parquet file.")
+    return feature_cols
 
 
 @st.cache_data(show_spinner=False)
@@ -290,6 +310,14 @@ def normalize_lens_grades(grades: Iterable[str]) -> tuple[str, ...]:
     return tuple(
         sorted({str(grade).strip().upper() for grade in grades if str(grade).strip()})
     )
+
+
+def normalize_pca_components(
+    selected_components: Iterable[str],
+    available_components: list[str],
+) -> tuple[str, ...]:
+    available = set(available_components)
+    return tuple(component for component in selected_components if component in available)
 
 
 @st.cache_data(show_spinner=False)
@@ -337,11 +365,16 @@ def run_birch_clustering(
     parquet_path: str,
     lens_path: str,
     selected_grades: tuple[str, ...],
+    cluster_feature_cols: tuple[str, ...],
     threshold: float,
     branching_factor: int,
     batch_size: int,
 ) -> tuple[pd.DataFrame, list[str]]:
-    work_df, feature_cols = load_pca_catalog(parquet_path)
+    work_df, all_feature_cols = load_pca_catalog(parquet_path)
+    feature_cols = [column for column in cluster_feature_cols if column in all_feature_cols]
+    if not feature_cols:
+        raise ValueError("Select at least one PCA component for BIRCH clustering.")
+
     lens_df = load_lens_catalog(lens_path, selected_grades)
 
     scaler = StandardScaler()
@@ -384,7 +417,7 @@ def run_birch_clustering(
     clustered_df["cluster"] = labels
     clustered_df = merge_lens_flags(clustered_df, lens_df)
     clustered_df.attrs["n_subclusters"] = len(cluster_model.subcluster_centers_)
-    return clustered_df, feature_cols
+    return clustered_df, all_feature_cols
 
 
 def build_cluster_summary(clustered_df: pd.DataFrame) -> pd.DataFrame:
@@ -528,6 +561,7 @@ def build_umap_signature(
         PARQUET_PATH,
         LENS_PATH,
         cluster_lens_grades(cluster_params),
+        cluster_pca_components(cluster_params),
         float(cluster_params["threshold"]),
         int(cluster_params["branching_factor"]),
         int(cluster_params["batch_size"]),
@@ -545,6 +579,10 @@ def cluster_lens_grades(cluster_params: dict) -> tuple[str, ...]:
     if cluster_params.get("only_grade_a", True):
         return ("A",)
     return tuple(LENS_GRADE_OPTIONS)
+
+
+def cluster_pca_components(cluster_params: dict) -> tuple[str, ...]:
+    return tuple(cluster_params.get("cluster_pca_components", ()))
 
 
 @st.cache_data(show_spinner=False)
@@ -1015,6 +1053,24 @@ def main() -> None:
     inject_plot_cursor_css()
     st.title(APP_TITLE)
 
+    required = [PARQUET_PATH, LENS_PATH]
+    missing = [path for path in required if not path_exists(path)]
+    if missing:
+        st.error(
+            "Required files were not found. Check the "
+            "MORPH_PATH, PARQUET_PATH, LENS_PATH, "
+            "CUTOUT_BASE and LENS_IMG_BASE environment variables."
+        )
+        st.code("\n".join(missing), language="text")
+        st.stop()
+
+    try:
+        available_pca_columns = load_pca_columns(PARQUET_PATH)
+    except OSError as exc:
+        st.error("Could not read the PCA parquet schema from the configured path.")
+        st.exception(exc)
+        st.stop()
+
     with st.sidebar:
         st.header("Data")
         with st.expander("Configured paths", expanded=False):
@@ -1033,6 +1089,29 @@ def main() -> None:
         selected_lens_grades = normalize_lens_grades(selected_lens_grades)
 
         st.header("BIRCH clustering")
+        use_all_pca_for_clustering = st.checkbox(
+            "Use all PCA components for clustering",
+            value=False,
+            key="use_all_pca_for_clustering",
+        )
+        default_cluster_components = [
+            feature for feature in DEFAULT_CLUSTER_FEATURES if feature in available_pca_columns
+        ] or available_pca_columns[: min(4, len(available_pca_columns))]
+        selected_cluster_components = st.multiselect(
+            "PCA components for clustering",
+            available_pca_columns,
+            default=available_pca_columns
+            if use_all_pca_for_clustering
+            else default_cluster_components,
+            disabled=use_all_pca_for_clustering,
+            key=f"cluster_pca_components_{'all' if use_all_pca_for_clustering else 'subset'}",
+        )
+        if use_all_pca_for_clustering:
+            selected_cluster_components = available_pca_columns
+        selected_cluster_components = normalize_pca_components(
+            selected_cluster_components,
+            available_pca_columns,
+        )
         threshold = st.number_input("threshold", min_value=0.1, value=8.0, step=0.1)
         branching_factor = st.number_input(
             "branching_factor",
@@ -1049,25 +1128,18 @@ def main() -> None:
         )
         run_clustering = st.button("Run clustering", type="primary")
 
-    required = [PARQUET_PATH, LENS_PATH]
-    missing = [path for path in required if not path_exists(path)]
-    if missing:
-        st.error(
-            "Required files were not found. Check the "
-            "MORPH_PATH, PARQUET_PATH, LENS_PATH, "
-            "CUTOUT_BASE and LENS_IMG_BASE environment variables."
-        )
-        st.code("\n".join(missing), language="text")
-        st.stop()
-
     if run_clustering:
         if not selected_lens_grades:
             st.warning("Select at least one lens grade before clustering.")
+            st.stop()
+        if not selected_cluster_components:
+            st.warning("Select at least one PCA component for BIRCH clustering.")
             st.stop()
 
         st.session_state["cluster_ready"] = True
         st.session_state["cluster_params"] = {
             "lens_grades": selected_lens_grades,
+            "cluster_pca_components": selected_cluster_components,
             "threshold": threshold,
             "branching_factor": int(branching_factor),
             "batch_size": int(batch_size),
@@ -1082,11 +1154,13 @@ def main() -> None:
 
     params = st.session_state["cluster_params"]
     lens_grades = cluster_lens_grades(params)
+    cluster_feature_cols = cluster_pca_components(params) or tuple(available_pca_columns)
     try:
         clustered_df, pca_columns = run_birch_clustering(
             PARQUET_PATH,
             LENS_PATH,
             lens_grades,
+            cluster_feature_cols,
             float(params["threshold"]),
             int(params["branching_factor"]),
             int(params["batch_size"]),
@@ -1114,6 +1188,10 @@ def main() -> None:
     middle_metric.metric("Clusters", f"{clustered_df['cluster'].nunique():,}")
     right_metric.metric("Lenses", f"{int(clustered_df['is_lens'].sum()):,}")
     st.caption(f"Lens grades used: {', '.join(lens_grades)}")
+    st.caption(
+        "PCA components used for clustering: "
+        f"{len(cluster_feature_cols)} selected"
+    )
 
     with st.expander("Cluster summary", expanded=False):
         summary_display = cluster_summary_df.copy()

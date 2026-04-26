@@ -28,6 +28,7 @@ The `data/` directories in this repository are placeholders for local developmen
 - Derives `object_id` from `id_str` when required.
 - Loads a strong-lensing catalogue and joins it with the PCA catalogue through `object_id`.
 - Allows the user to select lens grades used in the join (`A`, `B`, `C`).
+- Allows BIRCH clustering with either all PCA components or a selected PCA subset.
 - Runs BIRCH clustering on demand.
 - Allows the user to select a cluster and PCA components for UMAP.
 - Scales selected features with `StandardScaler`.
