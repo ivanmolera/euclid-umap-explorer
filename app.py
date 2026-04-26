@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as ds
-import pyarrow.parquet as pq
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -272,21 +271,6 @@ def ensure_object_id_from_id_str(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def load_pca_columns(parquet_path: str) -> list[str]:
-    path = cached_input_path(parquet_path)
-    if is_gcs_path(str(path)):
-        with gcs_filesystem().open(path, "rb") as parquet_file:
-            schema = pq.read_schema(parquet_file)
-    else:
-        schema = pq.read_schema(path)
-
-    feature_cols = detect_pca_column_names(schema.names)
-    if not feature_cols:
-        raise ValueError("No feat_pca_* columns were found in the PCA parquet file.")
-    return feature_cols
-
-
-@st.cache_data(show_spinner=False)
 def load_pca_catalog(parquet_path: str) -> tuple[pd.DataFrame, list[str]]:
     df = pd.read_parquet(cached_input_path(parquet_path))
     df = ensure_object_id_from_id_str(df)
@@ -311,14 +295,6 @@ def normalize_lens_grades(grades: Iterable[str]) -> tuple[str, ...]:
     return tuple(
         sorted({str(grade).strip().upper() for grade in grades if str(grade).strip()})
     )
-
-
-def normalize_pca_components(
-    selected_components: Iterable[str],
-    available_components: list[str],
-) -> tuple[str, ...]:
-    available = set(available_components)
-    return tuple(component for component in selected_components if component in available)
 
 
 @st.cache_data(show_spinner=False)
@@ -366,16 +342,11 @@ def run_birch_clustering(
     parquet_path: str,
     lens_path: str,
     selected_grades: tuple[str, ...],
-    cluster_feature_cols: tuple[str, ...],
     threshold: float,
     branching_factor: int,
     batch_size: int,
 ) -> tuple[pd.DataFrame, list[str]]:
-    work_df, all_feature_cols = load_pca_catalog(parquet_path)
-    feature_cols = [column for column in cluster_feature_cols if column in all_feature_cols]
-    if not feature_cols:
-        raise ValueError("Select at least one PCA component for BIRCH clustering.")
-
+    work_df, feature_cols = load_pca_catalog(parquet_path)
     lens_df = load_lens_catalog(lens_path, selected_grades)
 
     scaler = StandardScaler()
@@ -418,7 +389,7 @@ def run_birch_clustering(
     clustered_df["cluster"] = labels
     clustered_df = merge_lens_flags(clustered_df, lens_df)
     clustered_df.attrs["n_subclusters"] = len(cluster_model.subcluster_centers_)
-    return clustered_df, all_feature_cols
+    return clustered_df, feature_cols
 
 
 def build_cluster_summary(clustered_df: pd.DataFrame) -> pd.DataFrame:
@@ -562,7 +533,6 @@ def build_umap_signature(
         PARQUET_PATH,
         LENS_PATH,
         cluster_lens_grades(cluster_params),
-        analysis_pca_components(cluster_params),
         float(cluster_params["threshold"]),
         int(cluster_params["branching_factor"]),
         int(cluster_params["batch_size"]),
@@ -580,15 +550,6 @@ def cluster_lens_grades(cluster_params: dict) -> tuple[str, ...]:
     if cluster_params.get("only_grade_a", True):
         return ("A",)
     return tuple(LENS_GRADE_OPTIONS)
-
-
-def analysis_pca_components(cluster_params: dict) -> tuple[str, ...]:
-    return tuple(
-        cluster_params.get(
-            "analysis_pca_components",
-            cluster_params.get("cluster_pca_components", ()),
-        )
-    )
 
 
 @st.cache_data(show_spinner=False)
@@ -905,10 +866,10 @@ def render_cluster_visual_summary(
     clustered_df: pd.DataFrame,
     cluster_summary_df: pd.DataFrame,
     pca_columns: list[str],
-    analysis_features: tuple[str, ...],
+    selected_features: list[str],
 ) -> None:
     summary_features = [
-        feature for feature in analysis_features if feature in pca_columns
+        feature for feature in selected_features if feature in pca_columns
     ] or [feature for feature in DEFAULT_CLUSTER_FEATURES if feature in pca_columns]
     summary_features = summary_features or pca_columns[: min(4, len(pca_columns))]
     histogram_features = summary_features[:SUMMARY_HISTOGRAM_FEATURE_LIMIT]
@@ -1073,13 +1034,6 @@ def main() -> None:
         st.code("\n".join(missing), language="text")
         st.stop()
 
-    try:
-        available_pca_columns = load_pca_columns(PARQUET_PATH)
-    except OSError as exc:
-        st.error("Could not read the PCA parquet schema from the configured path.")
-        st.exception(exc)
-        st.stop()
-
     with st.sidebar:
         st.header("Data")
         with st.expander("Configured paths", expanded=False):
@@ -1097,32 +1051,8 @@ def main() -> None:
         )
         selected_lens_grades = normalize_lens_grades(selected_lens_grades)
 
-        st.header("PCA components")
-        use_all_pca_components = st.checkbox(
-            "Use all PCA components",
-            value=False,
-            key="use_all_pca_components",
-        )
-        default_analysis_components = [
-            feature for feature in DEFAULT_CLUSTER_FEATURES if feature in available_pca_columns
-        ] or available_pca_columns[: min(4, len(available_pca_columns))]
-        selected_analysis_components = st.multiselect(
-            "PCA components for analysis",
-            available_pca_columns,
-            default=available_pca_columns
-            if use_all_pca_components
-            else default_analysis_components,
-            disabled=use_all_pca_components,
-            key=f"analysis_pca_components_{'all' if use_all_pca_components else 'subset'}",
-        )
-        if use_all_pca_components:
-            selected_analysis_components = available_pca_columns
-        selected_analysis_components = normalize_pca_components(
-            selected_analysis_components,
-            available_pca_columns,
-        )
-
         st.header("BIRCH clustering")
+        st.caption("BIRCH clustering always uses all available PCA components.")
         threshold = st.number_input("threshold", min_value=0.1, value=8.0, step=0.1)
         branching_factor = st.number_input(
             "branching_factor",
@@ -1143,14 +1073,10 @@ def main() -> None:
         if not selected_lens_grades:
             st.warning("Select at least one lens grade before clustering.")
             st.stop()
-        if not selected_analysis_components:
-            st.warning("Select at least one PCA component for analysis.")
-            st.stop()
 
         st.session_state["cluster_ready"] = True
         st.session_state["cluster_params"] = {
             "lens_grades": selected_lens_grades,
-            "analysis_pca_components": selected_analysis_components,
             "threshold": threshold,
             "branching_factor": int(branching_factor),
             "batch_size": int(batch_size),
@@ -1165,13 +1091,11 @@ def main() -> None:
 
     params = st.session_state["cluster_params"]
     lens_grades = cluster_lens_grades(params)
-    analysis_features = analysis_pca_components(params) or tuple(available_pca_columns)
     try:
         clustered_df, pca_columns = run_birch_clustering(
             PARQUET_PATH,
             LENS_PATH,
             lens_grades,
-            analysis_features,
             float(params["threshold"]),
             int(params["branching_factor"]),
             int(params["batch_size"]),
@@ -1200,24 +1124,9 @@ def main() -> None:
     right_metric.metric("Lenses", f"{int(clustered_df['is_lens'].sum()):,}")
     st.caption(f"Lens grades used: {', '.join(lens_grades)}")
     st.caption(
-        "PCA components used for analysis: "
-        f"{len(analysis_features)} selected"
+        "PCA components used for clustering: "
+        f"all {len(pca_columns)} available components"
     )
-
-    with st.expander("Cluster summary", expanded=False):
-        summary_display = cluster_summary_df.copy()
-        summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
-        st.dataframe(
-            summary_display[["cluster", "n_objects", "n_lenses", "lens_rate"]],
-            use_container_width=True,
-            hide_index=True,
-        )
-        render_cluster_visual_summary(
-            clustered_df,
-            cluster_summary_df,
-            pca_columns,
-            analysis_features,
-        )
 
     with st.sidebar:
         st.header("UMAP")
@@ -1233,14 +1142,36 @@ def main() -> None:
             ].iloc[0]
         )
 
+        default_features = [
+            feature for feature in DEFAULT_CLUSTER_FEATURES if feature in pca_columns
+        ] or pca_columns[: min(4, len(pca_columns))]
+        selected_features = st.multiselect(
+            "PCA components",
+            pca_columns,
+            default=default_features,
+        )
         n_neighbors = st.slider("n_neighbors", 2, 100, 25)
         min_dist = st.slider("min_dist", 0.0, 1.0, 0.15, step=0.01)
         max_objects = st.slider("Maximum objects", 100, 100_000, 20_000, step=100)
 
-    selected_features = [feature for feature in analysis_features if feature in pca_columns]
     if not selected_features:
         st.warning("Select at least one PCA component to build UMAP.")
         st.stop()
+
+    with st.expander("Cluster summary", expanded=False):
+        summary_display = cluster_summary_df.copy()
+        summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
+        st.dataframe(
+            summary_display[["cluster", "n_objects", "n_lenses", "lens_rate"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+        render_cluster_visual_summary(
+            clustered_df,
+            cluster_summary_df,
+            pca_columns,
+            selected_features,
+        )
 
     cluster_df = clustered_df[clustered_df["cluster"] == selected_cluster].copy()
     umap_signature = build_umap_signature(
