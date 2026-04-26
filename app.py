@@ -52,6 +52,7 @@ SUMMARY_THUMBNAIL_WIDTH = 96
 SUMMARY_HISTOGRAM_BINS = 24
 SUMMARY_HISTOGRAM_FEATURE_LIMIT = 6
 SUMMARY_DISTPLOT_MAX_POINTS_PER_GROUP = 5_000
+PCA_FILTER_OPERATORS = [">", ">=", "<", "<=", "between"]
 
 
 def inject_plot_cursor_css() -> None:
@@ -533,9 +534,200 @@ def add_cluster_extreme_roles(
     return marked
 
 
+def normalize_pca_filters(raw_filters: list[dict], pca_columns: list[str]) -> tuple[dict, ...]:
+    valid_columns = set(pca_columns)
+    normalized = []
+    for raw_filter in raw_filters:
+        if not raw_filter.get("enabled", True):
+            continue
+
+        feature = raw_filter.get("feature")
+        operator = raw_filter.get("operator")
+        if feature not in valid_columns or operator not in PCA_FILTER_OPERATORS:
+            continue
+
+        if operator == "between":
+            lower = float(raw_filter.get("lower", 0.0))
+            upper = float(raw_filter.get("upper", 0.0))
+            lower, upper = sorted((lower, upper))
+            normalized.append(
+                {
+                    "feature": feature,
+                    "operator": operator,
+                    "lower": lower,
+                    "upper": upper,
+                    "enabled": True,
+                }
+            )
+        else:
+            normalized.append(
+                {
+                    "feature": feature,
+                    "operator": operator,
+                    "value": float(raw_filter.get("value", 0.0)),
+                    "enabled": True,
+                }
+            )
+    return tuple(normalized)
+
+
+def pca_filter_signature(pca_filters: tuple[dict, ...]) -> tuple:
+    signature = []
+    for pca_filter in pca_filters:
+        if pca_filter["operator"] == "between":
+            signature.append(
+                (
+                    pca_filter["feature"],
+                    pca_filter["operator"],
+                    round(float(pca_filter["lower"]), 6),
+                    round(float(pca_filter["upper"]), 6),
+                )
+            )
+        else:
+            signature.append(
+                (
+                    pca_filter["feature"],
+                    pca_filter["operator"],
+                    round(float(pca_filter["value"]), 6),
+                )
+            )
+    return tuple(signature)
+
+
+def format_pca_filter(pca_filter: dict) -> str:
+    if pca_filter["operator"] == "between":
+        return (
+            f"{pca_filter['feature']} between "
+            f"{pca_filter['lower']:.4g} and {pca_filter['upper']:.4g}"
+        )
+    return f"{pca_filter['feature']} {pca_filter['operator']} {pca_filter['value']:.4g}"
+
+
+def apply_pca_filters(data: pd.DataFrame, pca_filters: tuple[dict, ...]) -> pd.DataFrame:
+    if not pca_filters:
+        return data.copy()
+
+    mask = pd.Series(True, index=data.index)
+    for pca_filter in pca_filters:
+        values = data[pca_filter["feature"]]
+        operator = pca_filter["operator"]
+        if operator == ">":
+            mask &= values > pca_filter["value"]
+        elif operator == ">=":
+            mask &= values >= pca_filter["value"]
+        elif operator == "<":
+            mask &= values < pca_filter["value"]
+        elif operator == "<=":
+            mask &= values <= pca_filter["value"]
+        elif operator == "between":
+            mask &= values.between(
+                pca_filter["lower"],
+                pca_filter["upper"],
+                inclusive="both",
+            )
+    return data[mask].copy()
+
+
+def add_pca_filter() -> None:
+    st.session_state["pca_filter_count"] = (
+        st.session_state.get("pca_filter_count", 0) + 1
+    )
+
+
+def render_pca_filter_controls(pca_columns: list[str]) -> list[dict]:
+    with st.expander("PCA value filters", expanded=False):
+        st.caption("Filters are combined with AND before UMAP is computed.")
+        if "pca_filter_count" not in st.session_state:
+            st.session_state["pca_filter_count"] = 0
+
+        button_col, clear_col = st.columns(2)
+        with button_col:
+            st.button("Add filter", on_click=add_pca_filter)
+        with clear_col:
+            if st.session_state.get("pca_filter_count", 0):
+                if st.button("Clear filters", key="clear_pca_filters"):
+                    st.session_state["pca_filter_count"] = 0
+                    st.rerun()
+
+        filter_count = st.number_input(
+            "Number of filters",
+            min_value=0,
+            max_value=12,
+            step=1,
+            key="pca_filter_count",
+        )
+
+        raw_filters = []
+        for index in range(int(filter_count)):
+            st.markdown(f"**Filter {index + 1}**")
+            enabled = st.checkbox(
+                "Enabled",
+                value=True,
+                key=f"pca_filter_{index}_enabled",
+            )
+            feature = st.selectbox(
+                "Component",
+                pca_columns,
+                index=min(index, len(pca_columns) - 1),
+                key=f"pca_filter_{index}_feature",
+            )
+            operator = st.selectbox(
+                "Operator",
+                PCA_FILTER_OPERATORS,
+                key=f"pca_filter_{index}_operator",
+            )
+
+            if operator == "between":
+                lower_col, upper_col = st.columns(2)
+                with lower_col:
+                    lower = st.number_input(
+                        "Lower",
+                        value=0.0,
+                        step=0.1,
+                        format="%.6f",
+                        key=f"pca_filter_{index}_lower",
+                    )
+                with upper_col:
+                    upper = st.number_input(
+                        "Upper",
+                        value=1.0,
+                        step=0.1,
+                        format="%.6f",
+                        key=f"pca_filter_{index}_upper",
+                    )
+                raw_filters.append(
+                    {
+                        "feature": feature,
+                        "operator": operator,
+                        "lower": lower,
+                        "upper": upper,
+                        "enabled": enabled,
+                    }
+                )
+            else:
+                value = st.number_input(
+                    "Value",
+                    value=0.0,
+                    step=0.1,
+                    format="%.6f",
+                    key=f"pca_filter_{index}_value",
+                )
+                raw_filters.append(
+                    {
+                        "feature": feature,
+                        "operator": operator,
+                        "value": value,
+                        "enabled": enabled,
+                    }
+                )
+
+    return raw_filters
+
+
 def build_umap_signature(
     selected_cluster: int,
     selected_features: list[str],
+    pca_filters: tuple[dict, ...],
     n_neighbors: int,
     min_dist: float,
     max_objects: int,
@@ -550,6 +742,7 @@ def build_umap_signature(
         int(cluster_params["batch_size"]),
         int(selected_cluster),
         tuple(selected_features),
+        pca_filter_signature(pca_filters),
         int(n_neighbors),
         round(float(min_dist), 4),
         int(max_objects),
@@ -1199,6 +1392,7 @@ def main() -> None:
             pca_columns,
             default=default_features,
         )
+        raw_pca_filters = render_pca_filter_controls(pca_columns)
 
         st.header("UMAP")
         selected_option = st.selectbox(
@@ -1221,6 +1415,7 @@ def main() -> None:
     if not selected_features:
         st.warning("Select at least one PCA component to build UMAP.")
         st.stop()
+    pca_filters = normalize_pca_filters(raw_pca_filters, pca_columns)
 
     with st.expander(
         "Cluster summary",
@@ -1241,9 +1436,17 @@ def main() -> None:
         )
 
     cluster_df = clustered_df[clustered_df["cluster"] == selected_cluster].copy()
+    filtered_cluster_df = apply_pca_filters(cluster_df, pca_filters)
+    if pca_filters:
+        st.caption(
+            "Active PCA filters: "
+            + "; ".join(format_pca_filter(pca_filter) for pca_filter in pca_filters)
+        )
+
     umap_signature = build_umap_signature(
         selected_cluster=selected_cluster,
         selected_features=selected_features,
+        pca_filters=pca_filters,
         n_neighbors=n_neighbors,
         min_dist=min_dist,
         max_objects=int(max_objects),
@@ -1256,13 +1459,19 @@ def main() -> None:
     recalculate_umap = st.sidebar.button(
         button_label,
         type="primary" if needs_recalculation else "secondary",
-        disabled=(not selected_features) or (not needs_recalculation and "umap_embedding_df" in st.session_state),
+        disabled=(not selected_features)
+        or len(filtered_cluster_df) < 3
+        or (not needs_recalculation and "umap_embedding_df" in st.session_state),
         on_click=collapse_cluster_summary,
     )
 
+    if len(filtered_cluster_df) < 3:
+        st.warning("At least 3 objects must remain after PCA filters to compute UMAP.")
+        st.stop()
+
     if recalculate_umap:
-        cluster_df = add_cluster_extreme_roles(cluster_df, selected_features)
-        display_df = sample_for_display(cluster_df, int(max_objects))
+        filtered_cluster_df = add_cluster_extreme_roles(filtered_cluster_df, selected_features)
+        display_df = sample_for_display(filtered_cluster_df, int(max_objects))
 
         if len(display_df) < 3:
             st.warning("At least 3 objects are required to compute UMAP.")
@@ -1291,8 +1500,9 @@ def main() -> None:
 
     embedding_df = st.session_state["umap_embedding_df"]
 
-    cluster_left, cluster_middle, cluster_right, cluster_fourth = st.columns(4)
+    cluster_left, cluster_filtered, cluster_middle, cluster_right, cluster_fourth = st.columns(5)
     cluster_left.metric("Cluster objects", f"{len(cluster_df):,}")
+    cluster_filtered.metric("After filters", f"{len(filtered_cluster_df):,}")
     cluster_middle.metric("Objects in UMAP", f"{len(embedding_df):,}")
     cluster_right.metric("Lenses in UMAP", f"{int(embedding_df['is_lens'].sum()):,}")
     cluster_fourth.metric("Extremes", "2")

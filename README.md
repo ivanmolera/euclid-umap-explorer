@@ -31,6 +31,7 @@ The `data/` directories in this repository are placeholders for local developmen
 - Runs BIRCH clustering with all available PCA components.
 - Runs BIRCH clustering on demand.
 - Allows the user to select a cluster, PCA components, and UMAP parameters.
+- Supports multiple PCA threshold filters before computing UMAP.
 - Scales selected features with `StandardScaler`.
 - Computes a 2D UMAP embedding.
 - Visualizes the embedding with Plotly.
