@@ -41,6 +41,16 @@ The `data/` directories in this repository are placeholders for local developmen
 - Shows selected-object metadata, lens status, UMAP coordinates, selected PCA values, and available images.
 - Loads morphology cutouts and lens images on demand from `CUTOUT_BASE` and `LENS_IMG_BASE`.
 
+## Screenshots
+
+### Cluster Summary
+
+![Cluster summary with visual examples and PCA histograms](docs/images/clustering.png)
+
+### UMAP Explorer
+
+![UMAP view with selected object details](docs/images/umap.png)
+
 ## Configuration
 
 Set the required catalogue and image paths through environment variables:
