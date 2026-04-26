@@ -28,15 +28,16 @@ The `data/` directories in this repository are placeholders for local developmen
 - Derives `object_id` from `id_str` when required.
 - Loads a strong-lensing catalogue and joins it with the PCA catalogue through `object_id`.
 - Allows the user to select lens grades used in the join (`A`, `B`, `C`).
-- Allows BIRCH clustering with either all PCA components or a selected PCA subset.
+- Uses one PCA component selection for BIRCH, UMAP, cluster examples, and PCA histograms.
+- Allows the analysis to run with either all PCA components or a selected PCA subset.
 - Runs BIRCH clustering on demand.
-- Allows the user to select a cluster and PCA components for UMAP.
+- Allows the user to select a cluster and UMAP parameters.
 - Scales selected features with `StandardScaler`.
 - Computes a 2D UMAP embedding.
 - Visualizes the embedding with Plotly.
 - Distinguishes non-lenses, lens grades, canonical objects, and anomalous objects.
 - Provides a visual cluster summary with canonical, anomalous, random, and lens examples.
-- Computes compact lens vs non-lens PCA histograms for clusters containing lenses.
+- Computes compact lens vs non-lens PCA histograms for clusters containing lenses, limited to six components on screen.
 - Supports point selection from the UMAP plot.
 - Shows selected-object metadata, lens status, UMAP coordinates, selected PCA values, and available images.
 - Loads morphology cutouts and lens images on demand from `CUTOUT_BASE` and `LENS_IMG_BASE`.
