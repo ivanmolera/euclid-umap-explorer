@@ -64,6 +64,11 @@ streamlit run app.py
 
 ## Data Sources
 
+The analysis uses Euclid Q1 catalogue products published on Zenodo:
+
+- [Euclid Quick Data Release (Q1): First visual morphology catalogue](https://zenodo.org/records/15106473)
+- [Euclid Quick Data Release (Q1): The Strong Lensing Discovery Engine](https://zenodo.org/records/15025832)
+
 Runtime data is expected to be available through the configured paths:
 
 - PCA representations: `PARQUET_PATH`
