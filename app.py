@@ -5,18 +5,10 @@ from io import BytesIO
 from pathlib import Path
 from typing import Iterable
 
-import gcsfs
 import numpy as np
 import pandas as pd
-import pyarrow as pa
-import pyarrow.dataset as ds
-import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
-import umap
 from PIL import Image
-from sklearn.cluster import Birch
-from sklearn.preprocessing import StandardScaler
 
 
 APP_TITLE = "Euclid UMAP Explorer"
@@ -112,7 +104,9 @@ def is_gcs_path(path: str) -> bool:
 
 
 @st.cache_resource(show_spinner=False)
-def gcs_filesystem() -> gcsfs.GCSFileSystem:
+def gcs_filesystem():
+    import gcsfs
+
     return gcsfs.GCSFileSystem()
 
 
@@ -346,6 +340,9 @@ def run_birch_clustering(
     branching_factor: int,
     batch_size: int,
 ) -> tuple[pd.DataFrame, list[str]]:
+    from sklearn.cluster import Birch
+    from sklearn.preprocessing import StandardScaler
+
     work_df, feature_cols = load_pca_catalog(parquet_path)
     lens_df = load_lens_catalog(lens_path, selected_grades)
 
@@ -483,6 +480,9 @@ def compute_umap_embedding(
     n_neighbors: int,
     min_dist: float,
 ) -> pd.DataFrame:
+    import umap
+    from sklearn.preprocessing import StandardScaler
+
     clean = data.dropna(subset=selected_features).copy()
     if clean.empty:
         return clean
@@ -506,6 +506,8 @@ def add_cluster_extreme_roles(
     data: pd.DataFrame,
     selected_features: list[str],
 ) -> pd.DataFrame:
+    from sklearn.preprocessing import StandardScaler
+
     marked = data.copy()
     marked["is_canonical"] = False
     marked["is_anomaly"] = False
@@ -614,6 +616,9 @@ def lens_image_path(lens_id_str: object) -> str | None:
 
 @st.cache_data(show_spinner=False)
 def load_morphology_object(morph_path: str, object_id: str) -> pd.DataFrame:
+    import pyarrow as pa
+    import pyarrow.dataset as ds
+
     if is_gcs_path(morph_path):
         return pd.DataFrame()
 
@@ -800,7 +805,7 @@ def build_cluster_distplot_figure(
     cluster_df: pd.DataFrame,
     feature: str,
     feature_index: int,
-) -> go.Figure | None:
+) -> object | None:
     from plotly.figure_factory._distplot import create_distplot
 
     lens_df = cluster_df[cluster_df["is_lens"]]
@@ -1060,10 +1065,14 @@ def main() -> None:
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     inject_plot_cursor_css()
     st.title(APP_TITLE)
+    loading_placeholder = st.empty()
+    loading_placeholder.info("Loading application...")
 
     required = [PARQUET_PATH, LENS_PATH]
-    missing = [path for path in required if not path_exists(path)]
+    with st.spinner("Loading application..."):
+        missing = [path for path in required if not path_exists(path)]
     if missing:
+        loading_placeholder.empty()
         st.error(
             "Required files were not found. Check the "
             "MORPH_PATH, PARQUET_PATH, LENS_PATH, "
@@ -1071,6 +1080,7 @@ def main() -> None:
         )
         st.code("\n".join(missing), language="text")
         st.stop()
+    loading_placeholder.empty()
 
     with st.sidebar:
         st.header("Data")
@@ -1313,6 +1323,8 @@ def main() -> None:
         )
         if column in embedding_df.columns
     ]
+
+    import plotly.express as px
 
     fig = px.scatter(
         embedding_df,
