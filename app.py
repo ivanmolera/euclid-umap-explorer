@@ -847,20 +847,21 @@ def build_cluster_distplot_figure(
         curve_type="kde",
         show_curve=show_curve,
         show_hist=True,
-        show_rug=False,
+        show_rug=True,
         histnorm="probability density",
     )
     fig.update_layout(
         title={"text": feature, "x": 0.5, "xanchor": "center"},
-        height=230,
-        margin={"l": 28, "r": 12, "t": 42, "b": 26},
+        height=300,
+        margin={"l": 28, "r": 12, "t": 42, "b": 28},
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
         barmode="overlay",
+        yaxis={"title": "density", "showgrid": True, "zeroline": False},
+        yaxis2={"showgrid": True, "showticklabels": False, "zeroline": False},
     )
     fig.update_traces(opacity=0.72, selector={"type": "histogram"})
     fig.update_traces(line={"width": 2.0}, selector={"mode": "lines"})
     fig.update_xaxes(showgrid=False, zeroline=False)
-    fig.update_yaxes(showgrid=True, zeroline=False, title_text="density")
     return fig
 
 
