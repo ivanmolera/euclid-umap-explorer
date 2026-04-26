@@ -10,9 +10,8 @@ The application reads catalogues and image assets at runtime from configurable p
 - Automatically detects `feat_pca_*` columns.
 - Derives `object_id` from `id_str` when required.
 - Loads a strong-lensing catalogue and joins it with the PCA catalogue through `object_id`.
-- Allows the user to select lens grades used in the join (`A`, `B`, `C`), with `A` and `B` selected by default.
+- Allows the user to select lens grades used in the join (`A`, `B`, `C`).
 - Runs BIRCH clustering on demand.
-- Selects by default the cluster with the highest lens density among clusters containing more than one lens.
 - Allows the user to select a cluster and PCA components for UMAP.
 - Scales selected features with `StandardScaler`.
 - Computes a 2D UMAP embedding.
