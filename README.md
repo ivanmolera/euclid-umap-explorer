@@ -84,6 +84,7 @@ streamlit run app.py
 
 After BIRCH clustering, the cluster summary combines numerical metrics and visual examples for each cluster:
 
+- clusters are ordered by the number of lenses found in each cluster, from highest to lowest,
 - canonical object, closest to the cluster centroid in the selected PCA feature space,
 - anomalous object, farthest from the cluster centroid,
 - three deterministic random examples from the cluster,

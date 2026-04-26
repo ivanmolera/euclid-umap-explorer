@@ -194,11 +194,11 @@ def prepare_catalog_cache(paths: list[str]) -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     copied_any = False
 
-    with st.status("Preparando catálogos en cache local", expanded=True) as status:
+    with st.status("Preparing catalogues in local cache", expanded=True) as status:
         st.write(f"Cache: `{CACHE_DIR}`")
         for path in paths:
             if is_gcs_path(path):
-                st.write(f"Usando catálogo en Cloud Storage: `{path}`")
+                st.write(f"Using catalogue in Cloud Storage: `{path}`")
                 continue
 
             source = Path(path)
@@ -208,29 +208,31 @@ def prepare_catalog_cache(paths: list[str]) -> None:
             size = source.stat().st_size
             target = cache_target_for_path(path)
             if target.exists() and target.stat().st_size == size:
-                st.write(f"Ya en cache: `{source.name}` ({format_bytes(size)})")
+                st.write(f"Already cached: `{source.name}` ({format_bytes(size)})")
                 continue
 
             copied_any = True
-            st.write(f"Copiando `{source.name}` ({format_bytes(size)}) desde el origen configurado...")
+            st.write(
+                f"Copying `{source.name}` ({format_bytes(size)}) from the configured source..."
+            )
             progress = st.progress(0.0, text=f"0 B / {format_bytes(size)}")
             try:
                 cached_input_path(path, progress=progress)
             except TimeoutError as exc:
                 progress.empty()
                 st.error(
-                    "El origen de datos ha agotado el tiempo al servir este fichero. "
-                    "Si usas una unidad sincronizada, márcalo como disponible sin conexión y vuelve a intentarlo."
+                    "The data source timed out while serving this file. "
+                    "If you are using a synchronized drive, make it available offline and try again."
                 )
-                status.update(label="No se pudo copiar un catálogo", state="error")
+                status.update(label="Could not copy a catalogue", state="error")
                 raise exc
             progress.empty()
-            st.write(f"Copiado: `{source.name}` ({format_bytes(size)})")
+            st.write(f"Copied: `{source.name}` ({format_bytes(size)})")
 
         if copied_any:
-            status.update(label="Catálogos copiados a cache local", state="complete")
+            status.update(label="Catalogues copied to local cache", state="complete")
         else:
-            status.update(label="Catálogos ya disponibles en cache local", state="complete")
+            status.update(label="Catalogues already available in local cache", state="complete")
 
 
 def detect_pca_columns(df: pd.DataFrame) -> list[str]:
@@ -270,7 +272,7 @@ def load_pca_catalog(parquet_path: str) -> tuple[pd.DataFrame, list[str]]:
     feature_cols = detect_pca_columns(df)
 
     if not feature_cols:
-        raise ValueError("No se encontraron columnas feat_pca_* en el parquet PCA.")
+        raise ValueError("No feat_pca_* columns were found in the PCA parquet file.")
 
     keep_cols = ["id_str", "object_id", "hdf5_loc", *feature_cols]
     keep_cols = [column for column in keep_cols if column in df.columns]
@@ -294,7 +296,7 @@ def normalize_lens_grades(grades: Iterable[str]) -> tuple[str, ...]:
 def load_lens_catalog(lens_path: str, selected_grades: tuple[str, ...]) -> pd.DataFrame:
     lens_df = pd.read_csv(cached_input_path(lens_path), dtype={"object_id": "string"})
     if "object_id" not in lens_df.columns:
-        raise ValueError("El catálogo de lentes debe contener object_id.")
+        raise ValueError("The lens catalogue must contain object_id.")
 
     lens_df = lens_df.copy()
     lens_df["object_id"] = normalize_object_ids(lens_df["object_id"])
@@ -396,7 +398,7 @@ def build_cluster_summary(clustered_df: pd.DataFrame) -> pd.DataFrame:
     )
     summary_df["lens_rate"] = summary_df["n_lenses"] / summary_df["n_objects"]
     summary_df = summary_df.sort_values(
-        ["lens_rate", "n_lenses", "n_objects", "cluster"],
+        ["n_lenses", "lens_rate", "n_objects", "cluster"],
         ascending=[False, False, False, True],
     )
     return summary_df
@@ -405,8 +407,8 @@ def build_cluster_summary(clustered_df: pd.DataFrame) -> pd.DataFrame:
 def format_cluster_option(row: pd.Series) -> str:
     return (
         f"Cluster {int(row['cluster'])} | "
-        f"{int(row['n_objects']):,} objetos | "
-        f"{int(row['n_lenses']):,} lentes | "
+        f"{int(row['n_objects']):,} objects | "
+        f"{int(row['n_lenses']):,} lenses | "
         f"{row['lens_rate'] * 100:.3f}%"
     )
 
@@ -659,7 +661,7 @@ def show_image(path: str, caption: str) -> None:
     try:
         image = Image.open(BytesIO(load_image_bytes(path)))
     except Exception as exc:
-        st.warning(f"No se pudo abrir la imagen: {exc}")
+        st.warning(f"Could not open the image: {exc}")
         return
     st.image(image, caption=caption, use_container_width=True)
 
@@ -682,20 +684,20 @@ def show_thumbnail(
 ) -> None:
     if row is None:
         st.caption(caption)
-        st.caption("Sin objeto")
+        st.caption("No object")
         return
 
     path = object_image_path(row, prefer_lens_image=prefer_lens_image)
     if path is None:
         st.caption(caption)
-        st.caption("Sin imagen")
+        st.caption("No image")
         return
 
     try:
         image = Image.open(BytesIO(load_image_bytes(path)))
     except Exception:
         st.caption(caption)
-        st.caption("Sin imagen")
+        st.caption("No image")
         return
 
     st.image(image, caption=caption, width=SUMMARY_THUMBNAIL_WIDTH)
@@ -832,9 +834,9 @@ def render_cluster_histograms(
 
     state_key = f"cluster_histograms_visible_{cluster_id}"
     button_label = (
-        "Actualizar histogramas PCA"
+        "Update PCA histograms"
         if st.session_state.get(state_key)
-        else "Calcular histogramas PCA"
+        else "Compute PCA histograms"
     )
     if st.button(button_label, key=f"cluster_histograms_button_{cluster_id}"):
         st.session_state[state_key] = True
@@ -843,7 +845,7 @@ def render_cluster_histograms(
         return
 
     if n_non_lenses == 0:
-        st.info("Este cluster no contiene objetos no-lente para comparar.")
+        st.info("This cluster does not contain non-lens objects for comparison.")
         return
 
     fig = build_cluster_histogram_figure(cluster_df, summary_features)
@@ -876,33 +878,33 @@ def render_cluster_visual_summary(
         with st.container(border=True):
             stats_cols = st.columns([1, 1, 1, 1])
             stats_cols[0].metric("Cluster", cluster_id)
-            stats_cols[1].metric("Objetos", f"{int(summary_row['n_objects']):,}")
-            stats_cols[2].metric("Lentes", f"{int(summary_row['n_lenses']):,}")
-            stats_cols[3].metric("Densidad", f"{summary_row['lens_rate'] * 100:.3f}%")
+            stats_cols[1].metric("Objects", f"{int(summary_row['n_objects']):,}")
+            stats_cols[2].metric("Lenses", f"{int(summary_row['n_lenses']):,}")
+            stats_cols[3].metric("Density", f"{summary_row['lens_rate'] * 100:.3f}%")
 
             image_cols = st.columns([2, 3, 5])
             with image_cols[0]:
                 show_thumbnail_group(
-                    "Canónico / anómalo",
+                    "Canonical / anomalous",
                     [canonical_row, anomaly_row],
-                    ["Canónico", "Anómalo"],
+                    ["Canonical", "Anomalous"],
                 )
             with image_cols[1]:
                 show_thumbnail_group(
-                    "Aleatorios",
+                    "Random",
                     random_rows,
-                    [f"Aleatorio {index + 1}" for index in range(len(random_rows))],
+                    [f"Random {index + 1}" for index in range(len(random_rows))],
                 )
             with image_cols[2]:
                 lens_captions = []
                 for row in lens_rows:
                     lens_grade = row.get("lens_grade", "")
                     if pd.isna(lens_grade) or not str(lens_grade).strip():
-                        lens_captions.append("Grado ?")
+                        lens_captions.append("Grade ?")
                     else:
-                        lens_captions.append(f"Grado {str(lens_grade).strip()}")
+                        lens_captions.append(f"Grade {str(lens_grade).strip()}")
                 show_thumbnail_group(
-                    "Lentes confirmadas",
+                    "Confirmed lenses",
                     lens_rows,
                     lens_captions,
                     prefer_lens_image=True,
@@ -918,13 +920,13 @@ def show_lens_status(row: pd.Series) -> None:
         lens_grade_text = f"Grade: {lens_grade}"
 
     if is_lens:
-        label = "LENTE"
+        label = "LENS"
         css_class = "lens-status--yes"
-        meta = lens_grade_text or "Objeto presente en el catálogo de strong lenses."
+        meta = lens_grade_text or "Object present in the strong-lensing catalogue."
     else:
-        label = "NO LENTE"
+        label = "NOT LENS"
         css_class = "lens-status--no"
-        meta = "Objeto no marcado como lente en el catálogo cruzado."
+        meta = "Object not marked as a lens in the joined catalogue."
 
     st.markdown(
         f"""
@@ -938,7 +940,7 @@ def show_lens_status(row: pd.Series) -> None:
 
 
 def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
-    st.subheader("Objeto seleccionado")
+    st.subheader("Selected object")
     show_lens_status(row)
 
     details = {
@@ -955,7 +957,7 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
     }
     st.dataframe(pd.DataFrame([details]), use_container_width=True, hide_index=True)
 
-    st.markdown("**Componentes PCA usadas**")
+    st.markdown("**Selected PCA components**")
     st.dataframe(
         pd.DataFrame(
             [{"feature": feature, "value": row.get(feature)} for feature in selected_features]
@@ -966,13 +968,10 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
 
     morphology_df = load_morphology_object(MORPH_PATH, str(row.get("object_id", "")))
     if not morphology_df.empty:
-        with st.expander("Fila del catálogo morfológico", expanded=False):
+        with st.expander("Morphology catalogue row", expanded=False):
+            morph_display = morphology_df.iloc[0].dropna().astype(str).reset_index()
             morph_display = (
-                morphology_df.iloc[0]
-                .dropna()
-                .astype(str)
-                .reset_index()
-                .rename(columns={"index": "campo", 0: "valor"})
+                morph_display.rename(columns={"index": "field", morph_display.columns[-1]: "value"})
             )
             st.dataframe(morph_display, use_container_width=True, hide_index=True)
 
@@ -982,13 +981,13 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
         lens_path = lens_image_path(row.get("id_str"))
 
     if cutout_path is None and lens_path is None:
-        st.info("No se encontró imagen asociada en las rutas configuradas.")
+        st.info("No associated image was found in the configured paths.")
         return
 
     if cutout_path is not None:
-        show_image(cutout_path, "Cutout morfológico")
+        show_image(cutout_path, "Morphology cutout")
     if lens_path is not None:
-        show_image(lens_path, "Imagen strong lens")
+        show_image(lens_path, "Strong-lens image")
 
 
 def validate_paths() -> pd.DataFrame:
@@ -1017,23 +1016,23 @@ def main() -> None:
     st.title(APP_TITLE)
 
     with st.sidebar:
-        st.header("Datos")
-        with st.expander("Rutas configuradas", expanded=False):
+        st.header("Data")
+        with st.expander("Configured paths", expanded=False):
             st.dataframe(validate_paths(), use_container_width=True, hide_index=True)
             st.caption(
-                "La cache local solo copia catálogos individuales. "
-                "CUTOUT_BASE y LENS_IMG_BASE no se copian; las imágenes se leen bajo demanda."
+                "The local cache only copies individual catalogues. "
+                "CUTOUT_BASE and LENS_IMG_BASE are not copied; images are read on demand."
             )
 
-        st.header("Lentes")
+        st.header("Lenses")
         selected_lens_grades = st.multiselect(
-            "Grados de lentes",
+            "Lens grades",
             LENS_GRADE_OPTIONS,
             default=DEFAULT_LENS_GRADES,
         )
         selected_lens_grades = normalize_lens_grades(selected_lens_grades)
 
-        st.header("Clusterización BIRCH")
+        st.header("BIRCH clustering")
         threshold = st.number_input("threshold", min_value=0.1, value=8.0, step=0.1)
         branching_factor = st.number_input(
             "branching_factor",
@@ -1048,22 +1047,22 @@ def main() -> None:
             value=25_000,
             step=1_000,
         )
-        run_clustering = st.button("Ejecutar clusterización", type="primary")
+        run_clustering = st.button("Run clustering", type="primary")
 
     required = [PARQUET_PATH, LENS_PATH]
     missing = [path for path in required if not path_exists(path)]
     if missing:
         st.error(
-            "No se encuentran los ficheros necesarios. Revisa "
-            "las variables de entorno MORPH_PATH, PARQUET_PATH, LENS_PATH, "
-            "CUTOUT_BASE y LENS_IMG_BASE."
+            "Required files were not found. Check the "
+            "MORPH_PATH, PARQUET_PATH, LENS_PATH, "
+            "CUTOUT_BASE and LENS_IMG_BASE environment variables."
         )
         st.code("\n".join(missing), language="text")
         st.stop()
 
     if run_clustering:
         if not selected_lens_grades:
-            st.warning("Selecciona al menos un grado de lentes para clusterizar.")
+            st.warning("Select at least one lens grade before clustering.")
             st.stop()
 
         st.session_state["cluster_ready"] = True
@@ -1075,10 +1074,10 @@ def main() -> None:
         }
 
     if not st.session_state.get("cluster_ready"):
-        st.info("Pulsa **Ejecutar clusterización** para generar los clusters BIRCH.")
+        st.info("Click **Run clustering** to generate the BIRCH clusters.")
         st.stop()
 
-    # Solo cacheamos catálogos individuales. Las carpetas de imágenes se leen bajo demanda.
+    # Only individual catalogues are cached. Image folders are read on demand.
     prepare_catalog_cache([PARQUET_PATH, LENS_PATH])
 
     params = st.session_state["cluster_params"]
@@ -1094,15 +1093,15 @@ def main() -> None:
         )
     except TimeoutError as exc:
         st.error(
-            "El origen de datos ha agotado el tiempo leyendo un catálogo. "
-            "Si usas una unidad sincronizada, marca los ficheros como disponibles sin conexión o copia primero a la cache local."
+            "The data source timed out while reading a catalogue. "
+            "If you are using a synchronized drive, make the files available offline or copy them to local cache first."
         )
         st.exception(exc)
         st.stop()
     except OSError as exc:
         st.error(
-            "No se pudo leer un catálogo desde las rutas configuradas. "
-            "Si usas una unidad sincronizada, comprueba que los ficheros estén disponibles sin conexión."
+            "Could not read a catalogue from the configured paths. "
+            "If you are using a synchronized drive, check that the files are available offline."
         )
         st.exception(exc)
         st.stop()
@@ -1111,12 +1110,12 @@ def main() -> None:
     cluster_summary_df["option"] = cluster_summary_df.apply(format_cluster_option, axis=1)
 
     left_metric, middle_metric, right_metric = st.columns(3)
-    left_metric.metric("Objetos clusterizados", f"{len(clustered_df):,}")
+    left_metric.metric("Clustered objects", f"{len(clustered_df):,}")
     middle_metric.metric("Clusters", f"{clustered_df['cluster'].nunique():,}")
-    right_metric.metric("Lentes", f"{int(clustered_df['is_lens'].sum()):,}")
-    st.caption(f"Grados de lentes usados: {', '.join(lens_grades)}")
+    right_metric.metric("Lenses", f"{int(clustered_df['is_lens'].sum()):,}")
+    st.caption(f"Lens grades used: {', '.join(lens_grades)}")
 
-    with st.expander("Resumen de clusters", expanded=False):
+    with st.expander("Cluster summary", expanded=False):
         summary_display = cluster_summary_df.copy()
         summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
         st.dataframe(
@@ -1144,16 +1143,16 @@ def main() -> None:
             feature for feature in DEFAULT_CLUSTER_FEATURES if feature in pca_columns
         ] or pca_columns[: min(6, len(pca_columns))]
         selected_features = st.multiselect(
-            "Componentes PCA",
+            "PCA components",
             pca_columns,
             default=default_features,
         )
         n_neighbors = st.slider("n_neighbors", 2, 100, 25)
         min_dist = st.slider("min_dist", 0.0, 1.0, 0.15, step=0.01)
-        max_objects = st.slider("Máximo de objetos", 100, 100_000, 20_000, step=100)
+        max_objects = st.slider("Maximum objects", 100, 100_000, 20_000, step=100)
 
     if not selected_features:
-        st.warning("Selecciona al menos una componente PCA para construir UMAP.")
+        st.warning("Select at least one PCA component to build UMAP.")
         st.stop()
 
     cluster_df = clustered_df[clustered_df["cluster"] == selected_cluster].copy()
@@ -1168,7 +1167,7 @@ def main() -> None:
     stored_signature = st.session_state.get("umap_signature")
     needs_recalculation = stored_signature != umap_signature
 
-    button_label = "Calcular UMAP" if stored_signature is None else "Recalcular UMAP"
+    button_label = "Compute UMAP" if stored_signature is None else "Recompute UMAP"
     recalculate_umap = st.sidebar.button(
         button_label,
         type="primary" if needs_recalculation else "secondary",
@@ -1180,7 +1179,7 @@ def main() -> None:
         display_df = sample_for_display(cluster_df, int(max_objects))
 
         if len(display_df) < 3:
-            st.warning("Se necesitan al menos 3 objetos para calcular UMAP.")
+            st.warning("At least 3 objects are required to compute UMAP.")
             st.stop()
 
         embedding_df = compute_umap_embedding(
@@ -1191,7 +1190,7 @@ def main() -> None:
         )
 
         if embedding_df.empty:
-            st.warning("No quedan objetos con valores completos para las componentes seleccionadas.")
+            st.warning("No objects remain with complete values for the selected components.")
             st.stop()
 
         embedding_df = embedding_df.reset_index(drop=True)
@@ -1201,16 +1200,16 @@ def main() -> None:
         needs_recalculation = False
 
     if needs_recalculation or "umap_embedding_df" not in st.session_state:
-        st.info("Pulsa **Calcular UMAP** o **Recalcular UMAP** para actualizar la visualización.")
+        st.info("Click **Compute UMAP** or **Recompute UMAP** to update the visualization.")
         st.stop()
 
     embedding_df = st.session_state["umap_embedding_df"]
 
     cluster_left, cluster_middle, cluster_right, cluster_fourth = st.columns(4)
-    cluster_left.metric("Objetos del cluster", f"{len(cluster_df):,}")
-    cluster_middle.metric("Objetos en UMAP", f"{len(embedding_df):,}")
-    cluster_right.metric("Lentes en UMAP", f"{int(embedding_df['is_lens'].sum()):,}")
-    cluster_fourth.metric("Extremos", "2")
+    cluster_left.metric("Cluster objects", f"{len(cluster_df):,}")
+    cluster_middle.metric("Objects in UMAP", f"{len(embedding_df):,}")
+    cluster_right.metric("Lenses in UMAP", f"{int(embedding_df['is_lens'].sum()):,}")
+    cluster_fourth.metric("Extremes", "2")
 
     embedding_df = embedding_df.copy()
     if "lens_grade" in embedding_df.columns:
@@ -1270,7 +1269,7 @@ def main() -> None:
         category_orders={
             "point_role": ["No lens", "Lens", "Canonical", "Anomaly"],
         },
-        labels={"umap_1": "UMAP 1", "umap_2": "UMAP 2", "point_role": "Tipo"},
+        labels={"umap_1": "UMAP 1", "umap_2": "UMAP 2", "point_role": "Type"},
         height=680,
     )
     fig.update_traces(marker={"size": 7, "opacity": 0.72})
@@ -1305,7 +1304,7 @@ def main() -> None:
 
     fig.update_layout(
         title=f"Cluster {selected_cluster} | UMAP",
-        legend_title_text="Objeto",
+        legend_title_text="Object",
         margin={"l": 10, "r": 10, "t": 50, "b": 10},
         clickmode="event+select",
         dragmode="zoom",
@@ -1330,7 +1329,7 @@ def main() -> None:
     selected_index = selected_point_index(event)
     with detail_col:
         if selected_index is None:
-            st.info("Selecciona un punto del mapa para ver sus detalles e imagen.")
+            st.info("Select a point on the map to view its details and image.")
         else:
             show_object_details(embedding_df.loc[selected_index], selected_features)
 
