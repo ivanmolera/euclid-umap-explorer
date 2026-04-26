@@ -15,7 +15,6 @@ import plotly.graph_objects as go
 import streamlit as st
 import umap
 from PIL import Image
-from plotly.subplots import make_subplots
 from sklearn.cluster import Birch
 from sklearn.preprocessing import StandardScaler
 
@@ -60,6 +59,7 @@ SUMMARY_LENS_OBJECTS = 5
 SUMMARY_THUMBNAIL_WIDTH = 96
 SUMMARY_HISTOGRAM_BINS = 24
 SUMMARY_HISTOGRAM_FEATURE_LIMIT = 6
+SUMMARY_DISTPLOT_MAX_POINTS_PER_GROUP = 5_000
 
 
 def inject_plot_cursor_css() -> None:
@@ -777,63 +777,78 @@ def cluster_visual_rows(
     )
 
 
-def build_cluster_histogram_figure(
+def sample_distplot_values(values: pd.Series, random_state: int) -> list[float]:
+    clean_values = values.dropna()
+    if len(clean_values) > SUMMARY_DISTPLOT_MAX_POINTS_PER_GROUP:
+        clean_values = clean_values.sample(
+            n=SUMMARY_DISTPLOT_MAX_POINTS_PER_GROUP,
+            random_state=random_state,
+        )
+    return clean_values.astype(float).tolist()
+
+
+def feature_bin_size(values: list[float]) -> float:
+    if len(values) < 2:
+        return 1.0
+    value_range = max(values) - min(values)
+    if value_range <= 0:
+        return 1.0
+    return value_range / SUMMARY_HISTOGRAM_BINS
+
+
+def build_cluster_distplot_figure(
     cluster_df: pd.DataFrame,
-    features: list[str],
-) -> go.Figure:
-    n_columns = 2
-    n_rows = int(np.ceil(len(features) / n_columns))
-    fig = make_subplots(
-        rows=n_rows,
-        cols=n_columns,
-        subplot_titles=features,
-        horizontal_spacing=0.08,
-        vertical_spacing=0.22,
-    )
+    feature: str,
+    feature_index: int,
+) -> go.Figure | None:
+    from plotly.figure_factory._distplot import create_distplot
 
     lens_df = cluster_df[cluster_df["is_lens"]]
     non_lens_df = cluster_df[~cluster_df["is_lens"]]
-
-    for index, feature in enumerate(features):
-        row = (index // n_columns) + 1
-        column = (index % n_columns) + 1
-        show_legend = index == 0
-
-        fig.add_trace(
-            go.Histogram(
-                x=non_lens_df[feature].dropna(),
-                name="No lens",
-                marker={"color": "#4c78a8"},
-                opacity=0.62,
-                histnorm="probability",
-                nbinsx=SUMMARY_HISTOGRAM_BINS,
-                showlegend=show_legend,
-            ),
-            row=row,
-            col=column,
-        )
-        fig.add_trace(
-            go.Histogram(
-                x=lens_df[feature].dropna(),
-                name="Lens",
-                marker={"color": "#d62728"},
-                opacity=0.72,
-                histnorm="probability",
-                nbinsx=SUMMARY_HISTOGRAM_BINS,
-                showlegend=show_legend,
-            ),
-            row=row,
-            col=column,
-        )
-
-    fig.update_layout(
-        barmode="overlay",
-        height=max(260, 170 * n_rows),
-        margin={"l": 20, "r": 10, "t": 45, "b": 25},
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
+    non_lens_values = sample_distplot_values(
+        non_lens_df[feature],
+        random_state=feature_index + 101,
     )
+    lens_values = sample_distplot_values(
+        lens_df[feature],
+        random_state=feature_index + 701,
+    )
+
+    hist_data = []
+    group_labels = []
+    colors = []
+    if non_lens_values:
+        hist_data.append(non_lens_values)
+        group_labels.append("No lens")
+        colors.append("#4c78a8")
+    if lens_values:
+        hist_data.append(lens_values)
+        group_labels.append("Lens")
+        colors.append("#d62728")
+    if not hist_data:
+        return None
+
+    all_values = [value for values in hist_data for value in values]
+    fig = create_distplot(
+        hist_data,
+        group_labels,
+        bin_size=feature_bin_size(all_values),
+        colors=colors,
+        show_curve=False,
+        show_hist=True,
+        show_rug=False,
+        histnorm="probability density",
+    )
+    fig.update_layout(
+        title={"text": feature, "x": 0.5, "xanchor": "center"},
+        height=230,
+        margin={"l": 28, "r": 12, "t": 42, "b": 26},
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
+        barmode="overlay",
+    )
+    fig.update_traces(opacity=0.72, selector={"type": "histogram"})
     fig.update_xaxes(showgrid=False, zeroline=False)
-    fig.update_yaxes(showgrid=True, zeroline=False, title_text="prob.")
+    fig.update_yaxes(showgrid=True, zeroline=False, title_text="density")
     return fig
 
 
@@ -863,13 +878,18 @@ def render_cluster_histograms(
         st.info("This cluster does not contain non-lens objects for comparison.")
         return
 
-    fig = build_cluster_histogram_figure(cluster_df, summary_features)
-    st.plotly_chart(
-        fig,
-        use_container_width=True,
-        config={"displaylogo": False, "responsive": True},
-        key=f"cluster_histograms_chart_{cluster_id}",
-    )
+    chart_columns = st.columns(2)
+    for index, feature in enumerate(summary_features):
+        fig = build_cluster_distplot_figure(cluster_df, feature, index)
+        if fig is None:
+            continue
+        with chart_columns[index % 2]:
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+                config={"displaylogo": False, "responsive": True},
+                key=f"cluster_distplot_chart_{cluster_id}_{feature}",
+            )
 
 
 def render_cluster_visual_summary(
