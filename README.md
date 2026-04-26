@@ -79,6 +79,17 @@ Runtime data is expected to be available through the configured paths:
 
 The `data/` directories in this repository are placeholders for local development workflows.
 
+## Cluster Summary
+
+After BIRCH clustering, the cluster summary combines numerical metrics and visual examples for each cluster:
+
+- canonical object, closest to the cluster centroid in the selected PCA feature space,
+- anomalous object, farthest from the cluster centroid,
+- three deterministic random examples from the cluster,
+- up to five lens examples, ordered by grade `A`, then `B`, then `C`.
+
+Lens examples use the lens image when available and fall back to the morphology cutout otherwise.
+
 ## Cloud Run Deployment
 
 Example deployment command:
