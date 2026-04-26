@@ -1018,6 +1018,10 @@ def validate_paths() -> pd.DataFrame:
     )
 
 
+def request_clustering() -> None:
+    st.session_state["cluster_requested"] = True
+
+
 def main() -> None:
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     inject_plot_cursor_css()
@@ -1052,24 +1056,33 @@ def main() -> None:
         selected_lens_grades = normalize_lens_grades(selected_lens_grades)
 
         st.header("BIRCH clustering")
-        st.caption("BIRCH clustering always uses all available PCA components.")
-        threshold = st.number_input("threshold", min_value=0.1, value=8.0, step=0.1)
-        branching_factor = st.number_input(
-            "branching_factor",
-            min_value=2,
-            value=2,
-            step=1,
+        birch_expanded = not st.session_state.get("cluster_ready") and not st.session_state.get(
+            "cluster_requested"
         )
-        batch_size = st.number_input(
-            "batch_size",
-            min_value=1_000,
-            max_value=250_000,
-            value=25_000,
-            step=1_000,
-        )
-        run_clustering = st.button("Run clustering", type="primary")
+        with st.expander("BIRCH parameters", expanded=birch_expanded):
+            st.caption("All available PCA components are used for the initial clustering")
+            threshold = st.number_input("threshold", min_value=0.1, value=8.0, step=0.1)
+            branching_factor = st.number_input(
+                "branching_factor",
+                min_value=2,
+                value=2,
+                step=1,
+            )
+            batch_size = st.number_input(
+                "batch_size",
+                min_value=1_000,
+                max_value=250_000,
+                value=25_000,
+                step=1_000,
+            )
+            run_clustering = st.button(
+                "Run clustering",
+                type="primary",
+                on_click=request_clustering,
+            )
 
-    if run_clustering:
+    clustering_requested = st.session_state.pop("cluster_requested", False)
+    if run_clustering or clustering_requested:
         if not selected_lens_grades:
             st.warning("Select at least one lens grade before clustering.")
             st.stop()
@@ -1123,12 +1136,18 @@ def main() -> None:
     middle_metric.metric("Clusters", f"{clustered_df['cluster'].nunique():,}")
     right_metric.metric("Lenses", f"{int(clustered_df['is_lens'].sum()):,}")
     st.caption(f"Lens grades used: {', '.join(lens_grades)}")
-    st.caption(
-        "PCA components used for clustering: "
-        f"all {len(pca_columns)} available components"
-    )
 
     with st.sidebar:
+        st.header("PCA components")
+        default_features = [
+            feature for feature in DEFAULT_CLUSTER_FEATURES if feature in pca_columns
+        ] or pca_columns[: min(4, len(pca_columns))]
+        selected_features = st.multiselect(
+            "PCA components",
+            pca_columns,
+            default=default_features,
+        )
+
         st.header("UMAP")
         selected_option = st.selectbox(
             "Cluster",
@@ -1142,17 +1161,10 @@ def main() -> None:
             ].iloc[0]
         )
 
-        default_features = [
-            feature for feature in DEFAULT_CLUSTER_FEATURES if feature in pca_columns
-        ] or pca_columns[: min(4, len(pca_columns))]
-        selected_features = st.multiselect(
-            "PCA components",
-            pca_columns,
-            default=default_features,
-        )
-        n_neighbors = st.slider("n_neighbors", 2, 100, 25)
-        min_dist = st.slider("min_dist", 0.0, 1.0, 0.15, step=0.01)
-        max_objects = st.slider("Maximum objects", 100, 100_000, 20_000, step=100)
+        with st.expander("UMAP parameters", expanded=True):
+            n_neighbors = st.slider("n_neighbors", 2, 100, 25)
+            min_dist = st.slider("min_dist", 0.0, 1.0, 0.15, step=0.01)
+            max_objects = st.slider("Maximum objects", 100, 100_000, 20_000, step=100)
 
     if not selected_features:
         st.warning("Select at least one PCA component to build UMAP.")
