@@ -4,6 +4,23 @@ Streamlit web application for exploring Euclid astronomical-object clusters with
 
 The application reads catalogues and image assets at runtime from configurable paths. Google Cloud Storage paths are supported through `gs://` URIs.
 
+## Data Sources
+
+The analysis uses Euclid Q1 catalogue products published on Zenodo:
+
+- [Euclid Quick Data Release (Q1): First visual morphology catalogue](https://zenodo.org/records/15106473)
+- [Euclid Quick Data Release (Q1): The Strong Lensing Discovery Engine](https://zenodo.org/records/15025832)
+
+Runtime data is expected to be available through the configured paths:
+
+- PCA representations: `PARQUET_PATH`
+- Strong-lensing catalogue: `LENS_PATH`
+- Morphology cutouts: `CUTOUT_BASE`
+- Strong-lens images: `LENS_IMG_BASE`
+- Optional morphology catalogue: `MORPH_PATH`
+
+The `data/` directories in this repository are placeholders for local development workflows.
+
 ## Features
 
 - Loads the PCA catalogue `representations_pca_40.parquet`.
@@ -18,6 +35,7 @@ The application reads catalogues and image assets at runtime from configurable p
 - Visualizes the embedding with Plotly.
 - Distinguishes non-lenses, lens grades, canonical objects, and anomalous objects.
 - Provides a visual cluster summary with canonical, anomalous, random, and lens examples.
+- Computes compact lens vs non-lens PCA histograms for clusters containing lenses.
 - Supports point selection from the UMAP plot.
 - Shows selected-object metadata, lens status, UMAP coordinates, selected PCA values, and available images.
 - Loads morphology cutouts and lens images on demand from `CUTOUT_BASE` and `LENS_IMG_BASE`.
@@ -62,23 +80,6 @@ Configure the environment variables and start Streamlit:
 streamlit run app.py
 ```
 
-## Data Sources
-
-The analysis uses Euclid Q1 catalogue products published on Zenodo:
-
-- [Euclid Quick Data Release (Q1): First visual morphology catalogue](https://zenodo.org/records/15106473)
-- [Euclid Quick Data Release (Q1): The Strong Lensing Discovery Engine](https://zenodo.org/records/15025832)
-
-Runtime data is expected to be available through the configured paths:
-
-- PCA representations: `PARQUET_PATH`
-- Strong-lensing catalogue: `LENS_PATH`
-- Morphology cutouts: `CUTOUT_BASE`
-- Strong-lens images: `LENS_IMG_BASE`
-- Optional morphology catalogue: `MORPH_PATH`
-
-The `data/` directories in this repository are placeholders for local development workflows.
-
 ## Cluster Summary
 
 After BIRCH clustering, the cluster summary combines numerical metrics and visual examples for each cluster:
@@ -89,6 +90,8 @@ After BIRCH clustering, the cluster summary combines numerical metrics and visua
 - up to five lens examples, ordered by grade `A`, then `B`, then `C`.
 
 Lens examples use the lens image when available and fall back to the morphology cutout otherwise.
+
+For clusters containing lenses, the summary row includes an on-demand PCA histogram comparison between lens and non-lens objects.
 
 ## Cloud Run Deployment
 

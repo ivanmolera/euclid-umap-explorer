@@ -11,9 +11,11 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as ds
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 import umap
 from PIL import Image
+from plotly.subplots import make_subplots
 from sklearn.cluster import Birch
 from sklearn.preprocessing import StandardScaler
 
@@ -56,6 +58,7 @@ LENS_GRADE_OPTIONS = ["A", "B", "C"]
 SUMMARY_RANDOM_OBJECTS = 3
 SUMMARY_LENS_OBJECTS = 5
 SUMMARY_THUMBNAIL_WIDTH = 96
+SUMMARY_HISTOGRAM_BINS = 24
 
 
 def inject_plot_cursor_css() -> None:
@@ -757,6 +760,101 @@ def cluster_visual_rows(
     )
 
 
+def build_cluster_histogram_figure(
+    cluster_df: pd.DataFrame,
+    features: list[str],
+) -> go.Figure:
+    n_columns = 2
+    n_rows = int(np.ceil(len(features) / n_columns))
+    fig = make_subplots(
+        rows=n_rows,
+        cols=n_columns,
+        subplot_titles=features,
+        horizontal_spacing=0.08,
+        vertical_spacing=0.22,
+    )
+
+    lens_df = cluster_df[cluster_df["is_lens"]]
+    non_lens_df = cluster_df[~cluster_df["is_lens"]]
+
+    for index, feature in enumerate(features):
+        row = (index // n_columns) + 1
+        column = (index % n_columns) + 1
+        show_legend = index == 0
+
+        fig.add_trace(
+            go.Histogram(
+                x=non_lens_df[feature].dropna(),
+                name="No lens",
+                marker={"color": "#4c78a8"},
+                opacity=0.62,
+                histnorm="probability",
+                nbinsx=SUMMARY_HISTOGRAM_BINS,
+                showlegend=show_legend,
+            ),
+            row=row,
+            col=column,
+        )
+        fig.add_trace(
+            go.Histogram(
+                x=lens_df[feature].dropna(),
+                name="Lens",
+                marker={"color": "#d62728"},
+                opacity=0.72,
+                histnorm="probability",
+                nbinsx=SUMMARY_HISTOGRAM_BINS,
+                showlegend=show_legend,
+            ),
+            row=row,
+            col=column,
+        )
+
+    fig.update_layout(
+        barmode="overlay",
+        height=max(260, 170 * n_rows),
+        margin={"l": 20, "r": 10, "t": 45, "b": 25},
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
+    )
+    fig.update_xaxes(showgrid=False, zeroline=False)
+    fig.update_yaxes(showgrid=True, zeroline=False, title_text="prob.")
+    return fig
+
+
+def render_cluster_histograms(
+    cluster_id: int,
+    cluster_df: pd.DataFrame,
+    summary_features: list[str],
+) -> None:
+    n_lenses = int(cluster_df["is_lens"].sum())
+    n_non_lenses = len(cluster_df) - n_lenses
+    if n_lenses == 0:
+        return
+
+    state_key = f"cluster_histograms_visible_{cluster_id}"
+    button_label = (
+        "Actualizar histogramas PCA"
+        if st.session_state.get(state_key)
+        else "Calcular histogramas PCA"
+    )
+    if st.button(button_label, key=f"cluster_histograms_button_{cluster_id}"):
+        st.session_state[state_key] = True
+
+    if not st.session_state.get(state_key):
+        return
+
+    if n_non_lenses == 0:
+        st.info("Este cluster no contiene objetos no-lente para comparar.")
+        return
+
+    fig = build_cluster_histogram_figure(cluster_df, summary_features)
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displaylogo": False, "responsive": True},
+        key=f"cluster_histograms_chart_{cluster_id}",
+    )
+
+
 def render_cluster_visual_summary(
     clustered_df: pd.DataFrame,
     cluster_summary_df: pd.DataFrame,
@@ -809,6 +907,7 @@ def render_cluster_visual_summary(
                     lens_captions,
                     prefer_lens_image=True,
                 )
+            render_cluster_histograms(cluster_id, cluster_df, summary_features)
 
 
 def show_lens_status(row: pd.Series) -> None:
