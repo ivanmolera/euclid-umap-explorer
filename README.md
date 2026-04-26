@@ -1,29 +1,30 @@
 # Euclid UMAP Explorer
 
-Aplicación web en Streamlit para explorar clusters de objetos astronómicos Euclid mediante UMAP, cruzando el catálogo PCA/morfológico con un catálogo de strong lenses.
+Streamlit web application for exploring Euclid astronomical-object clusters with UMAP, using PCA representations and a strong-lensing catalogue.
 
-La app está pensada para trabajar con datos pesados fuera del repositorio. Los catálogos e imágenes pueden leerse desde rutas locales o desde Google Cloud Storage usando rutas `gs://`.
+The application reads catalogues and image assets at runtime from configurable paths. Google Cloud Storage paths are supported through `gs://` URIs.
 
-## Funcionalidad
+## Features
 
-- Carga el catálogo PCA `representations_pca_40.parquet`.
-- Detecta automáticamente columnas `feat_pca_*`.
-- Extrae `object_id` desde `id_str` cuando hace falta.
-- Carga el catálogo de strong lenses y cruza ambos catálogos por `object_id`.
-- Permite elegir qué grados de lentes usar en el cruce (`A`, `B`, `C`), con `A` y `B` seleccionados por defecto.
-- Ejecuta clusterización BIRCH solo cuando el usuario pulsa el botón.
-- Permite seleccionar un cluster y componentes PCA para construir UMAP.
-- Selecciona por defecto el cluster con mayor densidad de lentes entre los que tienen más de una lente.
-- Calcula UMAP con escalado previo mediante `StandardScaler`.
-- Visualiza el embedding con Plotly.
-- Marca visualmente no lentes, lentes por grado, objeto canónico y objeto más anómalo.
-- Permite seleccionar puntos del mapa y ver detalles del objeto.
-- Muestra un indicador claro de `LENTE` / `NO LENTE`.
-- Carga cutouts e imágenes de lentes bajo demanda desde `CUTOUT_BASE` y `LENS_IMG_BASE`.
+- Loads the PCA catalogue `representations_pca_40.parquet`.
+- Automatically detects `feat_pca_*` columns.
+- Derives `object_id` from `id_str` when required.
+- Loads a strong-lensing catalogue and joins it with the PCA catalogue through `object_id`.
+- Allows the user to select lens grades used in the join (`A`, `B`, `C`), with `A` and `B` selected by default.
+- Runs BIRCH clustering on demand.
+- Selects by default the cluster with the highest lens density among clusters containing more than one lens.
+- Allows the user to select a cluster and PCA components for UMAP.
+- Scales selected features with `StandardScaler`.
+- Computes a 2D UMAP embedding.
+- Visualizes the embedding with Plotly.
+- Distinguishes non-lenses, lens grades, canonical objects, and anomalous objects.
+- Supports point selection from the UMAP plot.
+- Shows selected-object metadata, lens status, UMAP coordinates, selected PCA values, and available images.
+- Loads morphology cutouts and lens images on demand from `CUTOUT_BASE` and `LENS_IMG_BASE`.
 
-## Variables de entorno
+## Configuration
 
-La app usa estas rutas configurables:
+Set the required catalogue and image paths through environment variables:
 
 ```bash
 export PARQUET_PATH="gs://<bucket>/catalogues/morphology_catalogue/representations_pca_40.parquet"
@@ -33,18 +34,20 @@ export LENS_IMG_BASE="gs://<bucket>/catalogues/strong_lensing_catalogue/lens"
 export EUCLID_USE_LOCAL_CACHE=0
 ```
 
-Opcionalmente:
+Optional variables:
 
 ```bash
 export MORPH_PATH="gs://<bucket>/catalogues/morphology_catalogue/morphology_catalogue.parquet"
 export EUCLID_CACHE_DIR="$HOME/.cache/euclid-umap-explorer"
 ```
 
-`EUCLID_USE_LOCAL_CACHE=0` desactiva la copia local de catálogos. Es el valor recomendado cuando se leen datos desde `gs://`.
+`MORPH_PATH` is used to display the full morphology-catalogue row for the selected object when available.
 
-## Entorno local
+`EUCLID_USE_LOCAL_CACHE=0` disables local catalogue caching. This is the recommended setting for `gs://` paths.
 
-Requiere Python 3.11.
+## Local Setup
+
+Python 3.11 is required.
 
 ```bash
 python3.11 -m venv .venv
@@ -53,26 +56,27 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Después configura las variables de entorno y ejecuta:
+Configure the environment variables and start Streamlit:
 
 ```bash
 streamlit run app.py
 ```
 
-## Datos
+## Data Sources
 
-Los datos pesados no deben subirse al repositorio. Mantén fuera de GitHub:
+Runtime data is expected to be available through the configured paths:
 
-- catálogos Parquet/CSV grandes,
-- cutouts,
-- imágenes de lentes,
-- cualquier archivo generado por procesos de extracción o sincronización.
+- PCA representations: `PARQUET_PATH`
+- Strong-lensing catalogue: `LENS_PATH`
+- Morphology cutouts: `CUTOUT_BASE`
+- Strong-lens images: `LENS_IMG_BASE`
+- Optional morphology catalogue: `MORPH_PATH`
 
-Si usas rutas locales, puedes configurar las variables de entorno para apuntar a tu filesystem. Si usas Cloud Run, usa un backend accesible por el servicio, por ejemplo Google Cloud Storage.
+The `data/` directories in this repository are placeholders for local development workflows.
 
-## Despliegue en Cloud Run
+## Cloud Run Deployment
 
-Ejemplo de despliegue:
+Example deployment command:
 
 ```bash
 gcloud run deploy euclid-umap-app \
@@ -85,9 +89,9 @@ gcloud run deploy euclid-umap-app \
   --set-env-vars=PARQUET_PATH=gs://<bucket>/catalogues/morphology_catalogue/representations_pca_40.parquet,LENS_PATH=gs://<bucket>/catalogues/strong_lensing_catalogue/q1_discovery_engine_lens_catalog.csv,CUTOUT_BASE=gs://<bucket>/catalogues/morphology_catalogue/cutouts_jpg_gz_arcsinh_vis_only,LENS_IMG_BASE=gs://<bucket>/catalogues/strong_lensing_catalogue/lens,EUCLID_USE_LOCAL_CACHE=0
 ```
 
-El `Dockerfile` ejecuta Streamlit en el puerto indicado por Cloud Run mediante `$PORT`.
+The `Dockerfile` runs Streamlit on the Cloud Run `$PORT`.
 
-## Estructura
+## Repository Layout
 
 ```text
 .
