@@ -17,6 +17,7 @@ The application reads catalogues and image assets at runtime from configurable p
 - Computes a 2D UMAP embedding.
 - Visualizes the embedding with Plotly.
 - Distinguishes non-lenses, lens grades, canonical objects, and anomalous objects.
+- Provides a visual cluster summary with canonical, anomalous, random, and lens examples.
 - Supports point selection from the UMAP plot.
 - Shows selected-object metadata, lens status, UMAP coordinates, selected PCA values, and available images.
 - Loads morphology cutouts and lens images on demand from `CUTOUT_BASE` and `LENS_IMG_BASE`.

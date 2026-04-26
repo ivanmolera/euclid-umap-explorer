@@ -53,6 +53,9 @@ DEFAULT_CLUSTER_FEATURES = [
 ]
 DEFAULT_LENS_GRADES = ["A", "B"]
 LENS_GRADE_OPTIONS = ["A", "B", "C"]
+SUMMARY_RANDOM_OBJECTS = 3
+SUMMARY_LENS_OBJECTS = 5
+SUMMARY_THUMBNAIL_WIDTH = 96
 
 
 def inject_plot_cursor_css() -> None:
@@ -410,6 +413,18 @@ def default_cluster_option_index(cluster_summary_df: pd.DataFrame) -> int:
     return int(eligible_positions[0]) if len(eligible_positions) else 0
 
 
+def lens_grade_sort_key(series: pd.Series) -> pd.Series:
+    grade_order = {grade: index for index, grade in enumerate(LENS_GRADE_OPTIONS)}
+    return (
+        series.astype("string")
+        .str.strip()
+        .str.upper()
+        .map(grade_order)
+        .fillna(len(grade_order))
+        .astype(int)
+    )
+
+
 def sample_for_display(df: pd.DataFrame, max_objects: int) -> pd.DataFrame:
     if len(df) <= max_objects:
         return df.copy()
@@ -646,6 +661,156 @@ def show_image(path: str, caption: str) -> None:
     st.image(image, caption=caption, use_container_width=True)
 
 
+def object_image_path(row: pd.Series, prefer_lens_image: bool = False) -> str | None:
+    if prefer_lens_image:
+        lens_path = lens_image_path(row.get("lens_id_str"))
+        if lens_path is None:
+            lens_path = lens_image_path(row.get("id_str"))
+        if lens_path is not None:
+            return lens_path
+
+    return morphology_cutout_path(row.get("id_str"), row.get("object_id"))
+
+
+def show_thumbnail(
+    row: pd.Series | None,
+    caption: str,
+    prefer_lens_image: bool = False,
+) -> None:
+    if row is None:
+        st.caption(caption)
+        st.caption("Sin objeto")
+        return
+
+    path = object_image_path(row, prefer_lens_image=prefer_lens_image)
+    if path is None:
+        st.caption(caption)
+        st.caption("Sin imagen")
+        return
+
+    try:
+        image = Image.open(BytesIO(load_image_bytes(path)))
+    except Exception:
+        st.caption(caption)
+        st.caption("Sin imagen")
+        return
+
+    st.image(image, caption=caption, width=SUMMARY_THUMBNAIL_WIDTH)
+
+
+def show_thumbnail_group(
+    title: str,
+    rows: list[pd.Series],
+    captions: list[str],
+    prefer_lens_image: bool = False,
+) -> None:
+    st.caption(title)
+    count = max(len(rows), 1)
+    for column, row, caption in zip(st.columns(count), rows or [None], captions or [""]):
+        with column:
+            show_thumbnail(row, caption, prefer_lens_image=prefer_lens_image)
+
+
+def cluster_visual_rows(
+    cluster_df: pd.DataFrame,
+    summary_features: list[str],
+    cluster_id: int,
+) -> tuple[pd.Series | None, pd.Series | None, list[pd.Series], list[pd.Series]]:
+    marked = add_cluster_extreme_roles(cluster_df, summary_features)
+
+    canonical_rows = marked[marked["is_canonical"]]
+    anomaly_rows = marked[marked["is_anomaly"]]
+    canonical_row = canonical_rows.iloc[0] if not canonical_rows.empty else None
+    anomaly_row = anomaly_rows.iloc[0] if not anomaly_rows.empty else None
+
+    used_object_ids = {
+        str(row.get("object_id"))
+        for row in (canonical_row, anomaly_row)
+        if row is not None and not pd.isna(row.get("object_id"))
+    }
+    random_pool = cluster_df[
+        ~cluster_df["object_id"].astype("string").isin(used_object_ids)
+    ]
+    if random_pool.empty:
+        random_pool = cluster_df
+    random_rows = random_pool.sample(
+        n=min(SUMMARY_RANDOM_OBJECTS, len(random_pool)),
+        random_state=int(cluster_id) + 17,
+    )
+
+    lens_rows = cluster_df[cluster_df["is_lens"]].copy()
+    if not lens_rows.empty:
+        if "lens_grade" not in lens_rows.columns:
+            lens_rows["lens_grade"] = ""
+        lens_rows["_grade_order"] = lens_grade_sort_key(lens_rows["lens_grade"])
+        lens_rows = lens_rows.sort_values(
+            ["_grade_order", "lens_grade", "object_id"],
+            na_position="last",
+        ).drop(columns=["_grade_order"])
+    lens_rows = lens_rows.head(SUMMARY_LENS_OBJECTS)
+
+    return (
+        canonical_row,
+        anomaly_row,
+        [row for _, row in random_rows.iterrows()],
+        [row for _, row in lens_rows.iterrows()],
+    )
+
+
+def render_cluster_visual_summary(
+    clustered_df: pd.DataFrame,
+    cluster_summary_df: pd.DataFrame,
+    pca_columns: list[str],
+) -> None:
+    summary_features = [
+        feature for feature in DEFAULT_CLUSTER_FEATURES if feature in pca_columns
+    ] or pca_columns[: min(4, len(pca_columns))]
+
+    for _, summary_row in cluster_summary_df.iterrows():
+        cluster_id = int(summary_row["cluster"])
+        cluster_df = clustered_df[clustered_df["cluster"] == cluster_id].copy()
+        canonical_row, anomaly_row, random_rows, lens_rows = cluster_visual_rows(
+            cluster_df,
+            summary_features,
+            cluster_id,
+        )
+
+        with st.container(border=True):
+            stats_cols = st.columns([1, 1, 1, 1])
+            stats_cols[0].metric("Cluster", cluster_id)
+            stats_cols[1].metric("Objetos", f"{int(summary_row['n_objects']):,}")
+            stats_cols[2].metric("Lentes", f"{int(summary_row['n_lenses']):,}")
+            stats_cols[3].metric("Densidad", f"{summary_row['lens_rate'] * 100:.3f}%")
+
+            image_cols = st.columns([2, 3, 5])
+            with image_cols[0]:
+                show_thumbnail_group(
+                    "Canónico / anómalo",
+                    [canonical_row, anomaly_row],
+                    ["Canónico", "Anómalo"],
+                )
+            with image_cols[1]:
+                show_thumbnail_group(
+                    "Aleatorios",
+                    random_rows,
+                    [f"Aleatorio {index + 1}" for index in range(len(random_rows))],
+                )
+            with image_cols[2]:
+                lens_captions = []
+                for row in lens_rows:
+                    lens_grade = row.get("lens_grade", "")
+                    if pd.isna(lens_grade) or not str(lens_grade).strip():
+                        lens_captions.append("Grado ?")
+                    else:
+                        lens_captions.append(f"Grado {str(lens_grade).strip()}")
+                show_thumbnail_group(
+                    "Lentes confirmadas",
+                    lens_rows,
+                    lens_captions,
+                    prefer_lens_image=True,
+                )
+
+
 def show_lens_status(row: pd.Series) -> None:
     is_lens = bool(row.get("is_lens", False))
     lens_grade = row.get("lens_grade", "")
@@ -860,6 +1025,7 @@ def main() -> None:
             use_container_width=True,
             hide_index=True,
         )
+        render_cluster_visual_summary(clustered_df, cluster_summary_df, pca_columns)
 
     with st.sidebar:
         st.header("UMAP")
