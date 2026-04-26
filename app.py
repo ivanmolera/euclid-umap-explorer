@@ -419,8 +419,18 @@ def format_cluster_option(row: pd.Series) -> str:
 
 
 def default_cluster_option_index(cluster_summary_df: pd.DataFrame) -> int:
-    eligible_positions = np.flatnonzero(cluster_summary_df["n_lenses"].to_numpy() > 1)
-    return int(eligible_positions[0]) if len(eligible_positions) else 0
+    eligible = cluster_summary_df[cluster_summary_df["n_lenses"] > 1].copy()
+    if eligible.empty:
+        return 0
+
+    selected_index = (
+        eligible.sort_values(
+            ["lens_rate", "n_lenses", "n_objects", "cluster"],
+            ascending=[False, False, False, True],
+        )
+        .index[0]
+    )
+    return int(cluster_summary_df.index.get_loc(selected_index))
 
 
 def lens_grade_sort_key(series: pd.Series) -> pd.Series:
@@ -1022,6 +1032,10 @@ def request_clustering() -> None:
     st.session_state["cluster_requested"] = True
 
 
+def collapse_cluster_summary() -> None:
+    st.session_state["cluster_summary_expanded"] = False
+
+
 def main() -> None:
     st.set_page_config(page_title=APP_TITLE, layout="wide")
     inject_plot_cursor_css()
@@ -1170,7 +1184,10 @@ def main() -> None:
         st.warning("Select at least one PCA component to build UMAP.")
         st.stop()
 
-    with st.expander("Cluster summary", expanded=False):
+    with st.expander(
+        "Cluster summary",
+        expanded=st.session_state.get("cluster_summary_expanded", False),
+    ):
         summary_display = cluster_summary_df.copy()
         summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
         st.dataframe(
@@ -1202,6 +1219,7 @@ def main() -> None:
         button_label,
         type="primary" if needs_recalculation else "secondary",
         disabled=(not selected_features) or (not needs_recalculation and "umap_embedding_df" in st.session_state),
+        on_click=collapse_cluster_summary,
     )
 
     if recalculate_umap:
