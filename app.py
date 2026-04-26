@@ -801,12 +801,16 @@ def feature_bin_size(values: list[float]) -> float:
     return value_range / SUMMARY_HISTOGRAM_BINS
 
 
+def can_show_kde(values: list[float]) -> bool:
+    return len(values) > 1 and len(set(values)) > 1
+
+
 def build_cluster_distplot_figure(
     cluster_df: pd.DataFrame,
     feature: str,
     feature_index: int,
 ) -> object | None:
-    from plotly.figure_factory._distplot import create_distplot
+    import plotly.figure_factory as ff
 
     lens_df = cluster_df[cluster_df["is_lens"]]
     non_lens_df = cluster_df[~cluster_df["is_lens"]]
@@ -834,12 +838,14 @@ def build_cluster_distplot_figure(
         return None
 
     all_values = [value for values in hist_data for value in values]
-    fig = create_distplot(
+    show_curve = all(can_show_kde(values) for values in hist_data)
+    fig = ff.create_distplot(
         hist_data,
         group_labels,
         bin_size=feature_bin_size(all_values),
         colors=colors,
-        show_curve=False,
+        curve_type="kde",
+        show_curve=show_curve,
         show_hist=True,
         show_rug=False,
         histnorm="probability density",
@@ -852,6 +858,7 @@ def build_cluster_distplot_figure(
         barmode="overlay",
     )
     fig.update_traces(opacity=0.72, selector={"type": "histogram"})
+    fig.update_traces(line={"width": 2.0}, selector={"mode": "lines"})
     fig.update_xaxes(showgrid=False, zeroline=False)
     fig.update_yaxes(showgrid=True, zeroline=False, title_text="density")
     return fig
