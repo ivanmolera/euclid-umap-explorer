@@ -36,6 +36,7 @@ The `data/` directories in this repository are placeholders for local developmen
 - Computes a 2D UMAP embedding.
 - Visualizes the embedding with Plotly.
 - Distinguishes non-lenses, lens grades, canonical objects, and anomalous objects.
+- Marks inspected non-lens points in a distinct color after selection.
 - Provides a visual cluster summary with canonical, anomalous, random, and lens examples.
 - Computes compact lens vs non-lens PCA histograms for clusters containing lenses, limited to six selected UMAP components on screen.
 - Supports point selection from the UMAP plot.

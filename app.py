@@ -53,6 +53,8 @@ SUMMARY_HISTOGRAM_BINS = 24
 SUMMARY_HISTOGRAM_FEATURE_LIMIT = 6
 SUMMARY_DISTPLOT_MAX_POINTS_PER_GROUP = 5_000
 PCA_FILTER_OPERATORS = [">", ">=", "<", "<=", "between"]
+INSPECTED_NO_LENS_KEY = "inspected_no_lens_object_keys"
+SELECTED_OBJECT_KEY = "selected_object_key"
 
 
 def inject_plot_cursor_css() -> None:
@@ -862,6 +864,32 @@ def selected_point_index(event: object) -> int | None:
         return None
 
 
+def object_visit_key(row: pd.Series) -> str:
+    for column in ("object_id", "id_str", "hdf5_loc", "point_index"):
+        value = row.get(column)
+        if value is not None and not pd.isna(value):
+            return f"{column}:{str(value).strip()}"
+    return f"index:{row.name}"
+
+
+def inspected_no_lens_keys() -> set[str]:
+    return set(st.session_state.get(INSPECTED_NO_LENS_KEY, []))
+
+
+def mark_inspected_no_lens(row: pd.Series) -> bool:
+    if bool(row.get("is_lens", False)) or row.get("point_role") != "No lens":
+        return False
+
+    inspected_keys = inspected_no_lens_keys()
+    visit_key = str(row.get("object_visit_key") or object_visit_key(row))
+    if visit_key in inspected_keys:
+        return False
+
+    inspected_keys.add(visit_key)
+    st.session_state[INSPECTED_NO_LENS_KEY] = sorted(inspected_keys)
+    return True
+
+
 @st.cache_data(show_spinner=False)
 def load_image_bytes(path: str) -> bytes:
     if is_gcs_path(path):
@@ -1527,6 +1555,14 @@ def main() -> None:
         lens_grade_marker.fillna("?"),
         "",
     )
+    embedding_df["object_visit_key"] = embedding_df.apply(object_visit_key, axis=1)
+    embedding_df["display_role"] = embedding_df["point_role"]
+    inspected_mask = (
+        ~embedding_df["is_lens"]
+        & (embedding_df["point_role"] == "No lens")
+        & embedding_df["object_visit_key"].isin(inspected_no_lens_keys())
+    )
+    embedding_df.loc[inspected_mask, "display_role"] = "Inspected no lens"
 
     hover_columns = [
         column
@@ -1535,6 +1571,7 @@ def main() -> None:
             "object_id",
             "cluster",
             "point_role",
+            "display_role",
             "is_lens",
             "lens_grade",
             "dist_to_cluster_centroid",
@@ -1548,32 +1585,44 @@ def main() -> None:
         embedding_df,
         x="umap_1",
         y="umap_2",
-        color="point_role",
-        symbol="point_role",
+        color="display_role",
+        symbol="display_role",
         custom_data=["point_index"],
         hover_data=hover_columns,
         color_discrete_map={
             "No lens": "#4c78a8",
+            "Inspected no lens": "#facc15",
             "Lens": "#d62728",
             "Canonical": "#2ca02c",
             "Anomaly": "#111111",
         },
         symbol_map={
             "No lens": "circle",
+            "Inspected no lens": "circle",
             "Lens": "circle",
             "Canonical": "diamond",
             "Anomaly": "x",
         },
         category_orders={
-            "point_role": ["No lens", "Lens", "Canonical", "Anomaly"],
+            "display_role": [
+                "No lens",
+                "Inspected no lens",
+                "Lens",
+                "Canonical",
+                "Anomaly",
+            ],
         },
-        labels={"umap_1": "UMAP 1", "umap_2": "UMAP 2", "point_role": "Type"},
+        labels={"umap_1": "UMAP 1", "umap_2": "UMAP 2", "display_role": "Type"},
         height=680,
     )
     fig.update_traces(marker={"size": 7, "opacity": 0.72})
     fig.update_traces(
         marker={"size": 17, "opacity": 0.98, "line": {"width": 1.5, "color": "white"}},
         selector={"name": "Lens"},
+    )
+    fig.update_traces(
+        marker={"size": 8, "opacity": 0.9, "line": {"width": 0.6, "color": "#854d0e"}},
+        selector={"name": "Inspected no lens"},
     )
     fig.update_traces(
         marker={"size": 14, "opacity": 1.0, "line": {"width": 2, "color": "white"}},
@@ -1625,11 +1674,23 @@ def main() -> None:
         )
 
     selected_index = selected_point_index(event)
+    if selected_index is not None:
+        selected_row = embedding_df.loc[selected_index]
+        st.session_state[SELECTED_OBJECT_KEY] = selected_row["object_visit_key"]
+        if mark_inspected_no_lens(selected_row):
+            st.rerun()
+    else:
+        selected_object_key = st.session_state.get(SELECTED_OBJECT_KEY)
+        selected_matches = embedding_df[
+            embedding_df["object_visit_key"] == selected_object_key
+        ]
+        selected_row = selected_matches.iloc[0] if not selected_matches.empty else None
+
     with detail_col:
-        if selected_index is None:
+        if selected_row is None:
             st.info("Select a point on the map to view its details and image.")
         else:
-            show_object_details(embedding_df.loc[selected_index], selected_features)
+            show_object_details(selected_row, selected_features)
 
 
 if __name__ == "__main__":
