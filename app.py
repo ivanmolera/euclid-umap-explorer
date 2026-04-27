@@ -1349,7 +1349,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         }
 
     if not st.session_state.get("cluster_ready"):
-        st.info("Click **Run clustering** to generate the clusterize data.")
+        st.info("Click **Run clustering** button to clusterize data.")
         st.stop()
 
     # Only individual catalogues are cached. Image folders are read on demand.
