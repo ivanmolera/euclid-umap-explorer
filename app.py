@@ -1285,6 +1285,14 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Data")
+        st.markdown(
+            """
+This analysis uses Euclid Q1 catalogue products available at:
+
+- [Euclid Quick Data Release (Q1): The Strong Lensing Discovery Engine](https://zenodo.org/records/15025832)
+- [Euclid Quick Data Release (Q1): First visual morphology catalogue](https://zenodo.org/records/15106473)
+            """
+        )
         with st.expander("Configured paths", expanded=False):
             st.dataframe(validate_paths(), use_container_width=True, hide_index=True)
             st.caption(
@@ -1341,7 +1349,7 @@ def main() -> None:
         }
 
     if not st.session_state.get("cluster_ready"):
-        st.info("Click **Run clustering** to generate the BIRCH clusters.")
+        st.info("Click **Run clustering** to generate the clusterize data.")
         st.stop()
 
     # Only individual catalogues are cached. Image folders are read on demand.
