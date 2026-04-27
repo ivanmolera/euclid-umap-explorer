@@ -1556,13 +1556,12 @@ def main() -> None:
         "",
     )
     embedding_df["object_visit_key"] = embedding_df.apply(object_visit_key, axis=1)
-    embedding_df["display_role"] = embedding_df["point_role"]
     inspected_mask = (
         ~embedding_df["is_lens"]
         & (embedding_df["point_role"] == "No lens")
         & embedding_df["object_visit_key"].isin(inspected_no_lens_keys())
     )
-    embedding_df.loc[inspected_mask, "display_role"] = "Inspected no lens"
+    inspected_df = embedding_df[inspected_mask]
 
     hover_columns = [
         column
@@ -1571,7 +1570,6 @@ def main() -> None:
             "object_id",
             "cluster",
             "point_role",
-            "display_role",
             "is_lens",
             "lens_grade",
             "dist_to_cluster_centroid",
@@ -1580,49 +1578,38 @@ def main() -> None:
     ]
 
     import plotly.express as px
+    import plotly.graph_objects as go
 
     fig = px.scatter(
         embedding_df,
         x="umap_1",
         y="umap_2",
-        color="display_role",
-        symbol="display_role",
+        color="point_role",
+        symbol="point_role",
         custom_data=["point_index"],
         hover_data=hover_columns,
         color_discrete_map={
             "No lens": "#4c78a8",
-            "Inspected no lens": "#facc15",
             "Lens": "#d62728",
             "Canonical": "#2ca02c",
             "Anomaly": "#111111",
         },
         symbol_map={
             "No lens": "circle",
-            "Inspected no lens": "circle",
             "Lens": "circle",
             "Canonical": "diamond",
             "Anomaly": "x",
         },
         category_orders={
-            "display_role": [
-                "No lens",
-                "Inspected no lens",
-                "Lens",
-                "Canonical",
-                "Anomaly",
-            ],
+            "point_role": ["No lens", "Lens", "Canonical", "Anomaly"],
         },
-        labels={"umap_1": "UMAP 1", "umap_2": "UMAP 2", "display_role": "Type"},
+        labels={"umap_1": "UMAP 1", "umap_2": "UMAP 2", "point_role": "Type"},
         height=680,
     )
     fig.update_traces(marker={"size": 7, "opacity": 0.72})
     fig.update_traces(
         marker={"size": 17, "opacity": 0.98, "line": {"width": 1.5, "color": "white"}},
         selector={"name": "Lens"},
-    )
-    fig.update_traces(
-        marker={"size": 8, "opacity": 0.9, "line": {"width": 0.6, "color": "#854d0e"}},
-        selector={"name": "Inspected no lens"},
     )
     fig.update_traces(
         marker={"size": 14, "opacity": 1.0, "line": {"width": 2, "color": "white"}},
@@ -1636,6 +1623,26 @@ def main() -> None:
         opacity = getattr(trace.marker, "opacity", None) or 1.0
         trace.selected = {"marker": {"opacity": opacity}}
         trace.unselected = {"marker": {"opacity": opacity}}
+
+    fig.add_trace(
+        go.Scatter(
+            x=inspected_df["umap_1"],
+            y=inspected_df["umap_2"],
+            mode="markers",
+            name="Inspected no lens",
+            customdata=inspected_df[["point_index"]].to_numpy(),
+            marker={
+                "color": "#facc15",
+                "size": 8,
+                "opacity": 0.95,
+                "line": {"width": 0.7, "color": "#854d0e"},
+            },
+            hoverinfo="skip",
+            showlegend=not inspected_df.empty,
+        )
+    )
+    fig.data[-1].selected = {"marker": {"opacity": 0.95}}
+    fig.data[-1].unselected = {"marker": {"opacity": 0.95}}
 
     for lens_row in embedding_df[embedding_df["lens_grade_marker"] != ""].itertuples():
         fig.add_annotation(
