@@ -1289,8 +1289,8 @@ def main() -> None:
             """
 This analysis uses Euclid Q1 catalogue products available at:
 
-- [Euclid Quick Data Release (Q1): The Strong Lensing Discovery Engine](https://zenodo.org/records/15025832)
-- [Euclid Quick Data Release (Q1): First visual morphology catalogue](https://zenodo.org/records/15106473)
+- [The Strong Lensing Discovery Engine](https://zenodo.org/records/15025832)
+- [First visual morphology catalogue](https://zenodo.org/records/15106473)
             """
         )
         with st.expander("Configured paths", expanded=False):
