@@ -12,6 +12,7 @@ from PIL import Image
 
 
 APP_TITLE = "Euclid UMAP Explorer"
+APP_VERSION = "v0.1.6"
 EUCLID_LOGO_PATH = Path(__file__).parent / "assets" / "euclid_logo.png"
 EUCLID_FAVICON_PATH = Path(__file__).parent / "assets" / "favicon.png"
 
@@ -1289,6 +1290,7 @@ def main() -> None:
         logo_left, logo_center, logo_right = st.columns([1, 2, 1])
         with logo_center:
             st.image(str(EUCLID_LOGO_PATH), use_container_width=True)
+        st.caption(f"Version {APP_VERSION}")
 
         st.header("Data")
         st.markdown(
