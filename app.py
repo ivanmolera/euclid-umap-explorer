@@ -12,6 +12,8 @@ from PIL import Image
 
 
 APP_TITLE = "Euclid UMAP Explorer"
+EUCLID_LOGO_PATH = Path(__file__).parent / "assets" / "euclid_logo.png"
+EUCLID_FAVICON_PATH = Path(__file__).parent / "assets" / "favicon.png"
 
 MORPH_PATH = os.getenv(
     "MORPH_PATH",
@@ -44,7 +46,7 @@ DEFAULT_CLUSTER_FEATURES = [
     "feat_pca_13",
     "feat_pca_27",
 ]
-DEFAULT_LENS_GRADES = ["A", "B"]
+DEFAULT_LENS_GRADES = ["A", "B", "C"]
 LENS_GRADE_OPTIONS = ["A", "B", "C"]
 SUMMARY_RANDOM_OBJECTS = 3
 SUMMARY_LENS_OBJECTS = 5
@@ -1263,7 +1265,7 @@ def collapse_cluster_summary() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title=APP_TITLE, layout="wide")
+    st.set_page_config(page_title=APP_TITLE, page_icon=str(EUCLID_FAVICON_PATH), layout="wide")
     inject_plot_cursor_css()
     st.title(APP_TITLE)
     loading_placeholder = st.empty()
@@ -1284,6 +1286,10 @@ def main() -> None:
     loading_placeholder.empty()
 
     with st.sidebar:
+        logo_left, logo_center, logo_right = st.columns([1, 2, 1])
+        with logo_center:
+            st.image(str(EUCLID_LOGO_PATH), use_container_width=True)
+
         st.header("Data")
         st.markdown(
             """
