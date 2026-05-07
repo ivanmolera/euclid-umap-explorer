@@ -843,6 +843,110 @@ def load_morphology_object(morph_path: str, object_id: str) -> pd.DataFrame:
     return table.slice(0, 1).to_pandas()
 
 
+def normalize_search_object_id(object_id: str) -> str:
+    value = str(object_id).strip()
+    if not value:
+        raise ValueError("Enter an object_id.")
+    try:
+        return str(int(value))
+    except ValueError as exc:
+        raise ValueError("object_id must be an integer value.") from exc
+
+
+def serializable_table_value(value: object) -> object:
+    if hasattr(value, "item"):
+        value = value.item()
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    return value
+
+
+def table_row_to_dict(row: object) -> dict[str, object]:
+    columns = getattr(row, "colnames", None)
+    if columns is None and hasattr(row, "columns"):
+        columns = row.columns
+    return {column: serializable_table_value(row[column]) for column in columns}
+
+
+@st.cache_data(show_spinner=False, ttl=24 * 60 * 60)
+def fetch_euclid_object_summary(
+    object_id: str,
+    search_radius_arcmin: float = 0.10,
+    instrument: str = "VIS",
+) -> dict[str, object]:
+    from astroquery.esa.euclid import Euclid
+
+    normalized_object_id = normalize_search_object_id(object_id)
+
+    object_query = f"""
+SELECT
+    object_id,
+    right_ascension,
+    declination,
+    segmentation_area,
+    ellipticity,
+    kron_radius,
+    flux_detection_total,
+    flux_vis_sersic,
+    vis_det,
+    det_quality_flag
+FROM catalogue.mer_catalogue
+WHERE object_id = {normalized_object_id}
+"""
+
+    object_job = Euclid.launch_job_async(object_query, verbose=False)
+    object_result = object_job.get_results()
+    if len(object_result) == 0:
+        raise ValueError(f"object_id {normalized_object_id} was not found in catalogue.mer_catalogue.")
+
+    object_row = object_result[0]
+    object_summary = table_row_to_dict(object_row)
+    ra = float(object_row["right_ascension"])
+    dec = float(object_row["declination"])
+
+    search_radius_deg = max(float(search_radius_arcmin) / 60.0, 0.5 / 60.0)
+    mosaic_query = f"""
+SELECT
+    file_name,
+    file_path,
+    instrument_name,
+    filter_name,
+    product_type,
+    tile_index
+FROM q1.mosaic_product
+WHERE instrument_name = '{instrument}'
+  AND INTERSECTS(CIRCLE({ra}, {dec}, {search_radius_deg}), fov) = 1
+ORDER BY file_name
+"""
+
+    mosaic_job = Euclid.launch_job_async(mosaic_query, verbose=False)
+    mosaic_result = mosaic_job.get_results()
+    if len(mosaic_result) == 0:
+        raise ValueError(f"No {instrument} mosaic product was found for object_id {normalized_object_id}.")
+
+    mosaic_row = mosaic_result[0]
+    mosaic_summary = table_row_to_dict(mosaic_row)
+    file_path = f"{mosaic_row['file_path']}/{mosaic_row['file_name']}"
+    local_cutout_path = morphology_cutout_path(
+        f"{mosaic_summary.get('tile_index')}_{normalized_object_id}",
+        normalized_object_id,
+    )
+
+    return {
+        "object_id": normalized_object_id,
+        "object_summary": object_summary,
+        "mosaic_summary": mosaic_summary,
+        "file_path": file_path,
+        "cutout_path": local_cutout_path,
+    }
+
+
 def selected_point_index(event: object) -> int | None:
     if not event:
         return None
@@ -1237,6 +1341,48 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
         show_image(lens_path, "Strong-lens image")
 
 
+def render_euclid_object_search(object_id: str) -> None:
+    with st.spinner(f"Searching Euclid object {object_id}..."):
+        result = fetch_euclid_object_summary(object_id)
+
+    object_summary = result["object_summary"]
+    mosaic_summary = result["mosaic_summary"]
+
+    with st.container(border=True):
+        st.subheader("Object search")
+        metric_cols = st.columns(4)
+        metric_cols[0].metric("object_id", str(result["object_id"]))
+        metric_cols[1].metric("RA", f"{float(object_summary['right_ascension']):.6f}")
+        metric_cols[2].metric("Dec", f"{float(object_summary['declination']):.6f}")
+        metric_cols[3].metric("Tile", str(mosaic_summary.get("tile_index", "")))
+
+        image_col, summary_col = st.columns([1, 1])
+        with image_col:
+            cutout_path = result.get("cutout_path")
+            if cutout_path:
+                show_image(
+                    str(cutout_path),
+                    f"Euclid VIS cutout | object_id={result['object_id']}",
+                )
+            else:
+                st.info(
+                    "No precomputed JPEG cutout was found for this object. "
+                    "No FITS file was downloaded."
+                )
+        with summary_col:
+            st.markdown("**Object summary**")
+            object_display = pd.DataFrame(
+                [{"field": field, "value": value} for field, value in object_summary.items()]
+            )
+            st.dataframe(object_display, use_container_width=True, hide_index=True)
+
+            st.markdown("**Mosaic summary**")
+            mosaic_display = pd.DataFrame(
+                [{"field": field, "value": value} for field, value in mosaic_summary.items()]
+            )
+            st.dataframe(mosaic_display, use_container_width=True, hide_index=True)
+
+
 def validate_paths() -> pd.DataFrame:
     rows = [
         ("MORPH_PATH", MORPH_PATH),
@@ -1301,12 +1447,16 @@ This analysis uses Euclid Q1 catalogue products available at:
 - [First visual morphology catalogue](https://zenodo.org/records/15106473)
             """
         )
-        with st.expander("Configured paths", expanded=False):
-            st.dataframe(validate_paths(), use_container_width=True, hide_index=True)
-            st.caption(
-                "The local cache only copies individual catalogues. "
-                "CUTOUT_BASE and LENS_IMG_BASE are not copied; images are read on demand."
+        with st.form("object_id_search_form", clear_on_submit=False):
+            search_input_col, search_button_col = st.columns([3, 1])
+            object_id_search_value = search_input_col.text_input(
+                "object_id",
+                placeholder="object_id",
+                label_visibility="collapsed",
             )
+            search_submitted = search_button_col.form_submit_button("Search")
+        if search_submitted:
+            st.session_state["euclid_search_object_id"] = object_id_search_value.strip()
 
         st.header("Lenses")
         selected_lens_grades = st.multiselect(
@@ -1341,6 +1491,19 @@ This analysis uses Euclid Q1 catalogue products available at:
                 type="primary",
                 on_click=request_clustering,
             )
+
+    searched_object_id = st.session_state.get("euclid_search_object_id")
+    if searched_object_id:
+        try:
+            render_euclid_object_search(searched_object_id)
+        except ValueError as exc:
+            st.warning(str(exc))
+        except ImportError as exc:
+            st.error("The Euclid object search dependencies are not installed.")
+            st.exception(exc)
+        except Exception as exc:
+            st.error("Could not retrieve the Euclid cutout for this object_id.")
+            st.exception(exc)
 
     clustering_requested = st.session_state.pop("cluster_requested", False)
     if run_clustering or clustering_requested:
