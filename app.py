@@ -1350,7 +1350,7 @@ def render_euclid_object_search(object_id: str) -> None:
 
     with st.container(border=True):
         st.subheader("Object search")
-        metric_cols = st.columns(4)
+        metric_cols = st.columns([2.4, 1, 1, 1])
         metric_cols[0].metric("object_id", str(result["object_id"]))
         metric_cols[1].metric("RA", f"{float(object_summary['right_ascension']):.6f}")
         metric_cols[2].metric("Dec", f"{float(object_summary['declination']):.6f}")
