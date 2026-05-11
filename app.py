@@ -97,7 +97,40 @@ def inject_plot_cursor_css() -> None:
             line-height: 1.25;
             margin-top: 0.2rem;
         }
+        .back-to-top {
+            align-items: center;
+            background: #ff5a52;
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            border-radius: 999px;
+            bottom: 1.4rem;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+            color: white !important;
+            display: flex;
+            font-size: 1.25rem;
+            font-weight: 800;
+            height: 2.65rem;
+            justify-content: center;
+            position: fixed;
+            right: 1.4rem;
+            text-decoration: none !important;
+            width: 2.65rem;
+            z-index: 1000;
+        }
+        .back-to-top:hover {
+            background: #e84840;
+            color: white !important;
+        }
         </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_back_to_top_control() -> None:
+    st.markdown(
+        """
+        <div id="euclid-page-top"></div>
+        <a class="back-to-top" href="#euclid-page-top" title="Back to top">↑</a>
         """,
         unsafe_allow_html=True,
     )
@@ -1275,7 +1308,7 @@ def show_lens_status(row: pd.Series) -> None:
         css_class = "lens-status--yes"
         meta = lens_grade_text or "Object present in the strong-lensing catalogue."
     else:
-        label = "NOT LENS"
+        label = "UNKNOWN"
         css_class = "lens-status--no"
         meta = "Object not marked as a lens in the joined catalogue."
 
@@ -1414,6 +1447,7 @@ def collapse_cluster_summary() -> None:
 def main() -> None:
     st.set_page_config(page_title=APP_TITLE, page_icon=str(EUCLID_FAVICON_PATH), layout="wide")
     inject_plot_cursor_css()
+    render_back_to_top_control()
     st.title(APP_TITLE)
     loading_placeholder = st.empty()
     loading_placeholder.info("Loading application...")
