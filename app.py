@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
+import time
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable
@@ -56,6 +59,19 @@ SUMMARY_HISTOGRAM_BINS = 24
 SUMMARY_HISTOGRAM_FEATURE_LIMIT = 6
 SUMMARY_DISTPLOT_MAX_POINTS_PER_GROUP = 5_000
 PCA_FILTER_OPERATORS = [">", ">=", "<", "<=", "between"]
+
+logging.basicConfig(level=logging.INFO)
+LOGGER = logging.getLogger("euclid_umap_explorer")
+
+
+def log_app_event(event_type: str, **fields: object) -> None:
+    payload = {
+        "app": APP_TITLE,
+        "version": APP_VERSION,
+        "event_type": event_type,
+        **fields,
+    }
+    LOGGER.info(json.dumps(payload, default=str, sort_keys=True))
 
 
 def inject_plot_cursor_css() -> None:
@@ -380,6 +396,7 @@ def run_birch_clustering(
     from sklearn.cluster import Birch
     from sklearn.preprocessing import StandardScaler
 
+    started_at = time.perf_counter()
     work_df, feature_cols = load_pca_catalog(parquet_path)
     lens_df = load_lens_catalog(lens_path, selected_grades)
 
@@ -423,6 +440,18 @@ def run_birch_clustering(
     clustered_df["cluster"] = labels
     clustered_df = merge_lens_flags(clustered_df, lens_df)
     clustered_df.attrs["n_subclusters"] = len(cluster_model.subcluster_centers_)
+    log_app_event(
+        "birch_clustering_computed",
+        duration_seconds=round(time.perf_counter() - started_at, 3),
+        n_objects=int(len(clustered_df)),
+        n_features=int(len(feature_cols)),
+        n_clusters=int(clustered_df["cluster"].nunique()),
+        n_lenses=int(clustered_df["is_lens"].sum()),
+        selected_grades=list(selected_grades),
+        threshold=float(threshold),
+        branching_factor=int(branching_factor),
+        batch_size=int(batch_size),
+    )
     return clustered_df, feature_cols
 
 
@@ -520,8 +549,17 @@ def compute_umap_embedding(
     import umap
     from sklearn.preprocessing import StandardScaler
 
+    started_at = time.perf_counter()
     clean = data.dropna(subset=selected_features).copy()
     if clean.empty:
+        log_app_event(
+            "umap_computed",
+            duration_seconds=round(time.perf_counter() - started_at, 3),
+            n_objects=0,
+            n_features=int(len(selected_features)),
+            n_neighbors=int(n_neighbors),
+            min_dist=float(min_dist),
+        )
         return clean
 
     n_neighbors = min(n_neighbors, max(2, len(clean) - 1))
@@ -536,6 +574,14 @@ def compute_umap_embedding(
     embedding = reducer.fit_transform(scaled)
     clean["umap_1"] = embedding[:, 0]
     clean["umap_2"] = embedding[:, 1]
+    log_app_event(
+        "umap_computed",
+        duration_seconds=round(time.perf_counter() - started_at, 3),
+        n_objects=int(len(clean)),
+        n_features=int(len(selected_features)),
+        n_neighbors=int(n_neighbors),
+        min_dist=float(min_dist),
+    )
     return clean
 
 
@@ -1004,10 +1050,23 @@ def selected_point_index(event: object) -> int | None:
 
 @st.cache_data(show_spinner=False)
 def load_image_bytes(path: str) -> bytes:
+    started_at = time.perf_counter()
     if is_gcs_path(path):
         with gcs_filesystem().open(path, "rb") as image_file:
-            return image_file.read()
-    return Path(path).read_bytes()
+            image_bytes = image_file.read()
+        source = "gcs"
+    else:
+        image_bytes = Path(path).read_bytes()
+        source = "local"
+
+    log_app_event(
+        "image_loaded",
+        duration_seconds=round(time.perf_counter() - started_at, 3),
+        source=source,
+        bytes=int(len(image_bytes)),
+        suffix=Path(str(path)).suffix.lower(),
+    )
+    return image_bytes
 
 
 def show_image(path: str, caption: str) -> None:
@@ -1375,11 +1434,19 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
 
 
 def render_euclid_object_search(object_id: str) -> None:
+    started_at = time.perf_counter()
     with st.spinner(f"Searching Euclid object {object_id}..."):
         result = fetch_euclid_object_summary(object_id)
 
     object_summary = result["object_summary"]
     mosaic_summary = result["mosaic_summary"]
+    log_app_event(
+        "object_search_completed",
+        duration_seconds=round(time.perf_counter() - started_at, 3),
+        has_precomputed_cutout=bool(result.get("cutout_path")),
+        instrument=str(mosaic_summary.get("instrument_name", "")),
+        tile_index=str(mosaic_summary.get("tile_index", "")),
+    )
 
     with st.container(border=True):
         st.subheader("Object search")
@@ -1531,11 +1598,14 @@ This analysis uses Euclid Q1 catalogue products available at:
         try:
             render_euclid_object_search(searched_object_id)
         except ValueError as exc:
+            log_app_event("object_search_failed", error_type=type(exc).__name__)
             st.warning(str(exc))
         except ImportError as exc:
+            log_app_event("object_search_failed", error_type=type(exc).__name__)
             st.error("The Euclid object search dependencies are not installed.")
             st.exception(exc)
         except Exception as exc:
+            log_app_event("object_search_failed", error_type=type(exc).__name__)
             st.error("Could not retrieve the Euclid cutout for this object_id.")
             st.exception(exc)
 
@@ -1552,6 +1622,13 @@ This analysis uses Euclid Q1 catalogue products available at:
             "branching_factor": int(branching_factor),
             "batch_size": int(batch_size),
         }
+        log_app_event(
+            "birch_clustering_requested",
+            selected_grades=list(selected_lens_grades),
+            threshold=float(threshold),
+            branching_factor=int(branching_factor),
+            batch_size=int(batch_size),
+        )
 
     if not st.session_state.get("cluster_ready"):
         st.info("Click **Run clustering** button to clusterize data.")
@@ -1685,6 +1762,18 @@ This analysis uses Euclid Q1 catalogue products available at:
     if recalculate_umap:
         filtered_cluster_df = add_cluster_extreme_roles(filtered_cluster_df, selected_features)
         display_df = sample_for_display(filtered_cluster_df, int(max_objects))
+        log_app_event(
+            "umap_requested",
+            cluster=int(selected_cluster),
+            cluster_objects=int(len(cluster_df)),
+            filtered_objects=int(len(filtered_cluster_df)),
+            display_objects=int(len(display_df)),
+            n_features=int(len(selected_features)),
+            n_pca_filters=int(len(pca_filters)),
+            n_neighbors=int(n_neighbors),
+            min_dist=float(min_dist),
+            max_objects=int(max_objects),
+        )
 
         if len(display_df) < 3:
             st.warning("At least 3 objects are required to compute UMAP.")
