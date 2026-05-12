@@ -46,9 +46,11 @@ USE_LOCAL_CACHE = os.getenv("EUCLID_USE_LOCAL_CACHE", "1") != "0"
 
 DEFAULT_CLUSTER_FEATURES = [
     "feat_pca_6",
-    "feat_pca_10",
-    "feat_pca_13",
+    "feat_pca_0",
+    "feat_pca_1",
     "feat_pca_27",
+    "feat_pca_12",
+    "feat_pca_29",
 ]
 DEFAULT_LENS_GRADES = ["A", "B", "C"]
 LENS_GRADE_OPTIONS = ["A", "B", "C"]
