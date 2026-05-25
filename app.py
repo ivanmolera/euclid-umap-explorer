@@ -505,10 +505,12 @@ def run_birch_clustering(
     clustered_df = work_df.copy()
     clustered_df["cluster"] = labels
     clustered_df = merge_lens_flags(clustered_df, lens_df)
+    duration_seconds = time.perf_counter() - started_at
     clustered_df.attrs["n_subclusters"] = len(cluster_model.subcluster_centers_)
+    clustered_df.attrs["processing_seconds"] = duration_seconds
     log_app_event(
         "birch_clustering_computed",
-        duration_seconds=round(time.perf_counter() - started_at, 3),
+        duration_seconds=round(duration_seconds, 3),
         n_objects=int(len(clustered_df)),
         n_features=int(len(feature_cols)),
         n_clusters=int(clustered_df["cluster"].nunique()),
@@ -545,6 +547,24 @@ def format_cluster_option(row: pd.Series) -> str:
         f"{int(row['n_lenses']):,} lenses | "
         f"{row['lens_rate'] * 100:.3f}%"
     )
+
+
+def format_duration(seconds: float | int | None) -> str:
+    if seconds is None:
+        return "-"
+
+    seconds = float(seconds)
+    if seconds < 1:
+        return f"{seconds * 1000:.0f} ms"
+    if seconds < 60:
+        return f"{seconds:.1f} s"
+
+    minutes, remaining_seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{int(minutes)} min {remaining_seconds:.0f} s"
+
+    hours, remaining_minutes = divmod(minutes, 60)
+    return f"{int(hours)} h {int(remaining_minutes)} min"
 
 
 def default_cluster_option_index(cluster_summary_df: pd.DataFrame) -> int:
@@ -618,9 +638,11 @@ def compute_umap_embedding(
     started_at = time.perf_counter()
     clean = data.dropna(subset=selected_features).copy()
     if clean.empty:
+        duration_seconds = time.perf_counter() - started_at
+        clean.attrs["processing_seconds"] = duration_seconds
         log_app_event(
             "umap_computed",
-            duration_seconds=round(time.perf_counter() - started_at, 3),
+            duration_seconds=round(duration_seconds, 3),
             n_objects=0,
             n_features=int(len(selected_features)),
             n_neighbors=int(n_neighbors),
@@ -640,9 +662,11 @@ def compute_umap_embedding(
     embedding = reducer.fit_transform(scaled)
     clean["umap_1"] = embedding[:, 0]
     clean["umap_2"] = embedding[:, 1]
+    duration_seconds = time.perf_counter() - started_at
+    clean.attrs["processing_seconds"] = duration_seconds
     log_app_event(
         "umap_computed",
-        duration_seconds=round(time.perf_counter() - started_at, 3),
+        duration_seconds=round(duration_seconds, 3),
         n_objects=int(len(clean)),
         n_features=int(len(selected_features)),
         n_neighbors=int(n_neighbors),
@@ -1900,10 +1924,14 @@ This analysis uses Euclid Q1 catalogue products available at:
     cluster_summary_df = build_cluster_summary(clustered_df)
     cluster_summary_df["option"] = cluster_summary_df.apply(format_cluster_option, axis=1)
 
-    left_metric, middle_metric, right_metric = st.columns(3)
+    left_metric, middle_metric, right_metric, duration_metric = st.columns(4)
     left_metric.metric("Clustered objects", f"{len(clustered_df):,}")
     middle_metric.metric("Clusters", f"{clustered_df['cluster'].nunique():,}")
     right_metric.metric("Lenses", f"{int(clustered_df['is_lens'].sum()):,}")
+    duration_metric.metric(
+        "BIRCH time",
+        format_duration(clustered_df.attrs.get("processing_seconds")),
+    )
     st.caption(f"Lens grades used: {', '.join(lens_grades)}")
 
     with st.sidebar:
@@ -2059,12 +2087,23 @@ This analysis uses Euclid Q1 catalogue products available at:
 
     embedding_df = st.session_state["umap_embedding_df"]
 
-    cluster_left, cluster_filtered, cluster_middle, cluster_right, cluster_fourth = st.columns(5)
+    (
+        cluster_left,
+        cluster_filtered,
+        cluster_middle,
+        cluster_right,
+        cluster_fourth,
+        umap_time,
+    ) = st.columns(6)
     cluster_left.metric("Cluster objects", f"{len(cluster_df):,}")
     cluster_filtered.metric("After filters", f"{len(filtered_cluster_df):,}")
     cluster_middle.metric("Objects in UMAP", f"{len(embedding_df):,}")
     cluster_right.metric("Lenses in UMAP", f"{int(embedding_df['is_lens'].sum()):,}")
     cluster_fourth.metric("Extremes", "2")
+    umap_time.metric(
+        "UMAP time",
+        format_duration(embedding_df.attrs.get("processing_seconds")),
+    )
 
     embedding_df = embedding_df.copy()
     if "lens_grade" in embedding_df.columns:
