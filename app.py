@@ -1694,7 +1694,7 @@ def show_lens_status(row: pd.Series) -> None:
         lens_grade_text = f"Grade: {lens_grade}"
 
     if is_lens:
-        label = "LENS"
+        label = "LENS CANDIDATE"
         css_class = "lens-status--yes"
         meta = lens_grade_text or "Object present in the strong-lensing catalogue."
     else:
@@ -1753,6 +1753,8 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
         if lens_path is not None:
             show_image(lens_path, "Strong-lens image")
 
+
+def show_morphology_catalogue_row(row: pd.Series) -> None:
     morphology_df = load_morphology_object(MORPH_PATH, str(row.get("object_id", "")))
     if not morphology_df.empty:
         with st.expander("Morphology catalogue row", expanded=False):
@@ -2375,11 +2377,19 @@ This analysis uses Euclid Q1 catalogue products available at:
             )
 
         selected_index = selected_point_index(event)
+        selected_row = (
+            embedding_df.loc[selected_index]
+            if selected_index is not None
+            else None
+        )
         with detail_col:
-            if selected_index is None:
+            if selected_row is None:
                 st.info("Select a point on the map to view its details and image.")
             else:
-                show_object_details(embedding_df.loc[selected_index], selected_features)
+                show_object_details(selected_row, selected_features)
+
+        if selected_row is not None:
+            show_morphology_catalogue_row(selected_row)
 
 
 if __name__ == "__main__":
