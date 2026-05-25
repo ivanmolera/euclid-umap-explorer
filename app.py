@@ -903,15 +903,20 @@ def lens_image_path(lens_id_str: object) -> str | None:
 def load_morphology_object(morph_path: str, object_id: str) -> pd.DataFrame:
     import pyarrow as pa
     import pyarrow.dataset as ds
+    import pyarrow.fs as pafs
+
+    if not object_id:
+        return pd.DataFrame()
 
     if is_gcs_path(morph_path):
-        return pd.DataFrame()
+        filesystem, path = pafs.FileSystem.from_uri(morph_path)
+        dataset = ds.dataset(path, format="parquet", filesystem=filesystem)
+    else:
+        path = cached_input_path(morph_path)
+        if not Path(path).exists():
+            return pd.DataFrame()
+        dataset = ds.dataset(path, format="parquet")
 
-    path = cached_input_path(morph_path)
-    if not Path(path).exists() or not object_id:
-        return pd.DataFrame()
-
-    dataset = ds.dataset(path, format="parquet")
     if "object_id" not in dataset.schema.names:
         return pd.DataFrame()
 
@@ -1450,10 +1455,12 @@ def render_euclid_object_search(object_id: str) -> None:
 
     object_summary = result["object_summary"]
     mosaic_summary = result["mosaic_summary"]
+    morphology_df = load_morphology_object(MORPH_PATH, str(result["object_id"]))
     log_app_event(
         "object_search_completed",
         duration_seconds=round(time.perf_counter() - started_at, 3),
         has_precomputed_cutout=bool(result.get("cutout_path")),
+        has_morphology_row=not morphology_df.empty,
         instrument=str(mosaic_summary.get("instrument_name", "")),
         tile_index=str(mosaic_summary.get("tile_index", "")),
     )
@@ -1491,6 +1498,19 @@ def render_euclid_object_search(object_id: str) -> None:
                 [{"field": field, "value": value} for field, value in mosaic_summary.items()]
             )
             st.dataframe(mosaic_display, use_container_width=True, hide_index=True)
+
+            st.markdown("**Morphology catalogue features**")
+            if morphology_df.empty:
+                st.info("No morphology catalogue row was found for this object_id.")
+            else:
+                morphology_display = morphology_df.iloc[0].dropna().astype(str).reset_index()
+                morphology_display = morphology_display.rename(
+                    columns={
+                        "index": "field",
+                        morphology_display.columns[-1]: "value",
+                    }
+                )
+                st.dataframe(morphology_display, use_container_width=True, hide_index=True)
 
 
 def validate_paths() -> pd.DataFrame:
@@ -1562,7 +1582,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             search_input_col, search_button_col = st.columns([3, 1])
             object_id_search_value = search_input_col.text_input(
                 "object_id",
-                placeholder="object_id",
+                placeholder="2658211530641487553",
                 label_visibility="collapsed",
             )
             search_submitted = search_button_col.form_submit_button("Search")
