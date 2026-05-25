@@ -1427,8 +1427,8 @@ def build_cluster_distplot_figure(
     fig.update_layout(
         title={"text": feature, "x": 0.5, "xanchor": "center"},
         height=300,
-        margin={"l": 28, "r": 12, "t": 66, "b": 28},
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.12, "x": 0},
+        margin={"l": 28, "r": 12, "t": 46, "b": 58},
+        legend={"orientation": "h", "yanchor": "top", "y": -0.18, "x": 0},
         barmode="overlay",
         yaxis={"title": "density", "showgrid": True, "zeroline": False},
         yaxis2={"showgrid": True, "showticklabels": False, "zeroline": False},
