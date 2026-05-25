@@ -63,10 +63,11 @@ SUMMARY_DISTPLOT_MAX_POINTS_PER_GROUP = 5_000
 PCA_FILTER_OPERATORS = [">", ">=", "<", "<=", "between"]
 LENS_GRADE_HELP = (
     "Grade A: secure or almost secure lens candidates with clear lensing features "
-    "(expert score > 2.0). Grade B: probable lens candidates requiring additional "
-    "confirmation (expert score > 1.5). Grade C: possible lens candidates with "
-    "lens-like morphology that may still be explained by other physical structures "
-    "(expert score > 1.0)."
+    "(expert score > 2.0).\n\n"
+    "Grade B: probable lens candidates requiring additional confirmation "
+    "(expert score > 1.5).\n\n"
+    "Grade C: possible lens candidates with lens-like morphology that may still "
+    "be explained by other physical structures (expert score > 1.0)."
 )
 
 logging.basicConfig(level=logging.INFO)
