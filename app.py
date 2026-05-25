@@ -1744,15 +1744,6 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
         if lens_path is not None:
             show_image(lens_path, "Strong-lens image")
 
-    st.markdown("**Selected PCA components**")
-    st.dataframe(
-        pd.DataFrame(
-            [{"feature": feature, "value": row.get(feature)} for feature in selected_features]
-        ),
-        use_container_width=True,
-        hide_index=True,
-    )
-
 
 def show_morphology_catalogue_row(row: pd.Series) -> None:
     morphology_df = load_morphology_object(MORPH_PATH, str(row.get("object_id", "")))
@@ -1763,6 +1754,17 @@ def show_morphology_catalogue_row(row: pd.Series) -> None:
                 morph_display.rename(columns={"index": "field", morph_display.columns[-1]: "value"})
             )
             st.dataframe(morph_display, use_container_width=True, hide_index=True)
+
+
+def show_selected_pca_components(row: pd.Series, selected_features: list[str]) -> None:
+    st.markdown("**Selected PCA components**")
+    st.dataframe(
+        pd.DataFrame(
+            [{"feature": feature, "value": row.get(feature)} for feature in selected_features]
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 def render_euclid_object_search(object_id: str) -> None:
@@ -2389,7 +2391,11 @@ This analysis uses Euclid Q1 catalogue products available at:
                 show_object_details(selected_row, selected_features)
 
         if selected_row is not None:
-            show_morphology_catalogue_row(selected_row)
+            morphology_col, pca_col = st.columns([1, 1])
+            with morphology_col:
+                show_morphology_catalogue_row(selected_row)
+            with pca_col:
+                show_selected_pca_components(selected_row, selected_features)
 
 
 if __name__ == "__main__":
