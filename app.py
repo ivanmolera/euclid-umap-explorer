@@ -1661,7 +1661,6 @@ This analysis uses Euclid Q1 catalogue products available at:
             object_id_search_value = search_input_col.text_input(
                 "object_id",
                 value="2658211530641487553",
-                label_visibility="collapsed",
             )
             search_submitted = search_button_col.form_submit_button("Search")
         if search_submitted:
