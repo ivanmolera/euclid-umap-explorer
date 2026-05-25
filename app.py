@@ -1128,6 +1128,15 @@ def show_thumbnail(
         return
 
     st.image(image, caption=caption, width=SUMMARY_THUMBNAIL_WIDTH)
+    object_id = row.get("object_id", "")
+    id_str = row.get("id_str", "")
+    popover_label = "Open"
+    with st.popover(popover_label, use_container_width=True):
+        st.markdown(f"**{caption}**")
+        st.caption(f"object_id: {object_id}")
+        if not pd.isna(id_str) and str(id_str).strip():
+            st.caption(f"id_str: {id_str}")
+        st.image(image, caption=f"object_id={object_id}", use_container_width=True)
 
 
 def show_thumbnail_group(
