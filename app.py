@@ -1166,7 +1166,6 @@ def show_thumbnail(
             background: #0f1117;
             border: 1px solid rgba(255, 255, 255, 0.18);
             border-radius: 8px;
-            max-width: min(820px, 92vw);
             padding: 1rem;
         }}
         #{modal_id} .thumb-modal-meta {{
@@ -1176,8 +1175,9 @@ def show_thumbnail(
         }}
         #{modal_id} img {{
             display: block;
-            max-height: 78vh;
-            max-width: 100%;
+            height: 400px;
+            object-fit: contain;
+            width: 400px;
         }}
         .thumb-link img {{
             cursor: pointer;
@@ -1613,6 +1613,7 @@ def validate_paths() -> pd.DataFrame:
 
 def request_clustering() -> None:
     st.session_state["cluster_requested"] = True
+    st.session_state["cluster_summary_expanded"] = True
 
 
 def collapse_cluster_summary() -> None:
@@ -1731,6 +1732,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             "branching_factor": int(branching_factor),
             "batch_size": int(batch_size),
         }
+        st.session_state["cluster_summary_expanded"] = True
         log_app_event(
             "birch_clustering_requested",
             selected_grades=list(selected_lens_grades),
