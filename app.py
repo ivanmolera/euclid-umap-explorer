@@ -149,6 +149,47 @@ def inject_plot_cursor_css() -> None:
             background: #e84840;
             color: white !important;
         }
+        .concept-help {
+            border-bottom: 1px dotted rgba(250, 250, 250, 0.72);
+            cursor: help;
+            display: inline-block;
+            position: relative;
+        }
+        .concept-help::after {
+            content: "?";
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 0.9rem;
+            height: 0.9rem;
+            margin-left: 0.25rem;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.14);
+            color: rgba(250, 250, 250, 0.88);
+            font-size: 0.68rem;
+            font-weight: 700;
+        }
+        .concept-popover {
+            background: #171a22;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 8px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
+            color: #f8fafc;
+            display: none;
+            font-size: 0.82rem;
+            font-weight: 400;
+            left: 0;
+            line-height: 1.35;
+            min-width: 240px;
+            padding: 0.65rem 0.75rem;
+            position: absolute;
+            top: 1.45rem;
+            z-index: 1000;
+        }
+        .concept-help:hover .concept-popover,
+        .concept-help:focus .concept-popover {
+            display: block;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -950,6 +991,14 @@ def normalize_search_object_id(object_id: str) -> str:
         raise ValueError("object_id must be an integer value.") from exc
 
 
+def is_valid_search_object_id(object_id: str) -> bool:
+    try:
+        normalize_search_object_id(object_id)
+    except ValueError:
+        return False
+    return True
+
+
 def serializable_table_value(value: object) -> object:
     if hasattr(value, "item"):
         value = value.item()
@@ -1214,7 +1263,7 @@ def show_thumbnail_group(
     captions: list[str],
     prefer_lens_image: bool = False,
 ) -> None:
-    st.caption(title)
+    render_thumbnail_group_title(title)
     count = max(len(rows), 1)
     for column, row, caption in zip(st.columns(count), rows or [None], captions or [""]):
         with column:
@@ -1313,11 +1362,11 @@ def build_cluster_distplot_figure(
     colors = []
     if non_lens_values:
         hist_data.append(non_lens_values)
-        group_labels.append("No lens")
+        group_labels.append("Unknown")
         colors.append("#4c78a8")
     if lens_values:
         hist_data.append(lens_values)
-        group_labels.append("Lens")
+        group_labels.append("Lens candidate")
         colors.append("#d62728")
     if not hist_data:
         return None
@@ -1390,6 +1439,31 @@ def render_cluster_histograms(
             )
 
 
+def render_thumbnail_group_title(title: str) -> None:
+    if title != "Canonical / anomalous":
+        st.caption(title)
+        return
+
+    st.markdown(
+        """
+        <div style="color: rgba(250, 250, 250, 0.72); font-size: 0.82rem; margin-bottom: 0.35rem;">
+            <span class="concept-help" tabindex="0">Canonical
+                <span class="concept-popover">
+                    Object closest to the cluster centroid in the selected PCA feature space.
+                </span>
+            </span>
+            <span style="margin: 0 0.2rem;">/</span>
+            <span class="concept-help" tabindex="0">Anomalous
+                <span class="concept-popover">
+                    Object farthest from the cluster centroid in the selected PCA feature space.
+                </span>
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_cluster_visual_summary(
     clustered_df: pd.DataFrame,
     cluster_summary_df: pd.DataFrame,
@@ -1440,7 +1514,7 @@ def render_cluster_visual_summary(
                     else:
                         lens_captions.append(f"Grade {str(lens_grade).strip()}")
                 show_thumbnail_group(
-                    "Labelled lens candidates",
+                    "Labelled lens candidates in the cluster",
                     lens_rows,
                     lens_captions,
                     prefer_lens_image=True,
@@ -1659,14 +1733,34 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
         with st.form("object_id_search_form", clear_on_submit=False):
             search_input_col, search_button_col = st.columns([3, 1])
-            object_id_search_value = search_input_col.text_input(
-                "object_id",
-                placeholder="object_id",
-                label_visibility="collapsed",
-            )
+            with search_input_col:
+                if st.session_state.get("object_id_search_invalid"):
+                    st.markdown(
+                        """
+                        <style>
+                        div[data-testid="stTextInput"] input[aria-label="object_id"] {
+                            border: 2px solid #ef4444 !important;
+                            box-shadow: 0 0 0 0.1rem rgba(239, 68, 68, 0.25) !important;
+                        }
+                        </style>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                object_id_search_value = st.text_input(
+                    "object_id",
+                    placeholder="object_id",
+                    label_visibility="collapsed",
+                )
             search_submitted = search_button_col.form_submit_button("Search")
         if search_submitted:
-            st.session_state["euclid_search_object_id"] = object_id_search_value.strip()
+            search_object_id = object_id_search_value.strip()
+            if is_valid_search_object_id(search_object_id):
+                st.session_state["object_id_search_invalid"] = False
+                st.session_state["euclid_search_object_id"] = search_object_id
+            else:
+                st.session_state["object_id_search_invalid"] = True
+                st.session_state.pop("euclid_search_object_id", None)
+                st.rerun()
 
         st.header("Lens candidates")
         selected_lens_grades = st.multiselect(
