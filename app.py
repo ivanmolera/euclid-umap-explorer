@@ -72,6 +72,32 @@ LENS_GRADE_HELP = (
     "Grade C: possible lens candidates with lens-like morphology that may still "
     "be explained by other physical structures (expert score > 1.0)."
 )
+PARAMETER_HELP = {
+    "threshold": (
+        "BIRCH radius threshold. Larger values create broader clusters; "
+        "smaller values split the data into more compact groups."
+    ),
+    "branching_factor": (
+        "Maximum number of subclusters kept at each BIRCH tree node. Higher "
+        "values can preserve more structure, with extra memory cost."
+    ),
+    "batch_size": (
+        "Number of catalogue rows processed at once during BIRCH fitting and "
+        "prediction. Larger batches can be faster but use more memory."
+    ),
+    "n_neighbors": (
+        "UMAP neighborhood size. Lower values emphasize local structure; higher "
+        "values preserve broader global structure."
+    ),
+    "min_dist": (
+        "Minimum distance between nearby points in the UMAP layout. Lower values "
+        "form tighter groups; higher values spread points out."
+    ),
+    "Maximum objects": (
+        "Upper limit for objects drawn in the UMAP view, used to keep interaction "
+        "responsive on large clusters."
+    ),
+}
 
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger("euclid_umap_explorer")
@@ -634,7 +660,7 @@ def add_cluster_extreme_roles(
     marked = data.copy()
     marked["is_canonical"] = False
     marked["is_anomaly"] = False
-    marked["point_role"] = np.where(marked["is_lens"], "Lens", "No lens")
+    marked["point_role"] = np.where(marked["is_lens"], "Lens candidate", "Unknown")
 
     clean = marked.dropna(subset=selected_features).copy()
     if len(clean) < 2:
@@ -1454,6 +1480,22 @@ def render_thumbnail_group_title(title: str) -> None:
     )
 
 
+def render_help_label(label: str, help_text: str) -> None:
+    escaped_label = html.escape(label)
+    escaped_help = html.escape(help_text).replace("\n", "<br>")
+    st.markdown(
+        f"""
+        <div style="font-size: 0.88rem; font-weight: 600; margin-bottom: 0.2rem;">
+            <span class="concept-help" tabindex="0">
+                {escaped_label}
+                <span class="concept-popover">{escaped_help}</span>
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_cluster_visual_summary(
     clustered_df: pd.DataFrame,
     cluster_summary_df: pd.DataFrame,
@@ -1738,17 +1780,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             st.session_state["euclid_search_object_id"] = search_object_id
 
         st.header("Lens candidates")
-        st.markdown(
-            f"""
-            <div style="font-size: 0.88rem; font-weight: 600; margin-bottom: 0.2rem;">
-                <span class="concept-help" tabindex="0">
-                    Lens grades
-                    <span class="concept-popover">{html.escape(LENS_GRADE_HELP).replace(chr(10), "<br>")}</span>
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        render_help_label("Lens grades", LENS_GRADE_HELP)
         selected_lens_grades = st.multiselect(
             "Lens grades",
             LENS_GRADE_OPTIONS,
@@ -1763,19 +1795,30 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
         with st.expander("BIRCH parameters", expanded=birch_expanded):
             st.caption("All available PCA components are used for the initial clustering")
-            threshold = st.number_input("threshold", min_value=0.1, value=8.0, step=0.1)
+            render_help_label("threshold", PARAMETER_HELP["threshold"])
+            threshold = st.number_input(
+                "threshold",
+                min_value=0.1,
+                value=8.0,
+                step=0.1,
+                label_visibility="collapsed",
+            )
+            render_help_label("branching_factor", PARAMETER_HELP["branching_factor"])
             branching_factor = st.number_input(
                 "branching_factor",
                 min_value=2,
                 value=2,
                 step=1,
+                label_visibility="collapsed",
             )
+            render_help_label("batch_size", PARAMETER_HELP["batch_size"])
             batch_size = st.number_input(
                 "batch_size",
                 min_value=1_000,
                 max_value=250_000,
                 value=25_000,
                 step=1_000,
+                label_visibility="collapsed",
             )
             run_clustering = st.button(
                 "Run clustering",
@@ -1889,9 +1932,32 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
 
         with st.expander("UMAP parameters", expanded=True):
-            n_neighbors = st.slider("n_neighbors", 2, 100, 25)
-            min_dist = st.slider("min_dist", 0.0, 1.0, 0.15, step=0.01)
-            max_objects = st.slider("Maximum objects", 100, 100_000, 20_000, step=100)
+            render_help_label("n_neighbors", PARAMETER_HELP["n_neighbors"])
+            n_neighbors = st.slider(
+                "n_neighbors",
+                2,
+                100,
+                25,
+                label_visibility="collapsed",
+            )
+            render_help_label("min_dist", PARAMETER_HELP["min_dist"])
+            min_dist = st.slider(
+                "min_dist",
+                0.0,
+                1.0,
+                0.15,
+                step=0.01,
+                label_visibility="collapsed",
+            )
+            render_help_label("Maximum objects", PARAMETER_HELP["Maximum objects"])
+            max_objects = st.slider(
+                "Maximum objects",
+                100,
+                100_000,
+                20_000,
+                step=100,
+                label_visibility="collapsed",
+            )
 
     if not selected_features:
         st.warning("Select at least one PCA component to build UMAP.")
@@ -2046,19 +2112,19 @@ This analysis uses Euclid Q1 catalogue products available at:
         custom_data=["point_index"],
         hover_data=hover_columns,
         color_discrete_map={
-            "No lens": "#4c78a8",
-            "Lens": "#d62728",
+            "Unknown": "#4c78a8",
+            "Lens candidate": "#d62728",
             "Canonical": "#2ca02c",
             "Anomaly": "#111111",
         },
         symbol_map={
-            "No lens": "circle",
-            "Lens": "circle",
+            "Unknown": "circle",
+            "Lens candidate": "circle",
             "Canonical": "diamond",
             "Anomaly": "x",
         },
         category_orders={
-            "point_role": ["No lens", "Lens", "Canonical", "Anomaly"],
+            "point_role": ["Unknown", "Lens candidate", "Canonical", "Anomaly"],
         },
         labels={"umap_1": "UMAP 1", "umap_2": "UMAP 2", "point_role": "Type"},
         height=680,
@@ -2066,7 +2132,7 @@ This analysis uses Euclid Q1 catalogue products available at:
     fig.update_traces(marker={"size": 7, "opacity": 0.72})
     fig.update_traces(
         marker={"size": 17, "opacity": 0.98, "line": {"width": 1.5, "color": "white"}},
-        selector={"name": "Lens"},
+        selector={"name": "Lens candidate"},
     )
     fig.update_traces(
         marker={"size": 14, "opacity": 1.0, "line": {"width": 2, "color": "white"}},
