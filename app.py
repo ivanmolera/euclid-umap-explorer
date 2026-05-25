@@ -2109,9 +2109,18 @@ This analysis uses Euclid Q1 catalogue products available at:
         "Clustering summary",
         expanded=st.session_state.get("cluster_summary_expanded", False),
     ):
-        st.metric(
-            "BIRCH execution time",
-            format_duration(clustered_df.attrs.get("processing_seconds")),
+        st.markdown(
+            f"""
+            <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
+                <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
+                    Execution time:
+                </span>
+                <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
+                    {format_duration(clustered_df.attrs.get("processing_seconds"))}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
         summary_display = cluster_summary_df.copy()
         summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
