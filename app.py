@@ -59,7 +59,7 @@ DEFAULT_LENS_GRADES = ["A", "B", "C"]
 LENS_GRADE_OPTIONS = ["A", "B", "C"]
 SUMMARY_RANDOM_OBJECTS = 3
 SUMMARY_LENS_OBJECTS = 5
-SUMMARY_THUMBNAIL_WIDTH = 96
+SUMMARY_THUMBNAIL_WIDTH = 90
 SUMMARY_HISTOGRAM_BINS = 24
 SUMMARY_HISTOGRAM_FEATURE_LIMIT = 6
 SUMMARY_DISTPLOT_MAX_POINTS_PER_GROUP = 5_000
@@ -151,23 +151,9 @@ def inject_plot_cursor_css() -> None:
         }
         .concept-help {
             border-bottom: 1px dotted rgba(250, 250, 250, 0.72);
-            cursor: help;
+            cursor: help !important;
             display: inline-block;
             position: relative;
-        }
-        .concept-help::after {
-            content: "?";
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 0.9rem;
-            height: 0.9rem;
-            margin-left: 0.25rem;
-            border-radius: 999px;
-            background: rgba(255, 255, 255, 0.14);
-            color: rgba(250, 250, 250, 0.88);
-            font-size: 0.68rem;
-            font-weight: 700;
         }
         .concept-popover {
             background: #171a22;
@@ -1230,6 +1216,10 @@ def show_thumbnail(
         }}
         .thumb-link img {{
             cursor: pointer;
+            display: block;
+            height: {SUMMARY_THUMBNAIL_WIDTH}px;
+            object-fit: cover;
+            width: {SUMMARY_THUMBNAIL_WIDTH}px;
         }}
         .thumb-caption {{
             color: rgba(250, 250, 250, 0.72);
@@ -1240,7 +1230,7 @@ def show_thumbnail(
         }}
         </style>
         <a class="thumb-link" href="#{modal_id}" title="Open enlarged image">
-            <img src="{image_src}" width="{SUMMARY_THUMBNAIL_WIDTH}" />
+            <img src="{image_src}" width="{SUMMARY_THUMBNAIL_WIDTH}" height="{SUMMARY_THUMBNAIL_WIDTH}" />
         </a>
         <div class="thumb-caption">{escaped_caption}</div>
         <div id="{modal_id}">
@@ -1387,8 +1377,8 @@ def build_cluster_distplot_figure(
     fig.update_layout(
         title={"text": feature, "x": 0.5, "xanchor": "center"},
         height=300,
-        margin={"l": 28, "r": 12, "t": 42, "b": 28},
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
+        margin={"l": 28, "r": 12, "t": 66, "b": 28},
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.12, "x": 0},
         barmode="overlay",
         yaxis={"title": "density", "showgrid": True, "zeroline": False},
         yaxis2={"showgrid": True, "showticklabels": False, "zeroline": False},
@@ -1731,43 +1721,39 @@ This analysis uses Euclid Q1 catalogue products available at:
 - [First visual morphology catalogue](https://zenodo.org/records/15106473)
             """
         )
-        with st.form("object_id_search_form", clear_on_submit=False):
-            search_input_col, search_button_col = st.columns([3, 1])
-            with search_input_col:
-                if st.session_state.get("object_id_search_invalid"):
-                    st.markdown(
-                        """
-                        <style>
-                        div[data-testid="stTextInput"] input[aria-label="object_id"] {
-                            border: 2px solid #ef4444 !important;
-                            box-shadow: 0 0 0 0.1rem rgba(239, 68, 68, 0.25) !important;
-                        }
-                        </style>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                object_id_search_value = st.text_input(
-                    "object_id",
-                    placeholder="object_id",
-                    label_visibility="collapsed",
-                )
-            search_submitted = search_button_col.form_submit_button("Search")
+        search_input_col, search_button_col = st.columns([3, 1])
+        with search_input_col:
+            object_id_search_value = st.text_input(
+                "object_id",
+                placeholder="object_id",
+                label_visibility="collapsed",
+                key="object_id_search_value",
+            )
+        search_object_id = object_id_search_value.strip()
+        search_submitted = search_button_col.button(
+            "Search",
+            disabled=not is_valid_search_object_id(search_object_id),
+        )
         if search_submitted:
-            search_object_id = object_id_search_value.strip()
-            if is_valid_search_object_id(search_object_id):
-                st.session_state["object_id_search_invalid"] = False
-                st.session_state["euclid_search_object_id"] = search_object_id
-            else:
-                st.session_state["object_id_search_invalid"] = True
-                st.session_state.pop("euclid_search_object_id", None)
-                st.rerun()
+            st.session_state["euclid_search_object_id"] = search_object_id
 
         st.header("Lens candidates")
+        st.markdown(
+            f"""
+            <div style="font-size: 0.88rem; font-weight: 600; margin-bottom: 0.2rem;">
+                <span class="concept-help" tabindex="0">
+                    Lens grades
+                    <span class="concept-popover">{html.escape(LENS_GRADE_HELP).replace(chr(10), "<br>")}</span>
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         selected_lens_grades = st.multiselect(
             "Lens grades",
             LENS_GRADE_OPTIONS,
             default=DEFAULT_LENS_GRADES,
-            help=LENS_GRADE_HELP,
+            label_visibility="collapsed",
         )
         selected_lens_grades = normalize_lens_grades(selected_lens_grades)
 
