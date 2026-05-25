@@ -1924,14 +1924,10 @@ This analysis uses Euclid Q1 catalogue products available at:
     cluster_summary_df = build_cluster_summary(clustered_df)
     cluster_summary_df["option"] = cluster_summary_df.apply(format_cluster_option, axis=1)
 
-    left_metric, middle_metric, right_metric, duration_metric = st.columns(4)
+    left_metric, middle_metric, right_metric = st.columns(3)
     left_metric.metric("Clustered objects", f"{len(clustered_df):,}")
     middle_metric.metric("Clusters", f"{clustered_df['cluster'].nunique():,}")
     right_metric.metric("Lenses", f"{int(clustered_df['is_lens'].sum()):,}")
-    duration_metric.metric(
-        "BIRCH time",
-        format_duration(clustered_df.attrs.get("processing_seconds")),
-    )
     st.caption(f"Lens grades used: {', '.join(lens_grades)}")
 
     with st.sidebar:
@@ -1993,9 +1989,13 @@ This analysis uses Euclid Q1 catalogue products available at:
     pca_filters = normalize_pca_filters(raw_pca_filters, pca_columns)
 
     with st.expander(
-        "Cluster summary",
+        "Clustering summary",
         expanded=st.session_state.get("cluster_summary_expanded", False),
     ):
+        st.metric(
+            "BIRCH execution time",
+            format_duration(clustered_df.attrs.get("processing_seconds")),
+        )
         summary_display = cluster_summary_df.copy()
         summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
         st.dataframe(
