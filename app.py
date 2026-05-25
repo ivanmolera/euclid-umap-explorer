@@ -1227,6 +1227,13 @@ ORDER BY file_name
         f"{mosaic_summary.get('tile_index')}_{normalized_object_id}",
         normalized_object_id,
     )
+    if local_cutout_path is None:
+        morphology_df = load_morphology_object(MORPH_PATH, normalized_object_id)
+        if not morphology_df.empty and "id_str" in morphology_df.columns:
+            local_cutout_path = morphology_cutout_path(
+                morphology_df.iloc[0]["id_str"],
+                normalized_object_id,
+            )
 
     return {
         "object_id": normalized_object_id,
