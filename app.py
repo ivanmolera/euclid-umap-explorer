@@ -1700,7 +1700,7 @@ def show_lens_status(row: pd.Series) -> None:
     else:
         label = "UNKNOWN"
         css_class = "lens-status--no"
-        meta = "Object not marked as a lens in the joined catalogue."
+        meta = "Object not marked as a lens candidate in the joined catalogue."
 
     st.markdown(
         f"""
