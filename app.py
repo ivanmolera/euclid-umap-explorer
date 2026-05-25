@@ -1731,15 +1731,6 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
     }
     st.dataframe(pd.DataFrame([details]), use_container_width=True, hide_index=True)
 
-    st.markdown("**Selected PCA components**")
-    st.dataframe(
-        pd.DataFrame(
-            [{"feature": feature, "value": row.get(feature)} for feature in selected_features]
-        ),
-        use_container_width=True,
-        hide_index=True,
-    )
-
     cutout_path = morphology_cutout_path(row.get("id_str"), row.get("object_id"))
     lens_path = lens_image_path(row.get("lens_id_str"))
     if lens_path is None and bool(row.get("is_lens", False)):
@@ -1752,6 +1743,15 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
             show_image(cutout_path, "Morphology cutout")
         if lens_path is not None:
             show_image(lens_path, "Strong-lens image")
+
+    st.markdown("**Selected PCA components**")
+    st.dataframe(
+        pd.DataFrame(
+            [{"feature": feature, "value": row.get(feature)} for feature in selected_features]
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 def show_morphology_catalogue_row(row: pd.Series) -> None:
