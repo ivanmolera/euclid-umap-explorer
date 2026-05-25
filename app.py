@@ -1740,6 +1740,19 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
         hide_index=True,
     )
 
+    cutout_path = morphology_cutout_path(row.get("id_str"), row.get("object_id"))
+    lens_path = lens_image_path(row.get("lens_id_str"))
+    if lens_path is None and bool(row.get("is_lens", False)):
+        lens_path = lens_image_path(row.get("id_str"))
+
+    if cutout_path is None and lens_path is None:
+        st.info("No associated image was found in the configured paths.")
+    else:
+        if cutout_path is not None:
+            show_image(cutout_path, "Morphology cutout")
+        if lens_path is not None:
+            show_image(lens_path, "Strong-lens image")
+
     morphology_df = load_morphology_object(MORPH_PATH, str(row.get("object_id", "")))
     if not morphology_df.empty:
         with st.expander("Morphology catalogue row", expanded=False):
@@ -1748,20 +1761,6 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
                 morph_display.rename(columns={"index": "field", morph_display.columns[-1]: "value"})
             )
             st.dataframe(morph_display, use_container_width=True, hide_index=True)
-
-    cutout_path = morphology_cutout_path(row.get("id_str"), row.get("object_id"))
-    lens_path = lens_image_path(row.get("lens_id_str"))
-    if lens_path is None and bool(row.get("is_lens", False)):
-        lens_path = lens_image_path(row.get("id_str"))
-
-    if cutout_path is None and lens_path is None:
-        st.info("No associated image was found in the configured paths.")
-        return
-
-    if cutout_path is not None:
-        show_image(cutout_path, "Morphology cutout")
-    if lens_path is not None:
-        show_image(lens_path, "Strong-lens image")
 
 
 def render_euclid_object_search(object_id: str) -> None:
@@ -2236,17 +2235,12 @@ This analysis uses Euclid Q1 catalogue products available at:
         cluster_middle,
         cluster_right,
         cluster_fourth,
-        umap_time,
-    ) = st.columns(6)
+    ) = st.columns(5)
     cluster_left.metric("Cluster objects", f"{len(cluster_df):,}")
     cluster_filtered.metric("After filters", f"{len(filtered_cluster_df):,}")
     cluster_middle.metric("Objects in UMAP", f"{len(embedding_df):,}")
     cluster_right.metric("Lenses in UMAP", f"{int(embedding_df['is_lens'].sum()):,}")
     cluster_fourth.metric("Extremes", "2")
-    umap_time.metric(
-        "UMAP time",
-        format_duration(embedding_df.attrs.get("processing_seconds")),
-    )
 
     embedding_df = embedding_df.copy()
     if "lens_grade" in embedding_df.columns:
@@ -2350,27 +2344,42 @@ This analysis uses Euclid Q1 catalogue products available at:
         uirevision=st.session_state.get("umap_signature"),
     )
 
-    plot_col, detail_col = st.columns([2, 1])
-    with plot_col:
-        event = st.plotly_chart(
-            fig,
-            use_container_width=True,
-            config={
-                "displaylogo": False,
-                "scrollZoom": True,
-                "doubleClick": "reset",
-            },
-            on_select="rerun",
-            selection_mode="points",
-            key="umap_selection",
+    with st.expander("UMAP summary", expanded=True):
+        st.markdown(
+            f"""
+            <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
+                <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
+                    Execution time:
+                </span>
+                <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
+                    {format_duration(embedding_df.attrs.get("processing_seconds"))}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-    selected_index = selected_point_index(event)
-    with detail_col:
-        if selected_index is None:
-            st.info("Select a point on the map to view its details and image.")
-        else:
-            show_object_details(embedding_df.loc[selected_index], selected_features)
+        plot_col, detail_col = st.columns([2, 1])
+        with plot_col:
+            event = st.plotly_chart(
+                fig,
+                use_container_width=True,
+                config={
+                    "displaylogo": False,
+                    "scrollZoom": True,
+                    "doubleClick": "reset",
+                },
+                on_select="rerun",
+                selection_mode="points",
+                key="umap_selection",
+            )
+
+        selected_index = selected_point_index(event)
+        with detail_col:
+            if selected_index is None:
+                st.info("Select a point on the map to view its details and image.")
+            else:
+                show_object_details(embedding_df.loc[selected_index], selected_features)
 
 
 if __name__ == "__main__":
