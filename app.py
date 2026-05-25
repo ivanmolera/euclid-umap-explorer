@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import html
 import json
 import logging
 import os
@@ -1121,22 +1124,88 @@ def show_thumbnail(
         return
 
     try:
-        image = Image.open(BytesIO(load_image_bytes(path)))
+        image_bytes = load_image_bytes(path)
+        image = Image.open(BytesIO(image_bytes))
     except Exception:
         st.caption(caption)
         st.caption("No image")
         return
 
-    st.image(image, caption=caption, width=SUMMARY_THUMBNAIL_WIDTH)
     object_id = row.get("object_id", "")
     id_str = row.get("id_str", "")
-    popover_label = "Open"
-    with st.popover(popover_label, use_container_width=True):
-        st.markdown(f"**{caption}**")
-        st.caption(f"object_id: {object_id}")
-        if not pd.isna(id_str) and str(id_str).strip():
-            st.caption(f"id_str: {id_str}")
-        st.image(image, caption=f"object_id={object_id}", use_container_width=True)
+    image_type = "png" if str(path).lower().endswith(".png") else "jpeg"
+    image_src = f"data:image/{image_type};base64,{base64.b64encode(image_bytes).decode()}"
+    modal_key = hashlib.sha1(f"{caption}|{object_id}|{id_str}".encode()).hexdigest()[:12]
+    modal_id = f"thumb-{modal_key}"
+    escaped_caption = html.escape(str(caption))
+    escaped_object_id = html.escape(str(object_id))
+    escaped_id_str = html.escape(str(id_str))
+    id_str_html = (
+        f"<div class='thumb-modal-meta'>id_str: {escaped_id_str}</div>"
+        if not pd.isna(id_str) and str(id_str).strip()
+        else ""
+    )
+
+    st.markdown(
+        f"""
+        <style>
+        #{modal_id} {{
+            display: none;
+        }}
+        #{modal_id}:target {{
+            align-items: center;
+            background: rgba(0, 0, 0, 0.82);
+            display: flex;
+            inset: 0;
+            justify-content: center;
+            padding: 2rem;
+            position: fixed;
+            z-index: 10000;
+        }}
+        #{modal_id} .thumb-modal-panel {{
+            background: #0f1117;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 8px;
+            max-width: min(820px, 92vw);
+            padding: 1rem;
+        }}
+        #{modal_id} .thumb-modal-meta {{
+            color: #f8fafc;
+            font-size: 0.9rem;
+            margin-bottom: 0.45rem;
+        }}
+        #{modal_id} img {{
+            display: block;
+            max-height: 78vh;
+            max-width: 100%;
+        }}
+        .thumb-link img {{
+            cursor: pointer;
+        }}
+        .thumb-caption {{
+            color: rgba(250, 250, 250, 0.72);
+            font-size: 0.82rem;
+            margin-top: 0.2rem;
+            text-align: center;
+            width: {SUMMARY_THUMBNAIL_WIDTH}px;
+        }}
+        </style>
+        <a class="thumb-link" href="#{modal_id}" title="Open enlarged image">
+            <img src="{image_src}" width="{SUMMARY_THUMBNAIL_WIDTH}" />
+        </a>
+        <div class="thumb-caption">{escaped_caption}</div>
+        <div id="{modal_id}">
+            <a href="#" style="position: fixed; inset: 0;" aria-label="Close"></a>
+            <div class="thumb-modal-panel">
+                <div class="thumb-modal-meta"><strong>{escaped_caption}</strong></div>
+                <div class="thumb-modal-meta">object_id: {escaped_object_id}</div>
+                {id_str_html}
+                <img src="{image_src}" alt="{escaped_caption}" />
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def show_thumbnail_group(
@@ -1488,25 +1557,25 @@ def render_euclid_object_search(object_id: str) -> None:
             if cutout_path:
                 show_image(
                     str(cutout_path),
-                    f"Euclid VIS cutout | object_id={result['object_id']}",
+                    "Euclid VIS cutout",
                 )
             else:
                 st.info(
                     "No precomputed JPEG cutout was found for this object. "
                     "No FITS file was downloaded."
                 )
-        with summary_col:
-            st.markdown("**Object summary**")
-            object_display = pd.DataFrame(
-                [{"field": field, "value": value} for field, value in object_summary.items()]
-            )
-            st.dataframe(object_display, use_container_width=True, hide_index=True)
 
             st.markdown("**Mosaic summary**")
             mosaic_display = pd.DataFrame(
                 [{"field": field, "value": value} for field, value in mosaic_summary.items()]
             )
             st.dataframe(mosaic_display, use_container_width=True, hide_index=True)
+        with summary_col:
+            st.markdown("**Object summary**")
+            object_display = pd.DataFrame(
+                [{"field": field, "value": value} for field, value in object_summary.items()]
+            )
+            st.dataframe(object_display, use_container_width=True, hide_index=True)
 
             st.markdown("**Morphology catalogue features**")
             if morphology_df.empty:
