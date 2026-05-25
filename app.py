@@ -61,6 +61,13 @@ SUMMARY_HISTOGRAM_BINS = 24
 SUMMARY_HISTOGRAM_FEATURE_LIMIT = 6
 SUMMARY_DISTPLOT_MAX_POINTS_PER_GROUP = 5_000
 PCA_FILTER_OPERATORS = [">", ">=", "<", "<=", "between"]
+LENS_GRADE_HELP = (
+    "Grade A: secure or almost secure lens candidates with clear lensing features "
+    "(expert score > 2.0). Grade B: probable lens candidates requiring additional "
+    "confirmation (expert score > 1.5). Grade C: possible lens candidates with "
+    "lens-like morphology that may still be explained by other physical structures "
+    "(expert score > 1.0)."
+)
 
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger("euclid_umap_explorer")
@@ -1349,7 +1356,7 @@ def render_cluster_visual_summary(
                     else:
                         lens_captions.append(f"Grade {str(lens_grade).strip()}")
                 show_thumbnail_group(
-                    "Confirmed lenses",
+                    "Labelled lens candidates",
                     lens_rows,
                     lens_captions,
                     prefer_lens_image=True,
@@ -1561,11 +1568,12 @@ This analysis uses Euclid Q1 catalogue products available at:
         if search_submitted:
             st.session_state["euclid_search_object_id"] = object_id_search_value.strip()
 
-        st.header("Lenses")
+        st.header("Lens candidates")
         selected_lens_grades = st.multiselect(
             "Lens grades",
             LENS_GRADE_OPTIONS,
             default=DEFAULT_LENS_GRADES,
+            help=LENS_GRADE_HELP,
         )
         selected_lens_grades = normalize_lens_grades(selected_lens_grades)
 
