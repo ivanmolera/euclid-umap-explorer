@@ -5,7 +5,11 @@ import hashlib
 import html
 import json
 import logging
+import multiprocessing as mp
 import os
+import pickle
+import queue
+import tempfile
 import time
 from io import BytesIO
 from pathlib import Path
@@ -46,6 +50,7 @@ CACHE_DIR = Path(
     os.getenv("EUCLID_CACHE_DIR", Path.home() / ".cache" / "euclid-umap-explorer")
 )
 USE_LOCAL_CACHE = os.getenv("EUCLID_USE_LOCAL_CACHE", "1") != "0"
+MAX_ALGORITHM_SECONDS = int(os.getenv("EUCLID_MAX_ALGORITHM_SECONDS", "600"))
 
 DEFAULT_CLUSTER_FEATURES = [
     "feat_pca_6",
@@ -111,6 +116,73 @@ def log_app_event(event_type: str, **fields: object) -> None:
         **fields,
     }
     LOGGER.info(json.dumps(payload, default=str, sort_keys=True))
+
+
+class AlgorithmTimeoutError(TimeoutError):
+    pass
+
+
+def _run_in_process_worker(
+    result_queue: mp.Queue,
+    result_path: str,
+    function,
+    args: tuple,
+    kwargs: dict,
+) -> None:
+    try:
+        result = function(*args, **kwargs)
+        with open(result_path, "wb") as file:
+            pickle.dump(result, file, protocol=pickle.HIGHEST_PROTOCOL)
+        result_queue.put(("ok", None))
+    except BaseException as exc:
+        result_queue.put(("error", exc))
+
+
+def run_with_timeout(function, *args, timeout_seconds: int, **kwargs):
+    ctx = mp.get_context("fork" if "fork" in mp.get_all_start_methods() else "spawn")
+    result_queue = ctx.Queue(maxsize=1)
+    result_file = tempfile.NamedTemporaryFile(
+        prefix="euclid_algorithm_result_",
+        suffix=".pkl",
+        delete=False,
+    )
+    result_path = result_file.name
+    result_file.close()
+    process = ctx.Process(
+        target=_run_in_process_worker,
+        args=(result_queue, result_path, function, args, kwargs),
+    )
+    try:
+        process.start()
+        process.join(timeout_seconds)
+
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+            if process.is_alive():
+                process.kill()
+                process.join()
+            raise AlgorithmTimeoutError(
+                f"{function.__name__} exceeded {format_duration(timeout_seconds)}."
+            )
+
+        try:
+            status, payload = result_queue.get_nowait()
+        except queue.Empty as exc:
+            raise RuntimeError(
+                f"{function.__name__} finished without returning a result."
+            ) from exc
+
+        if status == "error":
+            raise payload
+
+        with open(result_path, "rb") as file:
+            return pickle.load(file)
+    finally:
+        try:
+            os.unlink(result_path)
+        except FileNotFoundError:
+            pass
 
 
 def inject_plot_cursor_css() -> None:
@@ -450,8 +522,7 @@ def merge_lens_flags(work_df: pd.DataFrame, lens_df: pd.DataFrame) -> pd.DataFra
     return merged
 
 
-@st.cache_data(show_spinner=True)
-def run_birch_clustering(
+def _run_birch_clustering_impl(
     parquet_path: str,
     lens_path: str,
     selected_grades: tuple[str, ...],
@@ -521,6 +592,27 @@ def run_birch_clustering(
         batch_size=int(batch_size),
     )
     return clustered_df, feature_cols
+
+
+@st.cache_data(show_spinner=True)
+def run_birch_clustering(
+    parquet_path: str,
+    lens_path: str,
+    selected_grades: tuple[str, ...],
+    threshold: float,
+    branching_factor: int,
+    batch_size: int,
+) -> tuple[pd.DataFrame, list[str]]:
+    return run_with_timeout(
+        _run_birch_clustering_impl,
+        parquet_path,
+        lens_path,
+        selected_grades,
+        threshold,
+        branching_factor,
+        batch_size,
+        timeout_seconds=MAX_ALGORITHM_SECONDS,
+    )
 
 
 def build_cluster_summary(clustered_df: pd.DataFrame) -> pd.DataFrame:
@@ -625,8 +717,7 @@ def sample_for_display(df: pd.DataFrame, max_objects: int) -> pd.DataFrame:
     return sampled.drop(columns=["_sample_priority"]).copy()
 
 
-@st.cache_data(show_spinner=True)
-def compute_umap_embedding(
+def _compute_umap_embedding_impl(
     data: pd.DataFrame,
     selected_features: list[str],
     n_neighbors: int,
@@ -673,6 +764,23 @@ def compute_umap_embedding(
         min_dist=float(min_dist),
     )
     return clean
+
+
+@st.cache_data(show_spinner=True)
+def compute_umap_embedding(
+    data: pd.DataFrame,
+    selected_features: list[str],
+    n_neighbors: int,
+    min_dist: float,
+) -> pd.DataFrame:
+    return run_with_timeout(
+        _compute_umap_embedding_impl,
+        data,
+        selected_features,
+        n_neighbors,
+        min_dist,
+        timeout_seconds=MAX_ALGORITHM_SECONDS,
+    )
 
 
 def add_cluster_extreme_roles(
@@ -1906,6 +2014,15 @@ This analysis uses Euclid Q1 catalogue products available at:
             int(params["branching_factor"]),
             int(params["batch_size"]),
         )
+    except AlgorithmTimeoutError as exc:
+        log_app_event("birch_clustering_timeout", timeout_seconds=MAX_ALGORITHM_SECONDS)
+        st.error(
+            "BIRCH clustering was cancelled because it exceeded the "
+            f"{format_duration(MAX_ALGORITHM_SECONDS)} execution limit. "
+            "Try a less expensive configuration before running it again."
+        )
+        st.exception(exc)
+        st.stop()
     except TimeoutError as exc:
         st.error(
             "The data source timed out while reading a catalogue. "
@@ -2064,12 +2181,29 @@ This analysis uses Euclid Q1 catalogue products available at:
             st.warning("At least 3 objects are required to compute UMAP.")
             st.stop()
 
-        embedding_df = compute_umap_embedding(
-            display_df,
-            selected_features,
-            n_neighbors=n_neighbors,
-            min_dist=min_dist,
-        )
+        try:
+            embedding_df = compute_umap_embedding(
+                display_df,
+                selected_features,
+                n_neighbors=n_neighbors,
+                min_dist=min_dist,
+            )
+        except AlgorithmTimeoutError as exc:
+            log_app_event(
+                "umap_timeout",
+                timeout_seconds=MAX_ALGORITHM_SECONDS,
+                cluster=int(selected_cluster),
+                display_objects=int(len(display_df)),
+                n_features=int(len(selected_features)),
+            )
+            st.error(
+                "UMAP was cancelled because it exceeded the "
+                f"{format_duration(MAX_ALGORITHM_SECONDS)} execution limit. "
+                "Try reducing the maximum number of objects, using fewer PCA components, "
+                "or adjusting the UMAP parameters before running it again."
+            )
+            st.exception(exc)
+            st.stop()
 
         if embedding_df.empty:
             st.warning("No objects remain with complete values for the selected components.")
