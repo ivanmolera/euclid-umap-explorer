@@ -1748,7 +1748,7 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
 def show_morphology_catalogue_row(row: pd.Series) -> None:
     morphology_df = load_morphology_object(MORPH_PATH, str(row.get("object_id", "")))
     if not morphology_df.empty:
-        st.markdown("**Morphology catalogue row**")
+        st.markdown("**Morphology catalogue features**")
         morph_display = morphology_df.iloc[0].dropna().astype(str).reset_index()
         morph_display = (
             morph_display.rename(columns={"index": "field", morph_display.columns[-1]: "value"})
