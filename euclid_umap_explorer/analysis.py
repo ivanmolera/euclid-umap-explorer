@@ -8,13 +8,14 @@ from .config import LENS_GRADE_OPTIONS, PCA_FILTER_OPERATORS
 
 PCA_SELECTION_PRESETS = [
     "Manual selection",
-    "Top 10 PCA by explained variance",
+    "PCA by explained variance",
     "Top 10 PCA by Random Forest importance",
     "Top 10 PCA by mutual information with lens candidate labels",
+    "Lens-displaced PCA components",
     "All 40 PCA baseline",
 ]
 
-PCA_TOP_10_BY_EXPLAINED_VARIANCE = [
+PCA_BY_EXPLAINED_VARIANCE = [
     "feat_pca_0",
     "feat_pca_1",
     "feat_pca_2",
@@ -25,6 +26,7 @@ PCA_TOP_10_BY_EXPLAINED_VARIANCE = [
     "feat_pca_7",
     "feat_pca_8",
     "feat_pca_9",
+    "feat_pca_10",
 ]
 PCA_TOP_10_BY_RANDOM_FOREST_IMPORTANCE = [
     "feat_pca_6",
@@ -50,12 +52,23 @@ PCA_TOP_10_BY_MUTUAL_INFORMATION = [
     "feat_pca_13",
     "feat_pca_22",
 ]
+PCA_LENS_DISPLACED_COMPONENTS = [
+    "feat_pca_6",
+    "feat_pca_0",
+    "feat_pca_12",
+    "feat_pca_1",
+    "feat_pca_27",
+    "feat_pca_10",
+    "feat_pca_8",
+    "feat_pca_13",
+]
 PCA_PRESET_FEATURES = {
-    "Top 10 PCA by explained variance": PCA_TOP_10_BY_EXPLAINED_VARIANCE,
+    "PCA by explained variance": PCA_BY_EXPLAINED_VARIANCE,
     "Top 10 PCA by Random Forest importance": PCA_TOP_10_BY_RANDOM_FOREST_IMPORTANCE,
     "Top 10 PCA by mutual information with lens candidate labels": (
         PCA_TOP_10_BY_MUTUAL_INFORMATION
     ),
+    "Lens-displaced PCA components": PCA_LENS_DISPLACED_COMPONENTS,
 }
 
 
