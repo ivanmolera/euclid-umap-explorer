@@ -401,7 +401,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             )
             color_by_subcluster = st.checkbox(
                 "Color UMAP by hierarchical subcluster",
-                value=bool(st.session_state.get("color_by_subcluster", False)),
+                value=bool(st.session_state.get("color_by_subcluster", True)),
                 key="color_by_subcluster",
             )
             subclustering_ready = "umap_embedding_df" in st.session_state
@@ -767,10 +767,56 @@ This analysis uses Euclid Q1 catalogue products available at:
                     hide_index=True,
                 )
 
-            st.markdown("**Semi-supervised UMAP for a subcluster**")
-            subcluster_options = sorted(
-                subclustered_df["hierarchical_subcluster"].dropna().astype(int).unique()
+        plot_col, detail_col = st.columns([2, 1])
+        with plot_col:
+            event = st.plotly_chart(
+                fig,
+                use_container_width=True,
+                config={
+                    "displaylogo": False,
+                    "scrollZoom": True,
+                    "doubleClick": "reset",
+                },
+                on_select="rerun",
+                selection_mode="points",
+                key="umap_selection",
             )
+
+        selected_index = selected_point_index(event)
+        selected_row = (
+            embedding_df.loc[selected_index]
+            if selected_index is not None
+            else None
+        )
+        with detail_col:
+            if selected_row is None:
+                st.info("Select a point on the map to view its details and image.")
+            else:
+                show_object_details(selected_row, selected_features)
+
+        if selected_row is not None:
+            morphology_col, pca_col = st.columns([1, 1])
+            with morphology_col:
+                show_morphology_catalogue_row(selected_row)
+            with pca_col:
+                show_selected_pca_components(selected_row, selected_features)
+
+    if subclustered_df is not None and not subclustered_df.empty:
+        with st.expander("Semi-supervised UMAP for a subcluster", expanded=False):
+            semi_subcluster_summary = build_subcluster_summary(subclustered_df)
+            if semi_subcluster_summary.empty:
+                subcluster_options = sorted(
+                    subclustered_df["hierarchical_subcluster"].dropna().astype(int).unique()
+                )
+            else:
+                subcluster_options = (
+                    semi_subcluster_summary.sort_values(
+                        ["lens_rate", "n_lenses", "n_objects", "hierarchical_subcluster"],
+                        ascending=[False, False, False, True],
+                    )["hierarchical_subcluster"]
+                    .astype(int)
+                    .tolist()
+                )
             semi_control_cols = st.columns([1, 1, 1, 1])
             with semi_control_cols[0]:
                 selected_semi_subcluster = st.selectbox(
@@ -780,6 +826,10 @@ This analysis uses Euclid Q1 catalogue products available at:
                     key="semisupervised_subcluster",
                 )
             with semi_control_cols[1]:
+                render_help_label(
+                    "Semi-supervised n_neighbors",
+                    PARAMETER_HELP["n_neighbors"],
+                )
                 semi_n_neighbors = st.slider(
                     "Semi-supervised n_neighbors",
                     2,
@@ -788,6 +838,10 @@ This analysis uses Euclid Q1 catalogue products available at:
                     key="semisupervised_n_neighbors",
                 )
             with semi_control_cols[2]:
+                render_help_label(
+                    "Semi-supervised min_dist",
+                    PARAMETER_HELP["min_dist"],
+                )
                 semi_min_dist = st.slider(
                     "Semi-supervised min_dist",
                     0.0,
@@ -918,37 +972,3 @@ This analysis uses Euclid Q1 catalogue products available at:
                     },
                     key="semisupervised_umap_chart",
                 )
-
-        plot_col, detail_col = st.columns([2, 1])
-        with plot_col:
-            event = st.plotly_chart(
-                fig,
-                use_container_width=True,
-                config={
-                    "displaylogo": False,
-                    "scrollZoom": True,
-                    "doubleClick": "reset",
-                },
-                on_select="rerun",
-                selection_mode="points",
-                key="umap_selection",
-            )
-
-        selected_index = selected_point_index(event)
-        selected_row = (
-            embedding_df.loc[selected_index]
-            if selected_index is not None
-            else None
-        )
-        with detail_col:
-            if selected_row is None:
-                st.info("Select a point on the map to view its details and image.")
-            else:
-                show_object_details(selected_row, selected_features)
-
-        if selected_row is not None:
-            morphology_col, pca_col = st.columns([1, 1])
-            with morphology_col:
-                show_morphology_catalogue_row(selected_row)
-            with pca_col:
-                show_selected_pca_components(selected_row, selected_features)
