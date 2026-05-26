@@ -56,6 +56,12 @@ from .storage import path_exists, prepare_catalog_cache
 from .umap import build_umap_signature, compute_umap_embedding
 
 
+def request_umap_computation() -> None:
+    collapse_cluster_summary()
+    st.session_state["umap_requested"] = True
+    st.session_state["umap_running"] = True
+
+
 def main() -> None:
     st.set_page_config(page_title=APP_TITLE, page_icon=str(EUCLID_FAVICON_PATH), layout="wide")
     inject_plot_cursor_css()
@@ -368,42 +374,50 @@ This analysis uses Euclid Q1 catalogue products available at:
     )
     stored_signature = st.session_state.get("umap_signature")
     needs_recalculation = stored_signature != umap_signature
+    umap_running = bool(st.session_state.get("umap_running", False))
 
     button_label = "Compute UMAP" if stored_signature is None else "Recompute UMAP"
-    recalculate_umap = st.sidebar.button(
+    umap_button_disabled = (
+        umap_running
+        or (not selected_features)
+        or len(filtered_cluster_df) < 3
+        or (not needs_recalculation and "umap_embedding_df" in st.session_state)
+    )
+    st.sidebar.button(
         button_label,
         type="primary" if needs_recalculation else "secondary",
-        disabled=(not selected_features)
-        or len(filtered_cluster_df) < 3
-        or (not needs_recalculation and "umap_embedding_df" in st.session_state),
-        on_click=collapse_cluster_summary,
+        disabled=umap_button_disabled,
+        on_click=request_umap_computation,
     )
+    recalculate_umap = bool(st.session_state.get("umap_requested", False))
 
     if len(filtered_cluster_df) < 3:
+        st.session_state["umap_running"] = False
+        st.session_state["umap_requested"] = False
         st.warning("At least 3 objects must remain after PCA filters to compute UMAP.")
         st.stop()
 
     if recalculate_umap:
-        filtered_cluster_df = add_cluster_extreme_roles(filtered_cluster_df, selected_features)
-        display_df = sample_for_display(filtered_cluster_df, int(max_objects))
-        log_app_event(
-            "umap_requested",
-            cluster=int(selected_cluster),
-            cluster_objects=int(len(cluster_df)),
-            filtered_objects=int(len(filtered_cluster_df)),
-            display_objects=int(len(display_df)),
-            n_features=int(len(selected_features)),
-            n_pca_filters=int(len(pca_filters)),
-            n_neighbors=int(n_neighbors),
-            min_dist=float(min_dist),
-            max_objects=int(max_objects),
-        )
-
-        if len(display_df) < 3:
-            st.warning("At least 3 objects are required to compute UMAP.")
-            st.stop()
-
         try:
+            filtered_cluster_df = add_cluster_extreme_roles(filtered_cluster_df, selected_features)
+            display_df = sample_for_display(filtered_cluster_df, int(max_objects))
+            log_app_event(
+                "umap_requested",
+                cluster=int(selected_cluster),
+                cluster_objects=int(len(cluster_df)),
+                filtered_objects=int(len(filtered_cluster_df)),
+                display_objects=int(len(display_df)),
+                n_features=int(len(selected_features)),
+                n_pca_filters=int(len(pca_filters)),
+                n_neighbors=int(n_neighbors),
+                min_dist=float(min_dist),
+                max_objects=int(max_objects),
+            )
+
+            if len(display_df) < 3:
+                st.warning("At least 3 objects are required to compute UMAP.")
+                st.stop()
+
             embedding_df = compute_umap_embedding(
                 display_df,
                 selected_features,
@@ -426,6 +440,9 @@ This analysis uses Euclid Q1 catalogue products available at:
             )
             st.exception(exc)
             st.stop()
+        finally:
+            st.session_state["umap_running"] = False
+            st.session_state["umap_requested"] = False
 
         if embedding_df.empty:
             st.warning("No objects remain with complete values for the selected components.")
