@@ -125,13 +125,13 @@ def inject_plot_cursor_css() -> None:
             display: none;
             font-size: 0.9rem;
             font-weight: 700;
-            left: 50%;
+            left: 0;
             line-height: 1.35;
+            max-width: min(360px, calc(100vw - 2rem));
             min-width: 260px;
             padding: 0.75rem 0.9rem;
             position: absolute;
             text-align: left;
-            transform: translateX(-50%);
             z-index: 1000;
         }
         .concept-popover::after {
@@ -140,7 +140,7 @@ def inject_plot_cursor_css() -> None:
             border-top: 0.55rem solid #111923;
             bottom: -0.52rem;
             content: "";
-            left: 50%;
+            left: 1.8rem;
             position: absolute;
             transform: translateX(-50%);
         }
