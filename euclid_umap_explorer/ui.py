@@ -803,6 +803,10 @@ This analysis uses Euclid Q1 catalogue products available at:
 
     if subclustered_df is not None and not subclustered_df.empty:
         with st.expander("Semi-supervised UMAP for a subcluster", expanded=False):
+            st.caption(
+                "Supervised labels guide the projection as A=2, B=1, C=0, "
+                "and unknown objects=-1."
+            )
             semi_subcluster_summary = build_subcluster_summary(subclustered_df)
             if semi_subcluster_summary.empty:
                 subcluster_options = sorted(
