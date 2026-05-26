@@ -4,20 +4,18 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from .algorithms import (
+from .analysis import (
     add_cluster_extreme_roles,
     apply_pca_filters,
     build_cluster_summary,
-    build_umap_signature,
     cluster_lens_grades,
-    compute_umap_embedding,
     default_cluster_option_index,
     format_cluster_option,
     format_pca_filter,
     normalize_pca_filters,
-    run_birch_clustering,
     sample_for_display,
 )
+from .birch import run_birch_clustering
 from .catalogs import normalize_lens_grades
 from .components import (
     collapse_cluster_summary,
@@ -55,6 +53,7 @@ from .config import (
 from .euclid_search import is_valid_search_object_id, selected_point_index
 from .runtime import AlgorithmTimeoutError, format_duration, log_app_event
 from .storage import path_exists, prepare_catalog_cache
+from .umap import build_umap_signature, compute_umap_embedding
 
 
 def main() -> None:
