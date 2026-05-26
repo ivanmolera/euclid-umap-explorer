@@ -110,7 +110,7 @@ def inject_plot_cursor_css() -> None:
             color: white !important;
         }
         .concept-help {
-            border-bottom: 1px dotted rgba(250, 250, 250, 0.72);
+            border-bottom: 1px dotted currentColor;
             cursor: help !important;
             display: inline-block;
             position: relative;
@@ -402,9 +402,10 @@ def show_thumbnail(
             width: {SUMMARY_THUMBNAIL_WIDTH}px;
         }}
         .thumb-caption {{
-            color: rgba(250, 250, 250, 0.72);
+            color: inherit;
             font-size: 0.82rem;
             margin-top: 0.2rem;
+            opacity: 0.72;
             text-align: center;
             width: {SUMMARY_THUMBNAIL_WIDTH}px;
         }}
@@ -608,7 +609,7 @@ def render_thumbnail_group_title(title: str) -> None:
 
     st.markdown(
         """
-        <div style="color: rgba(250, 250, 250, 0.72); font-size: 0.82rem; margin-bottom: 0.35rem;">
+        <div style="color: inherit; font-size: 0.82rem; margin-bottom: 0.35rem; opacity: 0.72;">
             <span class="concept-help" tabindex="0">Canonical
                 <span class="concept-popover">
                     Object closest to the cluster centroid in the selected PCA feature space.
