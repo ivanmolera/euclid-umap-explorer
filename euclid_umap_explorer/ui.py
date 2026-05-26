@@ -269,12 +269,10 @@ This analysis uses Euclid Q1 catalogue products available at:
             if selected_pca_preset == "Manual selection":
                 st.session_state.setdefault("selected_pca_components", default_features)
             else:
-                with st.spinner("Computing PCA component preset..."):
-                    st.session_state["selected_pca_components"] = pca_features_for_preset(
-                        clustered_df,
-                        pca_columns,
-                        selected_pca_preset,
-                    )
+                st.session_state["selected_pca_components"] = pca_features_for_preset(
+                    pca_columns,
+                    selected_pca_preset,
+                )
         elif "selected_pca_components" not in st.session_state:
             st.session_state["selected_pca_components"] = default_features
         else:

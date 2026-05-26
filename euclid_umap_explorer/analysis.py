@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import streamlit as st
 
 from .catalogs import normalize_lens_grades
 from .config import LENS_GRADE_OPTIONS, PCA_FILTER_OPERATORS
@@ -14,6 +13,50 @@ PCA_SELECTION_PRESETS = [
     "Top 10 PCA by mutual information with lens candidate labels",
     "All 40 PCA baseline",
 ]
+
+PCA_TOP_10_BY_EXPLAINED_VARIANCE = [
+    "feat_pca_0",
+    "feat_pca_1",
+    "feat_pca_2",
+    "feat_pca_3",
+    "feat_pca_4",
+    "feat_pca_5",
+    "feat_pca_6",
+    "feat_pca_7",
+    "feat_pca_8",
+    "feat_pca_9",
+]
+PCA_TOP_10_BY_RANDOM_FOREST_IMPORTANCE = [
+    "feat_pca_6",
+    "feat_pca_0",
+    "feat_pca_1",
+    "feat_pca_27",
+    "feat_pca_12",
+    "feat_pca_29",
+    "feat_pca_10",
+    "feat_pca_22",
+    "feat_pca_13",
+    "feat_pca_32",
+]
+PCA_TOP_10_BY_MUTUAL_INFORMATION = [
+    "feat_pca_6",
+    "feat_pca_27",
+    "feat_pca_12",
+    "feat_pca_32",
+    "feat_pca_0",
+    "feat_pca_29",
+    "feat_pca_10",
+    "feat_pca_1",
+    "feat_pca_13",
+    "feat_pca_22",
+]
+PCA_PRESET_FEATURES = {
+    "Top 10 PCA by explained variance": PCA_TOP_10_BY_EXPLAINED_VARIANCE,
+    "Top 10 PCA by Random Forest importance": PCA_TOP_10_BY_RANDOM_FOREST_IMPORTANCE,
+    "Top 10 PCA by mutual information with lens candidate labels": (
+        PCA_TOP_10_BY_MUTUAL_INFORMATION
+    ),
+}
 
 
 def build_cluster_summary(clustered_df: pd.DataFrame) -> pd.DataFrame:
@@ -100,80 +143,16 @@ def sample_for_display(df: pd.DataFrame, max_objects: int) -> pd.DataFrame:
     return sampled.drop(columns=["_sample_priority"]).copy()
 
 
-def _balanced_feature_sample(
-    data: pd.DataFrame,
-    feature_cols: list[str],
-    target_col: str = "is_lens",
-    max_rows_per_class: int = 25_000,
-) -> pd.DataFrame:
-    columns = feature_cols + [target_col]
-    work_df = data[columns].dropna(subset=feature_cols + [target_col]).copy()
-    if work_df.empty:
-        return work_df
-
-    sampled_parts = []
-    for _, class_df in work_df.groupby(target_col):
-        sample_size = min(len(class_df), max_rows_per_class)
-        sampled_parts.append(class_df.sample(n=sample_size, random_state=42))
-    return pd.concat(sampled_parts, ignore_index=True)
-
-
-@st.cache_data(show_spinner=False)
 def pca_features_for_preset(
-    clustered_df: pd.DataFrame,
     pca_columns: list[str],
     preset: str,
 ) -> list[str]:
     if preset == "All 40 PCA baseline":
         return list(pca_columns)
 
-    ranked_by_variance = (
-        clustered_df[pca_columns]
-        .var(numeric_only=True)
-        .sort_values(ascending=False)
-        .head(10)
-        .index.tolist()
-    )
-    if preset == "Top 10 PCA by explained variance":
-        return ranked_by_variance
-
-    if (
-        preset not in (
-            "Top 10 PCA by Random Forest importance",
-            "Top 10 PCA by mutual information with lens candidate labels",
-        )
-        or "is_lens" not in clustered_df.columns
-        or clustered_df["is_lens"].nunique() < 2
-    ):
-        return ranked_by_variance
-
-    sampled_df = _balanced_feature_sample(clustered_df, pca_columns)
-    if sampled_df.empty or sampled_df["is_lens"].nunique() < 2:
-        return ranked_by_variance
-
-    x = sampled_df[pca_columns].astype(np.float32)
-    y = sampled_df["is_lens"].astype(int)
-
-    if preset == "Top 10 PCA by Random Forest importance":
-        from sklearn.ensemble import RandomForestClassifier
-
-        rf_model = RandomForestClassifier(
-            n_estimators=150,
-            min_samples_leaf=5,
-            max_features="sqrt",
-            class_weight="balanced_subsample",
-            random_state=42,
-            n_jobs=-1,
-        )
-        rf_model.fit(x, y)
-        rf_importance = pd.Series(rf_model.feature_importances_, index=pca_columns)
-        return rf_importance.sort_values(ascending=False).head(10).index.tolist()
-
-    from sklearn.feature_selection import mutual_info_classif
-
-    mi_scores = mutual_info_classif(x, y, random_state=42)
-    mutual_information = pd.Series(mi_scores, index=pca_columns)
-    return mutual_information.sort_values(ascending=False).head(10).index.tolist()
+    available_columns = set(pca_columns)
+    preset_features = PCA_PRESET_FEATURES.get(preset, [])
+    return [feature for feature in preset_features if feature in available_columns]
 
 
 def add_cluster_extreme_roles(
