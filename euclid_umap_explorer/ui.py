@@ -309,6 +309,37 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.stop()
     pca_filters = normalize_pca_filters(raw_pca_filters, pca_columns)
 
+    cluster_df = clustered_df[clustered_df["cluster"] == selected_cluster].copy()
+    filtered_cluster_df = apply_pca_filters(cluster_df, pca_filters)
+
+    umap_signature = build_umap_signature(
+        selected_cluster=selected_cluster,
+        selected_features=selected_features,
+        pca_filters=pca_filters,
+        n_neighbors=n_neighbors,
+        min_dist=min_dist,
+        max_objects=int(max_objects),
+        cluster_params=params,
+    )
+    stored_signature = st.session_state.get("umap_signature")
+    needs_recalculation = stored_signature != umap_signature
+    umap_running = bool(st.session_state.get("umap_running", False))
+
+    button_label = "Compute UMAP" if stored_signature is None else "Recompute UMAP"
+    umap_button_disabled = (
+        umap_running
+        or (not selected_features)
+        or len(filtered_cluster_df) < 3
+        or (not needs_recalculation and "umap_embedding_df" in st.session_state)
+    )
+    st.sidebar.button(
+        button_label,
+        type="primary" if needs_recalculation else "secondary",
+        disabled=umap_button_disabled,
+        on_click=request_umap_computation,
+    )
+    recalculate_umap = bool(st.session_state.get("umap_requested", False))
+
     with st.expander(
         "Clustering summary",
         expanded=st.session_state.get("cluster_summary_expanded", False),
@@ -355,41 +386,11 @@ This analysis uses Euclid Q1 catalogue products available at:
             selected_features,
         )
 
-    cluster_df = clustered_df[clustered_df["cluster"] == selected_cluster].copy()
-    filtered_cluster_df = apply_pca_filters(cluster_df, pca_filters)
     if pca_filters:
         st.caption(
             "Active PCA filters: "
             + "; ".join(format_pca_filter(pca_filter) for pca_filter in pca_filters)
         )
-
-    umap_signature = build_umap_signature(
-        selected_cluster=selected_cluster,
-        selected_features=selected_features,
-        pca_filters=pca_filters,
-        n_neighbors=n_neighbors,
-        min_dist=min_dist,
-        max_objects=int(max_objects),
-        cluster_params=params,
-    )
-    stored_signature = st.session_state.get("umap_signature")
-    needs_recalculation = stored_signature != umap_signature
-    umap_running = bool(st.session_state.get("umap_running", False))
-
-    button_label = "Compute UMAP" if stored_signature is None else "Recompute UMAP"
-    umap_button_disabled = (
-        umap_running
-        or (not selected_features)
-        or len(filtered_cluster_df) < 3
-        or (not needs_recalculation and "umap_embedding_df" in st.session_state)
-    )
-    st.sidebar.button(
-        button_label,
-        type="primary" if needs_recalculation else "secondary",
-        disabled=umap_button_disabled,
-        on_click=request_umap_computation,
-    )
-    recalculate_umap = bool(st.session_state.get("umap_requested", False))
 
     if len(filtered_cluster_df) < 3:
         st.session_state["umap_running"] = False
