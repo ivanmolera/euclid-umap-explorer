@@ -381,13 +381,13 @@ This analysis uses Euclid Q1 catalogue products available at:
                 "Subclusters",
                 2,
                 20,
-                6,
+                2,
             )
             max_subcluster_objects = st.slider(
                 "Maximum objects for subclustering",
                 100,
                 20_000,
-                min(5_000, max(100, len(cluster_df))),
+                min(15_000, max(100, len(cluster_df))),
                 step=100,
             )
             color_by_subcluster = st.checkbox(
