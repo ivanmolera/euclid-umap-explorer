@@ -379,6 +379,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             )
             st.button(
                 button_label,
+                key="compute_umap_button",
                 type="primary" if needs_recalculation else "secondary",
                 disabled=umap_button_disabled,
                 on_click=request_umap_computation,
@@ -417,58 +418,6 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.warning("Select at least one PCA component to build UMAP.")
         st.stop()
     recalculate_umap = bool(st.session_state.get("umap_requested", False))
-
-    with st.expander(
-        "Clustering summary",
-        expanded=st.session_state.get("cluster_summary_expanded", False),
-    ):
-        st.markdown(
-            f"""
-            <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
-                <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
-                    Execution time:
-                </span>
-                <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
-                    {format_duration(clustered_df.attrs.get("processing_seconds"))}
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        summary_display = cluster_summary_df.copy()
-        summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
-        st.dataframe(
-            summary_display[["cluster", "n_objects", "n_lenses", "lens_rate"]],
-            use_container_width=True,
-            hide_index=True,
-        )
-        if is_default_birch_configuration(params):
-            cache_key = default_cluster_visual_cache_key(
-                params,
-                selected_features,
-                cluster_summary_df,
-            )
-            if st.session_state.get("cluster_visual_image_cache_key") != cache_key:
-                with st.spinner("Preparing cluster summary images..."):
-                    warm_cluster_visual_image_cache(
-                        clustered_df,
-                        cluster_summary_df,
-                        pca_columns,
-                        selected_features,
-                    )
-                st.session_state["cluster_visual_image_cache_key"] = cache_key
-        render_cluster_visual_summary(
-            clustered_df,
-            cluster_summary_df,
-            pca_columns,
-            selected_features,
-        )
-
-    if pca_filters:
-        st.caption(
-            "Active PCA filters: "
-            + "; ".join(format_pca_filter(pca_filter) for pca_filter in pca_filters)
-        )
 
     if len(filtered_cluster_df) < 3:
         st.session_state["umap_running"] = False
@@ -532,6 +481,58 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.session_state["umap_embedding_df"] = embedding_df
         st.session_state["umap_signature"] = umap_signature
         needs_recalculation = False
+
+    with st.expander(
+        "Clustering summary",
+        expanded=st.session_state.get("cluster_summary_expanded", False),
+    ):
+        st.markdown(
+            f"""
+            <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
+                <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
+                    Execution time:
+                </span>
+                <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
+                    {format_duration(clustered_df.attrs.get("processing_seconds"))}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        summary_display = cluster_summary_df.copy()
+        summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
+        st.dataframe(
+            summary_display[["cluster", "n_objects", "n_lenses", "lens_rate"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+        if is_default_birch_configuration(params):
+            cache_key = default_cluster_visual_cache_key(
+                params,
+                selected_features,
+                cluster_summary_df,
+            )
+            if st.session_state.get("cluster_visual_image_cache_key") != cache_key:
+                with st.spinner("Preparing cluster summary images..."):
+                    warm_cluster_visual_image_cache(
+                        clustered_df,
+                        cluster_summary_df,
+                        pca_columns,
+                        selected_features,
+                    )
+                st.session_state["cluster_visual_image_cache_key"] = cache_key
+        render_cluster_visual_summary(
+            clustered_df,
+            cluster_summary_df,
+            pca_columns,
+            selected_features,
+        )
+
+    if pca_filters:
+        st.caption(
+            "Active PCA filters: "
+            + "; ".join(format_pca_filter(pca_filter) for pca_filter in pca_filters)
+        )
 
     if needs_recalculation or "umap_embedding_df" not in st.session_state:
         st.info("Click **Compute UMAP** or **Recompute UMAP** to update the visualization.")
