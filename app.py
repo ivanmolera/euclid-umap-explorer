@@ -51,6 +51,9 @@ CACHE_DIR = Path(
 )
 USE_LOCAL_CACHE = os.getenv("EUCLID_USE_LOCAL_CACHE", "1") != "0"
 MAX_ALGORITHM_SECONDS = int(os.getenv("EUCLID_MAX_ALGORITHM_SECONDS", "600"))
+DEFAULT_BIRCH_THRESHOLD = 8.0
+DEFAULT_BIRCH_BRANCHING_FACTOR = 2
+DEFAULT_BIRCH_BATCH_SIZE = 25_000
 
 DEFAULT_CLUSTER_FEATURES = [
     "feat_pca_6",
@@ -1287,6 +1290,14 @@ def load_image_bytes(path: str) -> bytes:
     return image_bytes
 
 
+@st.cache_data(show_spinner=False)
+def thumbnail_image_src(path: str) -> str:
+    image_bytes = load_image_bytes(path)
+    Image.open(BytesIO(image_bytes)).verify()
+    image_type = "png" if str(path).lower().endswith(".png") else "jpeg"
+    return f"data:image/{image_type};base64,{base64.b64encode(image_bytes).decode()}"
+
+
 def show_image(path: str, caption: str) -> None:
     try:
         image = Image.open(BytesIO(load_image_bytes(path)))
@@ -1307,6 +1318,91 @@ def object_image_path(row: pd.Series, prefer_lens_image: bool = False) -> str | 
     return morphology_cutout_path(row.get("id_str"), row.get("object_id"))
 
 
+def cluster_visual_image_paths(
+    cluster_df: pd.DataFrame,
+    summary_features: list[str],
+    cluster_id: int,
+) -> list[str]:
+    canonical_row, anomaly_row, random_rows, lens_rows = cluster_visual_rows(
+        cluster_df,
+        summary_features,
+        cluster_id,
+    )
+
+    paths = []
+    for row in [canonical_row, anomaly_row, *random_rows]:
+        if row is None:
+            continue
+        path = object_image_path(row)
+        if path is not None:
+            paths.append(path)
+
+    for row in lens_rows:
+        path = object_image_path(row, prefer_lens_image=True)
+        if path is not None:
+            paths.append(path)
+
+    return list(dict.fromkeys(paths))
+
+
+def is_default_birch_configuration(params: dict) -> bool:
+    return (
+        tuple(cluster_lens_grades(params)) == tuple(DEFAULT_LENS_GRADES)
+        and float(params["threshold"]) == DEFAULT_BIRCH_THRESHOLD
+        and int(params["branching_factor"]) == DEFAULT_BIRCH_BRANCHING_FACTOR
+        and int(params["batch_size"]) == DEFAULT_BIRCH_BATCH_SIZE
+    )
+
+
+def warm_cluster_visual_image_cache(
+    clustered_df: pd.DataFrame,
+    cluster_summary_df: pd.DataFrame,
+    pca_columns: list[str],
+    selected_features: list[str],
+) -> None:
+    summary_features = [
+        feature for feature in selected_features if feature in pca_columns
+    ] or [feature for feature in DEFAULT_CLUSTER_FEATURES if feature in pca_columns]
+    summary_features = summary_features or pca_columns[: min(4, len(pca_columns))]
+
+    warmed = 0
+    started_at = time.perf_counter()
+    for _, summary_row in cluster_summary_df.iterrows():
+        cluster_id = int(summary_row["cluster"])
+        cluster_df = clustered_df[clustered_df["cluster"] == cluster_id].copy()
+        for path in cluster_visual_image_paths(cluster_df, summary_features, cluster_id):
+            try:
+                thumbnail_image_src(path)
+                warmed += 1
+            except Exception:
+                continue
+
+    log_app_event(
+        "cluster_visual_image_cache_warmed",
+        duration_seconds=round(time.perf_counter() - started_at, 3),
+        n_images=int(warmed),
+    )
+
+
+def default_cluster_visual_cache_key(
+    params: dict,
+    selected_features: list[str],
+    cluster_summary_df: pd.DataFrame,
+) -> tuple:
+    return (
+        PARQUET_PATH,
+        LENS_PATH,
+        CUTOUT_BASE,
+        LENS_IMG_BASE,
+        cluster_lens_grades(params),
+        float(params["threshold"]),
+        int(params["branching_factor"]),
+        int(params["batch_size"]),
+        tuple(selected_features),
+        tuple(cluster_summary_df["cluster"].astype(int).tolist()),
+    )
+
+
 def show_thumbnail(
     row: pd.Series | None,
     caption: str,
@@ -1324,8 +1420,7 @@ def show_thumbnail(
         return
 
     try:
-        image_bytes = load_image_bytes(path)
-        image = Image.open(BytesIO(image_bytes))
+        image_src = thumbnail_image_src(path)
     except Exception:
         st.caption(caption)
         st.caption("No image")
@@ -1333,8 +1428,6 @@ def show_thumbnail(
 
     object_id = row.get("object_id", "")
     id_str = row.get("id_str", "")
-    image_type = "png" if str(path).lower().endswith(".png") else "jpeg"
-    image_src = f"data:image/{image_type};base64,{base64.b64encode(image_bytes).decode()}"
     modal_key = hashlib.sha1(f"{caption}|{object_id}|{id_str}".encode()).hexdigest()[:12]
     modal_id = f"thumb-{modal_key}"
     escaped_caption = html.escape(str(caption))
@@ -1941,7 +2034,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             threshold = st.number_input(
                 "threshold",
                 min_value=0.1,
-                value=8.0,
+                value=DEFAULT_BIRCH_THRESHOLD,
                 step=0.1,
                 label_visibility="collapsed",
             )
@@ -1949,7 +2042,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             branching_factor = st.number_input(
                 "branching_factor",
                 min_value=2,
-                value=2,
+                value=DEFAULT_BIRCH_BRANCHING_FACTOR,
                 step=1,
                 label_visibility="collapsed",
             )
@@ -1958,7 +2051,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 "batch_size",
                 min_value=1_000,
                 max_value=250_000,
-                value=25_000,
+                value=DEFAULT_BIRCH_BATCH_SIZE,
                 step=1_000,
                 label_visibility="collapsed",
             )
@@ -2139,6 +2232,21 @@ This analysis uses Euclid Q1 catalogue products available at:
             use_container_width=True,
             hide_index=True,
         )
+        if is_default_birch_configuration(params):
+            cache_key = default_cluster_visual_cache_key(
+                params,
+                selected_features,
+                cluster_summary_df,
+            )
+            if st.session_state.get("cluster_visual_image_cache_key") != cache_key:
+                with st.spinner("Preparing cluster summary images..."):
+                    warm_cluster_visual_image_cache(
+                        clustered_df,
+                        cluster_summary_df,
+                        pca_columns,
+                        selected_features,
+                    )
+                st.session_state["cluster_visual_image_cache_key"] = cache_key
         render_cluster_visual_summary(
             clustered_df,
             cluster_summary_df,
