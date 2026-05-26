@@ -55,6 +55,11 @@ from .config import (
 from .euclid_search import is_valid_search_object_id, selected_point_index
 from .runtime import AlgorithmTimeoutError, format_duration, log_app_event
 from .storage import path_exists, prepare_catalog_cache
+from .subclustering import (
+    build_subcluster_summary,
+    build_subclustering_signature,
+    compute_hierarchical_subclusters,
+)
 from .umap import build_umap_signature, compute_umap_embedding
 
 
@@ -63,6 +68,10 @@ def request_umap_computation() -> None:
     st.session_state["umap_requested"] = True
     st.session_state["umap_running"] = True
     st.session_state["umap_parameters_expanded"] = False
+
+
+def request_subclustering() -> None:
+    st.session_state["subclustering_requested"] = True
 
 
 def main() -> None:
@@ -367,6 +376,35 @@ This analysis uses Euclid Q1 catalogue products available at:
                 on_click=request_umap_computation,
             )
 
+        with st.expander("Hierarchical subclustering", expanded=False):
+            n_subclusters = st.slider(
+                "Subclusters",
+                2,
+                20,
+                6,
+            )
+            max_subcluster_objects = st.slider(
+                "Maximum objects for subclustering",
+                100,
+                20_000,
+                min(5_000, max(100, len(cluster_df))),
+                step=100,
+            )
+            color_by_subcluster = st.checkbox(
+                "Color UMAP by hierarchical subcluster",
+                value=bool(st.session_state.get("color_by_subcluster", False)),
+                key="color_by_subcluster",
+            )
+            subclustering_ready = "umap_embedding_df" in st.session_state
+            st.button(
+                "Compute hierarchical subclusters",
+                disabled=(not subclustering_ready)
+                or len(filtered_cluster_df) < 3
+                or needs_recalculation
+                or not selected_features,
+                on_click=request_subclustering,
+            )
+
     if not selected_features:
         st.warning("Select at least one PCA component to build UMAP.")
         st.stop()
@@ -492,6 +530,61 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.stop()
 
     embedding_df = st.session_state["umap_embedding_df"]
+    umap_processing_seconds = embedding_df.attrs.get("processing_seconds")
+
+    subclustering_signature = build_subclustering_signature(
+        umap_signature,
+        selected_features,
+        n_subclusters,
+        max_subcluster_objects,
+    )
+    subclustered_df = st.session_state.get("hierarchical_subcluster_df")
+    subcluster_signature = st.session_state.get("hierarchical_subcluster_signature")
+    if subcluster_signature != subclustering_signature:
+        subclustered_df = None
+
+    if st.session_state.get("subclustering_requested"):
+        try:
+            subclustered_df = compute_hierarchical_subclusters(
+                cluster_df,
+                selected_features,
+                n_subclusters,
+                max_subcluster_objects,
+            )
+        except AlgorithmTimeoutError as exc:
+            log_app_event(
+                "hierarchical_subclustering_timeout",
+                timeout_seconds=MAX_ALGORITHM_SECONDS,
+                cluster=int(selected_cluster),
+                n_features=int(len(selected_features)),
+                max_objects=int(max_subcluster_objects),
+            )
+            st.error(
+                "Hierarchical subclustering was cancelled because it exceeded the "
+                f"{format_duration(MAX_ALGORITHM_SECONDS)} execution limit. "
+                "Try reducing the maximum number of objects before running it again."
+            )
+            st.exception(exc)
+            st.stop()
+        finally:
+            st.session_state["subclustering_requested"] = False
+
+        st.session_state["hierarchical_subcluster_df"] = subclustered_df
+        st.session_state["hierarchical_subcluster_signature"] = subclustering_signature
+
+    if subclustered_df is not None and not subclustered_df.empty:
+        subcluster_lookup = subclustered_df[
+            ["object_id", "hierarchical_subcluster"]
+        ].drop_duplicates("object_id")
+        embedding_df = embedding_df.merge(
+            subcluster_lookup,
+            on="object_id",
+            how="left",
+        )
+        embedding_df.attrs["processing_seconds"] = umap_processing_seconds
+        embedding_df["hierarchical_subcluster_label"] = embedding_df[
+            "hierarchical_subcluster"
+        ].map(lambda value: f"Subcluster {int(value)}" if pd.notna(value) else "Not sampled")
 
     (
         cluster_left,
@@ -499,12 +592,20 @@ This analysis uses Euclid Q1 catalogue products available at:
         cluster_middle,
         cluster_right,
         cluster_fourth,
-    ) = st.columns(5)
+        cluster_fifth,
+    ) = st.columns(6)
     cluster_left.metric("Cluster objects", f"{len(cluster_df):,}")
     cluster_filtered.metric("After filters", f"{len(filtered_cluster_df):,}")
     cluster_middle.metric("Objects in UMAP", f"{len(embedding_df):,}")
     cluster_right.metric("Lenses in UMAP", f"{int(embedding_df['is_lens'].sum()):,}")
     cluster_fourth.metric("Extremes", "2")
+    if subclustered_df is not None and not subclustered_df.empty:
+        cluster_fifth.metric(
+            "Subclusters",
+            f"{subclustered_df['hierarchical_subcluster'].nunique():,}",
+        )
+    else:
+        cluster_fifth.metric("Subclusters", "-")
 
     embedding_df = embedding_df.copy()
     if "lens_grade" in embedding_df.columns:
@@ -537,26 +638,37 @@ This analysis uses Euclid Q1 catalogue products available at:
             "is_lens",
             "lens_grade",
             "dist_to_cluster_centroid",
+            "hierarchical_subcluster_label",
         )
         if column in embedding_df.columns
     ]
 
     import plotly.express as px
+    color_column = (
+        "hierarchical_subcluster_label"
+        if color_by_subcluster and "hierarchical_subcluster_label" in embedding_df.columns
+        else "point_role"
+    )
+    color_map = (
+        None
+        if color_column == "hierarchical_subcluster_label"
+        else {
+            "Unknown": "#4c78a8",
+            "Lens candidate": "#d62728",
+            "Canonical": "#2ca02c",
+            "Anomaly": "#111111",
+        }
+    )
 
     fig = px.scatter(
         embedding_df,
         x="umap_1",
         y="umap_2",
-        color="point_role",
+        color=color_column,
         symbol="point_role",
         custom_data=["point_index"],
         hover_data=hover_columns,
-        color_discrete_map={
-            "Unknown": "#4c78a8",
-            "Lens candidate": "#d62728",
-            "Canonical": "#2ca02c",
-            "Anomaly": "#111111",
-        },
+        color_discrete_map=color_map,
         symbol_map={
             "Unknown": "circle",
             "Lens candidate": "circle",
@@ -566,7 +678,12 @@ This analysis uses Euclid Q1 catalogue products available at:
         category_orders={
             "point_role": ["Unknown", "Lens candidate", "Canonical", "Anomaly"],
         },
-        labels={"umap_1": "UMAP 1", "umap_2": "UMAP 2", "point_role": "Type"},
+        labels={
+            "umap_1": "UMAP 1",
+            "umap_2": "UMAP 2",
+            "point_role": "Type",
+            "hierarchical_subcluster_label": "Hierarchical subcluster",
+        },
         height=680,
     )
     fig.update_traces(marker={"size": 7, "opacity": 0.72})
@@ -601,7 +718,11 @@ This analysis uses Euclid Q1 catalogue products available at:
 
     fig.update_layout(
         title=f"Cluster {selected_cluster} | UMAP",
-        legend_title_text="Object",
+        legend_title_text=(
+            "Hierarchical subcluster"
+            if color_column == "hierarchical_subcluster_label"
+            else "Object"
+        ),
         margin={"l": 10, "r": 10, "t": 50, "b": 10},
         clickmode="event+select",
         dragmode="zoom",
@@ -622,6 +743,20 @@ This analysis uses Euclid Q1 catalogue products available at:
             """,
             unsafe_allow_html=True,
         )
+        if subclustered_df is not None and not subclustered_df.empty:
+            st.markdown("**Hierarchical subclustering summary**")
+            subcluster_summary_df = build_subcluster_summary(subclustered_df).copy()
+            if not subcluster_summary_df.empty:
+                subcluster_summary_df["lens_rate"] = (
+                    subcluster_summary_df["lens_rate"] * 100
+                ).round(3)
+                st.dataframe(
+                    subcluster_summary_df[
+                        ["hierarchical_subcluster", "n_objects", "n_lenses", "lens_rate"]
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
         plot_col, detail_col = st.columns([2, 1])
         with plot_col:
