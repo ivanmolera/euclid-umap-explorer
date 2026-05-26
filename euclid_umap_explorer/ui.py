@@ -60,7 +60,11 @@ from .subclustering import (
     build_subclustering_signature,
     compute_hierarchical_subclusters,
 )
-from .umap import build_umap_signature, compute_umap_embedding
+from .umap import (
+    build_umap_signature,
+    compute_semisupervised_umap_embedding,
+    compute_umap_embedding,
+)
 
 
 def request_umap_computation() -> None:
@@ -72,6 +76,10 @@ def request_umap_computation() -> None:
 
 def request_subclustering() -> None:
     st.session_state["subclustering_requested"] = True
+
+
+def request_semisupervised_umap() -> None:
+    st.session_state["semisupervised_umap_requested"] = True
 
 
 def main() -> None:
@@ -756,6 +764,158 @@ This analysis uses Euclid Q1 catalogue products available at:
                     ],
                     use_container_width=True,
                     hide_index=True,
+                )
+
+            st.markdown("**Semi-supervised UMAP for a subcluster**")
+            subcluster_options = sorted(
+                subclustered_df["hierarchical_subcluster"].dropna().astype(int).unique()
+            )
+            semi_control_cols = st.columns([1, 1, 1, 1])
+            with semi_control_cols[0]:
+                selected_semi_subcluster = st.selectbox(
+                    "Subcluster",
+                    subcluster_options,
+                    format_func=lambda value: f"Subcluster {value}",
+                    key="semisupervised_subcluster",
+                )
+            with semi_control_cols[1]:
+                semi_n_neighbors = st.slider(
+                    "Semi-supervised n_neighbors",
+                    2,
+                    100,
+                    25,
+                    key="semisupervised_n_neighbors",
+                )
+            with semi_control_cols[2]:
+                semi_min_dist = st.slider(
+                    "Semi-supervised min_dist",
+                    0.0,
+                    1.0,
+                    0.15,
+                    step=0.01,
+                    key="semisupervised_min_dist",
+                )
+            with semi_control_cols[3]:
+                st.button(
+                    "Compute semi-supervised UMAP",
+                    on_click=request_semisupervised_umap,
+                )
+
+            semi_signature = (
+                subclustering_signature,
+                int(selected_semi_subcluster),
+                tuple(selected_features),
+                int(semi_n_neighbors),
+                round(float(semi_min_dist), 4),
+            )
+            semi_df = st.session_state.get("semisupervised_umap_df")
+            if st.session_state.get("semisupervised_umap_signature") != semi_signature:
+                semi_df = None
+
+            if st.session_state.get("semisupervised_umap_requested"):
+                semi_source_df = subclustered_df[
+                    subclustered_df["hierarchical_subcluster"].astype(int)
+                    == int(selected_semi_subcluster)
+                ].copy()
+                if len(semi_source_df) < 3:
+                    st.session_state["semisupervised_umap_requested"] = False
+                    st.warning(
+                        "At least 3 objects are required to compute semi-supervised UMAP."
+                    )
+                    st.stop()
+                try:
+                    semi_df = compute_semisupervised_umap_embedding(
+                        semi_source_df,
+                        selected_features,
+                        semi_n_neighbors,
+                        semi_min_dist,
+                    )
+                except AlgorithmTimeoutError as exc:
+                    log_app_event(
+                        "semisupervised_umap_timeout",
+                        timeout_seconds=MAX_ALGORITHM_SECONDS,
+                        cluster=int(selected_cluster),
+                        hierarchical_subcluster=int(selected_semi_subcluster),
+                        n_features=int(len(selected_features)),
+                    )
+                    st.error(
+                        "Semi-supervised UMAP was cancelled because it exceeded the "
+                        f"{format_duration(MAX_ALGORITHM_SECONDS)} execution limit."
+                    )
+                    st.exception(exc)
+                    st.stop()
+                finally:
+                    st.session_state["semisupervised_umap_requested"] = False
+
+                st.session_state["semisupervised_umap_df"] = semi_df
+                st.session_state["semisupervised_umap_signature"] = semi_signature
+
+            if semi_df is not None and not semi_df.empty:
+                semi_metric_cols = st.columns(4)
+                semi_metric_cols[0].metric("Subcluster objects", f"{len(semi_df):,}")
+                semi_metric_cols[1].metric(
+                    "Labelled candidates",
+                    f"{int((semi_df['semi_supervised_target'] >= 0).sum()):,}",
+                )
+                semi_metric_cols[2].metric(
+                    "Unknown",
+                    f"{int((semi_df['semi_supervised_target'] < 0).sum()):,}",
+                )
+                semi_metric_cols[3].metric(
+                    "Execution time",
+                    format_duration(semi_df.attrs.get("processing_seconds")),
+                )
+
+                semi_hover_columns = [
+                    column
+                    for column in (
+                        "id_str",
+                        "object_id",
+                        "lens_grade",
+                        "semi_supervised_label",
+                        "hierarchical_subcluster",
+                    )
+                    if column in semi_df.columns
+                ]
+                semi_fig = px.scatter(
+                    semi_df,
+                    x="semi_umap_1",
+                    y="semi_umap_2",
+                    color="semi_supervised_label",
+                    symbol="semi_supervised_label",
+                    hover_data=semi_hover_columns,
+                    color_discrete_map={
+                        "Grade A": "#d62728",
+                        "Grade B": "#ff7f0e",
+                        "Grade C": "#f2c94c",
+                        "Unknown": "#4c78a8",
+                    },
+                    labels={
+                        "semi_umap_1": "Semi-supervised UMAP 1",
+                        "semi_umap_2": "Semi-supervised UMAP 2",
+                        "semi_supervised_label": "Label",
+                    },
+                    height=520,
+                )
+                semi_fig.update_traces(marker={"size": 7, "opacity": 0.78})
+                semi_fig.update_layout(
+                    title=(
+                        f"Subcluster {selected_semi_subcluster} | "
+                        "Semi-supervised UMAP"
+                    ),
+                    legend_title_text="Semi-supervised label",
+                    margin={"l": 10, "r": 10, "t": 50, "b": 10},
+                    dragmode="zoom",
+                )
+                st.plotly_chart(
+                    semi_fig,
+                    use_container_width=True,
+                    config={
+                        "displaylogo": False,
+                        "scrollZoom": True,
+                        "doubleClick": "reset",
+                    },
+                    key="semisupervised_umap_chart",
                 )
 
         plot_col, detail_col = st.columns([2, 1])
