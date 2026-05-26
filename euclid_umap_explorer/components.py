@@ -116,21 +116,33 @@ def inject_plot_cursor_css() -> None:
             position: relative;
         }
         .concept-popover {
-            background: #171a22;
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            border-radius: 8px;
-            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
-            color: #f8fafc;
+            background: #111923;
+            border: 1px solid rgba(148, 163, 184, 0.45);
+            border-radius: 10px;
+            bottom: calc(100% + 0.75rem);
+            box-shadow: 0 14px 34px rgba(15, 23, 42, 0.32);
+            color: #f8fafc !important;
             display: none;
-            font-size: 0.82rem;
-            font-weight: 400;
-            left: 0;
+            font-size: 0.9rem;
+            font-weight: 700;
+            left: 50%;
             line-height: 1.35;
-            min-width: 240px;
-            padding: 0.65rem 0.75rem;
+            min-width: 260px;
+            padding: 0.75rem 0.9rem;
             position: absolute;
-            top: 1.45rem;
+            text-align: left;
+            transform: translateX(-50%);
             z-index: 1000;
+        }
+        .concept-popover::after {
+            border-left: 0.55rem solid transparent;
+            border-right: 0.55rem solid transparent;
+            border-top: 0.55rem solid #111923;
+            bottom: -0.52rem;
+            content: "";
+            left: 50%;
+            position: absolute;
+            transform: translateX(-50%);
         }
         .concept-help:hover .concept-popover,
         .concept-help:focus .concept-popover {
