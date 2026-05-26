@@ -13,6 +13,8 @@ from .analysis import (
     format_cluster_option,
     format_pca_filter,
     normalize_pca_filters,
+    PCA_SELECTION_PRESETS,
+    pca_features_for_preset,
     sample_for_display,
 )
 from .birch import run_birch_clustering
@@ -256,10 +258,38 @@ This analysis uses Euclid Q1 catalogue products available at:
         default_features = [
             feature for feature in DEFAULT_CLUSTER_FEATURES if feature in pca_columns
         ] or pca_columns[: min(4, len(pca_columns))]
+        selected_pca_preset = st.selectbox(
+            "PCA selection preset",
+            PCA_SELECTION_PRESETS,
+            index=0,
+        )
+        if selected_pca_preset != st.session_state.get("last_pca_selection_preset"):
+            st.session_state["last_pca_selection_preset"] = selected_pca_preset
+            if selected_pca_preset == "Manual selection":
+                st.session_state.setdefault("selected_pca_components", default_features)
+            else:
+                with st.spinner("Computing PCA component preset..."):
+                    st.session_state["selected_pca_components"] = pca_features_for_preset(
+                        clustered_df,
+                        pca_columns,
+                        selected_pca_preset,
+                    )
+        elif "selected_pca_components" not in st.session_state:
+            st.session_state["selected_pca_components"] = default_features
+        else:
+            selected_pca_components = [
+                feature
+                for feature in st.session_state["selected_pca_components"]
+                if feature in pca_columns
+            ]
+            st.session_state["selected_pca_components"] = (
+                selected_pca_components or default_features
+            )
+
         selected_features = st.multiselect(
             "PCA components",
             pca_columns,
-            default=default_features,
+            key="selected_pca_components",
         )
         raw_pca_filters = render_pca_filter_controls(pca_columns)
 
