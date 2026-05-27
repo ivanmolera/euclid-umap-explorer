@@ -408,7 +408,6 @@ This analysis uses Euclid Q1 catalogue products available at:
             umap_button_disabled = (
                 umap_running
                 or len(filtered_cluster_df) < 3
-                or (not needs_recalculation and "umap_embedding_df" in st.session_state)
             )
             umap_submitted = st.form_submit_button(
                 button_label,
@@ -439,7 +438,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             with subclustering_cols[2]:
                 color_by_subcluster = st.checkbox(
                     "Color UMAP by hierarchical subcluster",
-                    value=bool(st.session_state.get("color_by_subcluster", True)),
+                    value=bool(st.session_state.get("color_by_subcluster", False)),
                     key="color_by_subcluster",
                 )
             subclustering_ready = "umap_embedding_df" in st.session_state
@@ -447,8 +446,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 "Compute hierarchical subclusters",
                 type="primary",
                 disabled=(not subclustering_ready)
-                or len(filtered_cluster_df) < 3
-                or needs_recalculation,
+                or len(filtered_cluster_df) < 3,
             )
             if subclustering_submitted:
                 request_subclustering()
@@ -812,46 +810,49 @@ This analysis uses Euclid Q1 catalogue products available at:
                     .astype(int)
                     .tolist()
                 )
-            semi_control_cols = st.columns([1, 1, 1, 1])
-            with semi_control_cols[0]:
-                selected_semi_subcluster = st.selectbox(
-                    "Subcluster",
-                    subcluster_options,
-                    format_func=lambda value: f"Subcluster {value}",
-                    key="semisupervised_subcluster",
-                )
-            with semi_control_cols[1]:
-                render_help_label(
-                    "n_neighbors",
-                    PARAMETER_HELP["n_neighbors"],
-                )
-                semi_n_neighbors = st.slider(
-                    "n_neighbors",
-                    2,
-                    100,
-                    25,
-                    key="semisupervised_n_neighbors",
-                    label_visibility="collapsed",
-                )
-            with semi_control_cols[2]:
-                render_help_label(
-                    "min_dist",
-                    PARAMETER_HELP["min_dist"],
-                )
-                semi_min_dist = st.slider(
-                    "min_dist",
-                    0.0,
-                    1.0,
-                    0.15,
-                    step=0.01,
-                    key="semisupervised_min_dist",
-                    label_visibility="collapsed",
-                )
-            with semi_control_cols[3]:
-                st.button(
-                    "Compute semi-supervised UMAP",
-                    on_click=request_semisupervised_umap,
-                )
+            with st.form("semisupervised_umap_form"):
+                semi_control_cols = st.columns([1, 1, 1, 1])
+                with semi_control_cols[0]:
+                    selected_semi_subcluster = st.selectbox(
+                        "Subcluster",
+                        subcluster_options,
+                        format_func=lambda value: f"Subcluster {value}",
+                        key="semisupervised_subcluster",
+                    )
+                with semi_control_cols[1]:
+                    render_help_label(
+                        "n_neighbors",
+                        PARAMETER_HELP["n_neighbors"],
+                    )
+                    semi_n_neighbors = st.slider(
+                        "n_neighbors",
+                        2,
+                        100,
+                        25,
+                        key="semisupervised_n_neighbors",
+                        label_visibility="collapsed",
+                    )
+                with semi_control_cols[2]:
+                    render_help_label(
+                        "min_dist",
+                        PARAMETER_HELP["min_dist"],
+                    )
+                    semi_min_dist = st.slider(
+                        "min_dist",
+                        0.0,
+                        1.0,
+                        0.15,
+                        step=0.01,
+                        key="semisupervised_min_dist",
+                        label_visibility="collapsed",
+                    )
+                with semi_control_cols[3]:
+                    semi_submitted = st.form_submit_button(
+                        "Compute semi-supervised UMAP",
+                        type="primary",
+                    )
+                    if semi_submitted:
+                        request_semisupervised_umap()
 
             semi_signature = (
                 subclustering_signature,

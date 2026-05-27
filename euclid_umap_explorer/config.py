@@ -6,7 +6,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 APP_TITLE = "Euclid UMAP Explorer"
-APP_VERSION = "v0.1.6"
+APP_VERSION = "v0.1.7"
 EUCLID_LOGO_PATH = PROJECT_ROOT / "assets" / "euclid_logo.png"
 EUCLID_FAVICON_PATH = PROJECT_ROOT / "assets" / "favicon.png"
 
