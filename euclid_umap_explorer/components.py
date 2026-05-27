@@ -706,6 +706,43 @@ def show_selected_pca_components(row: pd.Series, selected_features: list[str]) -
         hide_index=True,
     )
 
+def format_ra_hms(ra_degrees: float) -> str:
+    total_seconds = (float(ra_degrees) % 360.0) / 15.0 * 3600.0
+    hours = int(total_seconds // 3600)
+    minutes = int((total_seconds % 3600) // 60)
+    seconds = total_seconds % 60
+    return f"{hours:02d}h {minutes:02d}m {seconds:06.3f}s"
+
+def format_dec_dms(dec_degrees: float) -> str:
+    sign = "-" if float(dec_degrees) < 0 else "+"
+    total_seconds = abs(float(dec_degrees)) * 3600.0
+    degrees = int(total_seconds // 3600)
+    minutes = int((total_seconds % 3600) // 60)
+    seconds = total_seconds % 60
+    return f"{sign}{degrees:02d}d {minutes:02d}m {seconds:05.2f}s"
+
+def object_summary_display_rows(object_summary: dict) -> list[dict]:
+    rows = [{"field": field, "value": value} for field, value in object_summary.items()]
+    try:
+        rows.append(
+            {
+                "field": "right_ascension_hms",
+                "value": format_ra_hms(float(object_summary["right_ascension"])),
+            }
+        )
+    except (KeyError, TypeError, ValueError):
+        pass
+    try:
+        rows.append(
+            {
+                "field": "declination_dms",
+                "value": format_dec_dms(float(object_summary["declination"])),
+            }
+        )
+    except (KeyError, TypeError, ValueError):
+        pass
+    return rows
+
 def render_euclid_object_search(object_id: str) -> None:
     started_at = time.perf_counter()
     with st.spinner(f"Searching Euclid object {object_id}..."):
@@ -725,11 +762,15 @@ def render_euclid_object_search(object_id: str) -> None:
 
     with st.container(border=True):
         st.subheader("Object search")
-        metric_cols = st.columns([2.4, 1, 1, 1])
+        ra_degrees = float(object_summary["right_ascension"])
+        dec_degrees = float(object_summary["declination"])
+        metric_cols = st.columns([2.4, 1, 1, 1, 1, 1])
         metric_cols[0].metric("object_id", str(result["object_id"]))
-        metric_cols[1].metric("RA", f"{float(object_summary['right_ascension']):.6f}")
-        metric_cols[2].metric("Dec", f"{float(object_summary['declination']):.6f}")
-        metric_cols[3].metric("Tile", str(mosaic_summary.get("tile_index", "")))
+        metric_cols[1].metric("RA", f"{ra_degrees:.6f}")
+        metric_cols[2].metric("RA HMS", format_ra_hms(ra_degrees))
+        metric_cols[3].metric("Dec", f"{dec_degrees:.6f}")
+        metric_cols[4].metric("Dec DMS", format_dec_dms(dec_degrees))
+        metric_cols[5].metric("Tile", str(mosaic_summary.get("tile_index", "")))
 
         image_col, summary_col = st.columns([1, 1])
         with image_col:
@@ -753,7 +794,7 @@ def render_euclid_object_search(object_id: str) -> None:
         with summary_col:
             st.markdown("**Object summary**")
             object_display = pd.DataFrame(
-                [{"field": field, "value": value} for field, value in object_summary.items()]
+                object_summary_display_rows(object_summary)
             )
             st.dataframe(object_display, use_container_width=True, hide_index=True)
 

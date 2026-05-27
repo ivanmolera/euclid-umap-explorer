@@ -124,6 +124,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         search_object_id = object_id_search_value.strip()
         search_submitted = search_button_col.button(
             "Search",
+            type="primary",
             disabled=not is_valid_search_object_id(search_object_id),
         )
         if search_submitted:
