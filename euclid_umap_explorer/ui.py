@@ -20,7 +20,6 @@ from .analysis import (
 from .birch import run_birch_clustering
 from .catalogs import normalize_lens_grades
 from .components import (
-    collapse_cluster_summary,
     default_cluster_visual_cache_key,
     inject_plot_cursor_css,
     is_default_birch_configuration,
@@ -68,10 +67,8 @@ from .umap import (
 
 
 def request_umap_computation() -> None:
-    collapse_cluster_summary()
     st.session_state["umap_requested"] = True
     st.session_state["umap_running"] = True
-    st.session_state["umap_parameters_expanded"] = False
 
 
 def request_subclustering() -> None:
@@ -315,6 +312,52 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.stop()
 
     with st.expander(
+        "Clustering summary",
+        expanded=st.session_state.get("cluster_summary_expanded", False),
+    ):
+        st.markdown(
+            f"""
+            <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
+                <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
+                    Execution time:
+                </span>
+                <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
+                    {format_duration(clustered_df.attrs.get("processing_seconds"))}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        summary_display = cluster_summary_df.copy()
+        summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
+        st.dataframe(
+            summary_display[["cluster", "n_objects", "n_lenses", "lens_rate"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+        if is_default_birch_configuration(params):
+            cache_key = default_cluster_visual_cache_key(
+                params,
+                selected_features,
+                cluster_summary_df,
+            )
+            if st.session_state.get("cluster_visual_image_cache_key") != cache_key:
+                with st.spinner("Preparing cluster summary images..."):
+                    warm_cluster_visual_image_cache(
+                        clustered_df,
+                        cluster_summary_df,
+                        pca_columns,
+                        selected_features,
+                    )
+                st.session_state["cluster_visual_image_cache_key"] = cache_key
+        render_cluster_visual_summary(
+            clustered_df,
+            cluster_summary_df,
+            pca_columns,
+            selected_features,
+        )
+
+    with st.expander(
         "UMAP",
         expanded=st.session_state.get("umap_parameters_expanded", True),
     ):
@@ -487,52 +530,6 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.session_state["umap_embedding_df"] = embedding_df
         st.session_state["umap_signature"] = umap_signature
         needs_recalculation = False
-
-    with st.expander(
-        "Clustering summary",
-        expanded=st.session_state.get("cluster_summary_expanded", False),
-    ):
-        st.markdown(
-            f"""
-            <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
-                <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
-                    Execution time:
-                </span>
-                <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
-                    {format_duration(clustered_df.attrs.get("processing_seconds"))}
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        summary_display = cluster_summary_df.copy()
-        summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
-        st.dataframe(
-            summary_display[["cluster", "n_objects", "n_lenses", "lens_rate"]],
-            use_container_width=True,
-            hide_index=True,
-        )
-        if is_default_birch_configuration(params):
-            cache_key = default_cluster_visual_cache_key(
-                params,
-                selected_features,
-                cluster_summary_df,
-            )
-            if st.session_state.get("cluster_visual_image_cache_key") != cache_key:
-                with st.spinner("Preparing cluster summary images..."):
-                    warm_cluster_visual_image_cache(
-                        clustered_df,
-                        cluster_summary_df,
-                        pca_columns,
-                        selected_features,
-                    )
-                st.session_state["cluster_visual_image_cache_key"] = cache_key
-        render_cluster_visual_summary(
-            clustered_df,
-            cluster_summary_df,
-            pca_columns,
-            selected_features,
-        )
 
     if pca_filters:
         st.caption(
