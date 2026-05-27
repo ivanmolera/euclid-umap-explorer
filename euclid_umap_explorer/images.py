@@ -13,7 +13,6 @@ from .config import CUTOUT_BASE, LENS_IMG_BASE
 from .runtime import log_app_event
 from .storage import gcs_filesystem, is_gcs_path, join_data_path, path_exists
 
-@st.cache_data(show_spinner=False)
 def image_path_exists(path: str) -> bool:
     return path_exists(path)
 
@@ -59,7 +58,6 @@ def lens_image_path(lens_id_str: object) -> str | None:
     path = join_data_path(LENS_IMG_BASE, str(lens_id_str), "rgb_1.png")
     return path if image_path_exists(path) else None
 
-@st.cache_data(show_spinner=False)
 def load_image_bytes(path: str) -> bytes:
     started_at = time.perf_counter()
     if is_gcs_path(path):
@@ -79,7 +77,6 @@ def load_image_bytes(path: str) -> bytes:
     )
     return image_bytes
 
-@st.cache_data(show_spinner=False)
 def thumbnail_image_src(path: str) -> str:
     image_bytes = load_image_bytes(path)
     Image.open(BytesIO(image_bytes)).verify()

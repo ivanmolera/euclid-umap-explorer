@@ -11,18 +11,13 @@ import streamlit as st
 
 from .analysis import (
     add_cluster_extreme_roles,
-    cluster_lens_grades,
     format_pca_filter,
     lens_grade_sort_key,
 )
 from .catalogs import load_morphology_object
 from .config import (
     CUTOUT_BASE,
-    DEFAULT_BIRCH_BATCH_SIZE,
-    DEFAULT_BIRCH_BRANCHING_FACTOR,
-    DEFAULT_BIRCH_THRESHOLD,
     DEFAULT_CLUSTER_FEATURES,
-    DEFAULT_LENS_GRADES,
     LENS_GRADE_OPTIONS,
     LENS_IMG_BASE,
     LENS_PATH,
@@ -255,87 +250,6 @@ def render_pca_filter_controls(pca_columns: list[str]) -> list[dict]:
                 )
 
     return raw_filters
-
-def cluster_visual_image_paths(
-    cluster_df: pd.DataFrame,
-    summary_features: list[str],
-    cluster_id: int,
-) -> list[str]:
-    canonical_row, anomaly_row, random_rows, lens_rows = cluster_visual_rows(
-        cluster_df,
-        summary_features,
-        cluster_id,
-    )
-
-    paths = []
-    for row in [canonical_row, anomaly_row, *random_rows]:
-        if row is None:
-            continue
-        path = object_image_path(row)
-        if path is not None:
-            paths.append(path)
-
-    for row in lens_rows:
-        path = object_image_path(row, prefer_lens_image=True)
-        if path is not None:
-            paths.append(path)
-
-    return list(dict.fromkeys(paths))
-
-def is_default_birch_configuration(params: dict) -> bool:
-    return (
-        tuple(cluster_lens_grades(params)) == tuple(DEFAULT_LENS_GRADES)
-        and float(params["threshold"]) == DEFAULT_BIRCH_THRESHOLD
-        and int(params["branching_factor"]) == DEFAULT_BIRCH_BRANCHING_FACTOR
-        and int(params["batch_size"]) == DEFAULT_BIRCH_BATCH_SIZE
-    )
-
-def warm_cluster_visual_image_cache(
-    clustered_df: pd.DataFrame,
-    cluster_summary_df: pd.DataFrame,
-    pca_columns: list[str],
-    selected_features: list[str],
-) -> None:
-    summary_features = [
-        feature for feature in selected_features if feature in pca_columns
-    ] or [feature for feature in DEFAULT_CLUSTER_FEATURES if feature in pca_columns]
-    summary_features = summary_features or pca_columns[: min(4, len(pca_columns))]
-
-    warmed = 0
-    started_at = time.perf_counter()
-    for _, summary_row in cluster_summary_df.iterrows():
-        cluster_id = int(summary_row["cluster"])
-        cluster_df = clustered_df[clustered_df["cluster"] == cluster_id].copy()
-        for path in cluster_visual_image_paths(cluster_df, summary_features, cluster_id):
-            try:
-                thumbnail_image_src(path)
-                warmed += 1
-            except Exception:
-                continue
-
-    log_app_event(
-        "cluster_visual_image_cache_warmed",
-        duration_seconds=round(time.perf_counter() - started_at, 3),
-        n_images=int(warmed),
-    )
-
-def default_cluster_visual_cache_key(
-    params: dict,
-    selected_features: list[str],
-    cluster_summary_df: pd.DataFrame,
-) -> tuple:
-    return (
-        PARQUET_PATH,
-        LENS_PATH,
-        CUTOUT_BASE,
-        LENS_IMG_BASE,
-        cluster_lens_grades(params),
-        float(params["threshold"]),
-        int(params["branching_factor"]),
-        int(params["batch_size"]),
-        tuple(selected_features),
-        tuple(cluster_summary_df["cluster"].astype(int).tolist()),
-    )
 
 def show_thumbnail(
     row: pd.Series | None,

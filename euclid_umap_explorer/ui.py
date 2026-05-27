@@ -20,9 +20,7 @@ from .analysis import (
 from .birch import run_birch_clustering
 from .catalogs import normalize_lens_grades
 from .components import (
-    default_cluster_visual_cache_key,
     inject_plot_cursor_css,
-    is_default_birch_configuration,
     render_back_to_top_control,
     render_cluster_visual_summary,
     render_euclid_object_search,
@@ -32,7 +30,6 @@ from .components import (
     show_morphology_catalogue_row,
     show_object_details,
     show_selected_pca_components,
-    warm_cluster_visual_image_cache,
 )
 from .config import (
     APP_TITLE,
@@ -335,21 +332,6 @@ This analysis uses Euclid Q1 catalogue products available at:
             use_container_width=True,
             hide_index=True,
         )
-        if is_default_birch_configuration(params):
-            cache_key = default_cluster_visual_cache_key(
-                params,
-                selected_features,
-                cluster_summary_df,
-            )
-            if st.session_state.get("cluster_visual_image_cache_key") != cache_key:
-                with st.spinner("Preparing cluster summary images..."):
-                    warm_cluster_visual_image_cache(
-                        clustered_df,
-                        cluster_summary_df,
-                        pca_columns,
-                        selected_features,
-                    )
-                st.session_state["cluster_visual_image_cache_key"] = cache_key
         render_cluster_visual_summary(
             clustered_df,
             cluster_summary_df,
