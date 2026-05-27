@@ -358,95 +358,98 @@ This analysis uses Euclid Q1 catalogue products available at:
         cluster_df = clustered_df[clustered_df["cluster"] == selected_cluster].copy()
         filtered_cluster_df = apply_pca_filters(cluster_df, pca_filters)
 
-        umap_param_cols = st.columns([1, 1, 1])
-        with umap_param_cols[0]:
-            render_help_label("n_neighbors", PARAMETER_HELP["n_neighbors"])
-            n_neighbors = st.slider(
-                "n_neighbors",
-                2,
-                100,
-                25,
-                label_visibility="collapsed",
-            )
-        with umap_param_cols[1]:
-            render_help_label("min_dist", PARAMETER_HELP["min_dist"])
-            min_dist = st.slider(
-                "min_dist",
-                0.0,
-                1.0,
-                0.15,
-                step=0.01,
-                label_visibility="collapsed",
-            )
-        with umap_param_cols[2]:
-            render_help_label("Maximum objects", PARAMETER_HELP["Maximum objects"])
-            max_objects = st.slider(
-                "Maximum objects",
-                100,
-                100_000,
-                20_000,
-                step=100,
-                label_visibility="collapsed",
-            )
+        with st.form("umap_parameters_form"):
+            umap_param_cols = st.columns([1, 1, 1])
+            with umap_param_cols[0]:
+                render_help_label("n_neighbors", PARAMETER_HELP["n_neighbors"])
+                n_neighbors = st.slider(
+                    "n_neighbors",
+                    2,
+                    100,
+                    25,
+                    label_visibility="collapsed",
+                )
+            with umap_param_cols[1]:
+                render_help_label("min_dist", PARAMETER_HELP["min_dist"])
+                min_dist = st.slider(
+                    "min_dist",
+                    0.0,
+                    1.0,
+                    0.15,
+                    step=0.01,
+                    label_visibility="collapsed",
+                )
+            with umap_param_cols[2]:
+                render_help_label("Maximum objects", PARAMETER_HELP["Maximum objects"])
+                max_objects = st.slider(
+                    "Maximum objects",
+                    100,
+                    100_000,
+                    20_000,
+                    step=100,
+                    label_visibility="collapsed",
+                )
 
-        umap_signature = build_umap_signature(
-            selected_cluster=selected_cluster,
-            selected_features=selected_features,
-            pca_filters=pca_filters,
-            n_neighbors=n_neighbors,
-            min_dist=min_dist,
-            max_objects=int(max_objects),
-            cluster_params=params,
-        )
-        stored_signature = st.session_state.get("umap_signature")
-        needs_recalculation = stored_signature != umap_signature
-        umap_running = bool(st.session_state.get("umap_running", False))
+            umap_signature = build_umap_signature(
+                selected_cluster=selected_cluster,
+                selected_features=selected_features,
+                pca_filters=pca_filters,
+                n_neighbors=n_neighbors,
+                min_dist=min_dist,
+                max_objects=int(max_objects),
+                cluster_params=params,
+            )
+            stored_signature = st.session_state.get("umap_signature")
+            needs_recalculation = stored_signature != umap_signature
+            umap_running = bool(st.session_state.get("umap_running", False))
 
-        button_label = "Compute UMAP" if stored_signature is None else "Recompute UMAP"
-        umap_button_disabled = (
-            umap_running
-            or len(filtered_cluster_df) < 3
-            or (not needs_recalculation and "umap_embedding_df" in st.session_state)
-        )
-        st.button(
-            button_label,
-            key="compute_umap_button",
-            type="primary" if needs_recalculation else "secondary",
-            disabled=umap_button_disabled,
-            on_click=request_umap_computation,
-        )
+            button_label = "Compute UMAP" if stored_signature is None else "Recompute UMAP"
+            umap_button_disabled = (
+                umap_running
+                or len(filtered_cluster_df) < 3
+                or (not needs_recalculation and "umap_embedding_df" in st.session_state)
+            )
+            umap_submitted = st.form_submit_button(
+                button_label,
+                type="primary" if needs_recalculation else "secondary",
+                disabled=umap_button_disabled,
+            )
+            if umap_submitted:
+                request_umap_computation()
 
     with st.expander("Hierarchical subclustering", expanded=False):
-        subclustering_cols = st.columns([1, 1, 1])
-        with subclustering_cols[0]:
-            n_subclusters = st.slider(
-                "Subclusters",
-                2,
-                20,
-                2,
+        with st.form("hierarchical_subclustering_form"):
+            subclustering_cols = st.columns([1, 1, 1])
+            with subclustering_cols[0]:
+                n_subclusters = st.slider(
+                    "Subclusters",
+                    2,
+                    20,
+                    2,
+                )
+            with subclustering_cols[1]:
+                max_subcluster_objects = st.slider(
+                    "Maximum objects for subclustering",
+                    100,
+                    20_000,
+                    min(15_000, max(100, len(cluster_df))),
+                    step=100,
+                )
+            with subclustering_cols[2]:
+                color_by_subcluster = st.checkbox(
+                    "Color UMAP by hierarchical subcluster",
+                    value=bool(st.session_state.get("color_by_subcluster", True)),
+                    key="color_by_subcluster",
+                )
+            subclustering_ready = "umap_embedding_df" in st.session_state
+            subclustering_submitted = st.form_submit_button(
+                "Compute hierarchical subclusters",
+                disabled=(not subclustering_ready)
+                or len(filtered_cluster_df) < 3
+                or needs_recalculation,
             )
-        with subclustering_cols[1]:
-            max_subcluster_objects = st.slider(
-                "Maximum objects for subclustering",
-                100,
-                20_000,
-                min(15_000, max(100, len(cluster_df))),
-                step=100,
-            )
-        with subclustering_cols[2]:
-            color_by_subcluster = st.checkbox(
-                "Color UMAP by hierarchical subcluster",
-                value=bool(st.session_state.get("color_by_subcluster", True)),
-                key="color_by_subcluster",
-            )
-        subclustering_ready = "umap_embedding_df" in st.session_state
-        st.button(
-            "Compute hierarchical subclusters",
-            disabled=(not subclustering_ready)
-            or len(filtered_cluster_df) < 3
-            or needs_recalculation,
-            on_click=request_subclustering,
-        )
+            if subclustering_submitted:
+                request_subclustering()
 
     recalculate_umap = bool(st.session_state.get("umap_requested", False))
 
@@ -960,6 +963,10 @@ This analysis uses Euclid Q1 catalogue products available at:
                     height=520,
                 )
                 semi_fig.update_traces(marker={"size": 7, "opacity": 0.78})
+                for trace in semi_fig.data:
+                    opacity = getattr(trace.marker, "opacity", None) or 1.0
+                    trace.selected = {"marker": {"opacity": opacity}}
+                    trace.unselected = {"marker": {"opacity": opacity}}
                 semi_fig.update_layout(
                     title=(
                         f"Subcluster {selected_semi_subcluster} | "
