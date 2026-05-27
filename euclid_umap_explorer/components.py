@@ -954,13 +954,11 @@ def render_euclid_object_search(object_id: str) -> None:
         st.subheader("Object search")
         ra_degrees = float(object_summary["right_ascension"])
         dec_degrees = float(object_summary["declination"])
-        metric_cols = st.columns([2.4, 1, 1, 1, 1, 1])
+        metric_cols = st.columns([2.4, 1, 1, 1])
         metric_cols[0].metric("object_id", str(result["object_id"]))
         metric_cols[1].metric("RA", f"{ra_degrees:.6f}")
-        metric_cols[2].metric("RA HMS", format_ra_hms(ra_degrees))
-        metric_cols[3].metric("Dec", f"{dec_degrees:.6f}")
-        metric_cols[4].metric("Dec DMS", format_dec_dms(dec_degrees))
-        metric_cols[5].metric("Tile", str(mosaic_summary.get("tile_index", "")))
+        metric_cols[2].metric("Dec", f"{dec_degrees:.6f}")
+        metric_cols[3].metric("Tile", str(mosaic_summary.get("tile_index", "")))
 
         image_col, summary_col = st.columns([1, 1])
         with image_col:
