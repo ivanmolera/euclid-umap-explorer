@@ -530,6 +530,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.session_state["umap_embedding_df"] = embedding_df
         st.session_state["umap_signature"] = umap_signature
         needs_recalculation = False
+        st.rerun()
 
     if pca_filters:
         st.caption(
