@@ -208,7 +208,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             "branching_factor": int(branching_factor),
             "batch_size": int(batch_size),
         }
-        st.session_state["cluster_summary_expanded"] = True
+        st.session_state["cluster_summary_expanded"] = False
         log_app_event(
             "birch_clustering_requested",
             selected_grades=list(selected_lens_grades),

@@ -877,7 +877,7 @@ def validate_paths() -> pd.DataFrame:
 
 def request_clustering() -> None:
     st.session_state["cluster_requested"] = True
-    st.session_state["cluster_summary_expanded"] = True
+    st.session_state["cluster_summary_expanded"] = False
 
 def collapse_cluster_summary() -> None:
     st.session_state["cluster_summary_expanded"] = False
