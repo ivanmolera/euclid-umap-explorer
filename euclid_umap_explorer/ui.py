@@ -831,28 +831,30 @@ This analysis uses Euclid Q1 catalogue products available at:
                 )
             with semi_control_cols[1]:
                 render_help_label(
-                    "Semi-supervised n_neighbors",
+                    "n_neighbors",
                     PARAMETER_HELP["n_neighbors"],
                 )
                 semi_n_neighbors = st.slider(
-                    "Semi-supervised n_neighbors",
+                    "n_neighbors",
                     2,
                     100,
                     25,
                     key="semisupervised_n_neighbors",
+                    label_visibility="collapsed",
                 )
             with semi_control_cols[2]:
                 render_help_label(
-                    "Semi-supervised min_dist",
+                    "min_dist",
                     PARAMETER_HELP["min_dist"],
                 )
                 semi_min_dist = st.slider(
-                    "Semi-supervised min_dist",
+                    "min_dist",
                     0.0,
                     1.0,
                     0.15,
                     step=0.01,
                     key="semisupervised_min_dist",
+                    label_visibility="collapsed",
                 )
             with semi_control_cols[3]:
                 st.button(
@@ -910,6 +912,19 @@ This analysis uses Euclid Q1 catalogue products available at:
                 st.session_state["semisupervised_umap_signature"] = semi_signature
 
             if semi_df is not None and not semi_df.empty:
+                st.markdown(
+                    f"""
+                    <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
+                        <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
+                            Execution time:
+                        </span>
+                        <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
+                            {format_duration(semi_df.attrs.get("processing_seconds"))}
+                        </span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
                 semi_metric_cols = st.columns(4)
                 semi_metric_cols[0].metric("Subcluster objects", f"{len(semi_df):,}")
                 semi_metric_cols[1].metric(
@@ -920,11 +935,12 @@ This analysis uses Euclid Q1 catalogue products available at:
                     "Unknown",
                     f"{int((semi_df['semi_supervised_target'] < 0).sum()):,}",
                 )
-                semi_metric_cols[3].metric(
-                    "Execution time",
-                    format_duration(semi_df.attrs.get("processing_seconds")),
-                )
+                semi_metric_cols[3].metric("PCA components", f"{len(selected_features):,}")
 
+                semi_display_df = semi_df.reset_index(drop=True).copy()
+                semi_display_df["point_index"] = semi_display_df.index
+                semi_display_df["umap_1"] = semi_display_df["semi_umap_1"]
+                semi_display_df["umap_2"] = semi_display_df["semi_umap_2"]
                 semi_hover_columns = [
                     column
                     for column in (
@@ -934,14 +950,15 @@ This analysis uses Euclid Q1 catalogue products available at:
                         "semi_supervised_label",
                         "hierarchical_subcluster",
                     )
-                    if column in semi_df.columns
+                    if column in semi_display_df.columns
                 ]
                 semi_fig = px.scatter(
-                    semi_df,
+                    semi_display_df,
                     x="semi_umap_1",
                     y="semi_umap_2",
                     color="semi_supervised_label",
                     symbol="semi_supervised_label",
+                    custom_data=["point_index"],
                     hover_data=semi_hover_columns,
                     color_discrete_map={
                         "Grade A": "#d62728",
@@ -965,14 +982,38 @@ This analysis uses Euclid Q1 catalogue products available at:
                     legend_title_text="Semi-supervised label",
                     margin={"l": 10, "r": 10, "t": 50, "b": 10},
                     dragmode="zoom",
+                    clickmode="event+select",
                 )
-                st.plotly_chart(
-                    semi_fig,
-                    use_container_width=True,
-                    config={
-                        "displaylogo": False,
-                        "scrollZoom": True,
-                        "doubleClick": "reset",
-                    },
-                    key="semisupervised_umap_chart",
+                semi_plot_col, semi_detail_col = st.columns([2, 1])
+                with semi_plot_col:
+                    semi_event = st.plotly_chart(
+                        semi_fig,
+                        use_container_width=True,
+                        config={
+                            "displaylogo": False,
+                            "scrollZoom": True,
+                            "doubleClick": "reset",
+                        },
+                        on_select="rerun",
+                        selection_mode="points",
+                        key="semisupervised_umap_chart",
+                    )
+
+                semi_selected_index = selected_point_index(semi_event)
+                semi_selected_row = (
+                    semi_display_df.loc[semi_selected_index]
+                    if semi_selected_index is not None
+                    else None
                 )
+                with semi_detail_col:
+                    if semi_selected_row is None:
+                        st.info("Select a point on the map to view its details and image.")
+                    else:
+                        show_object_details(semi_selected_row, selected_features)
+
+                if semi_selected_row is not None:
+                    semi_morphology_col, semi_pca_col = st.columns([1, 1])
+                    with semi_morphology_col:
+                        show_morphology_catalogue_row(semi_selected_row)
+                    with semi_pca_col:
+                        show_selected_pca_components(semi_selected_row, selected_features)
