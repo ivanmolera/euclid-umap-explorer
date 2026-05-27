@@ -586,13 +586,17 @@ def render_cluster_histograms(
         return
 
     state_key = f"cluster_histograms_visible_{cluster_id}"
+    st.session_state.setdefault(state_key, False)
     button_label = (
         "Update PCA histograms"
         if st.session_state.get(state_key)
         else "Compute PCA histograms"
     )
-    if st.button(button_label, key=f"cluster_histograms_button_{cluster_id}"):
-        st.session_state[state_key] = True
+    st.button(
+        button_label,
+        key=f"cluster_histograms_button_{cluster_id}",
+        on_click=lambda key=state_key: st.session_state.update({key: True}),
+    )
 
     if not st.session_state.get(state_key):
         return
@@ -601,18 +605,19 @@ def render_cluster_histograms(
         st.info("This cluster does not contain non-lens objects for comparison.")
         return
 
-    chart_columns = st.columns(2)
-    for index, feature in enumerate(summary_features):
-        fig = build_cluster_distplot_figure(cluster_df, feature, index)
-        if fig is None:
-            continue
-        with chart_columns[index % 2]:
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-                config={"displaylogo": False, "responsive": True},
-                key=f"cluster_distplot_chart_{cluster_id}_{feature}",
-            )
+    with st.spinner("Computing PCA histograms..."):
+        chart_columns = st.columns(2)
+        for index, feature in enumerate(summary_features):
+            fig = build_cluster_distplot_figure(cluster_df, feature, index)
+            if fig is None:
+                continue
+            with chart_columns[index % 2]:
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                    config={"displaylogo": False, "responsive": True},
+                    key=f"cluster_distplot_chart_{cluster_id}_{feature}",
+                )
 
 def render_thumbnail_group_title(title: str) -> None:
     if title != "Canonical / anomalous":
