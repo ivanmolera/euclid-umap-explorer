@@ -445,6 +445,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             subclustering_ready = "umap_embedding_df" in st.session_state
             subclustering_submitted = st.form_submit_button(
                 "Compute hierarchical subclusters",
+                type="primary",
                 disabled=(not subclustering_ready)
                 or len(filtered_cluster_df) < 3
                 or needs_recalculation,
