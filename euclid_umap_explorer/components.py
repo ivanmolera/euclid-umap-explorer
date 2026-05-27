@@ -870,9 +870,8 @@ def show_morphology_catalogue_row(row: pd.Series) -> None:
     morphology_df = load_morphology_object(MORPH_PATH, str(row.get("object_id", "")))
     if not morphology_df.empty:
         st.markdown("**Morphology catalogue features**")
-        morph_display = morphology_df.iloc[0].dropna().astype(str).reset_index()
-        morph_display = (
-            morph_display.rename(columns={"index": "field", morph_display.columns[-1]: "value"})
+        morph_display = pd.DataFrame(
+            table_rows_with_coordinate_formats(morphology_df.iloc[0].dropna().to_dict())
         )
         st.dataframe(morph_display, use_container_width=True, hide_index=True)
 
@@ -901,27 +900,34 @@ def format_dec_dms(dec_degrees: float) -> str:
     seconds = total_seconds % 60
     return f"{sign}{degrees:02d}d {minutes:02d}m {seconds:05.2f}s"
 
-def object_summary_display_rows(object_summary: dict) -> list[dict]:
-    rows = [{"field": field, "value": value} for field, value in object_summary.items()]
-    try:
-        rows.append(
-            {
-                "field": "right_ascension_hms",
-                "value": format_ra_hms(float(object_summary["right_ascension"])),
-            }
-        )
-    except (KeyError, TypeError, ValueError):
-        pass
-    try:
-        rows.append(
-            {
-                "field": "declination_dms",
-                "value": format_dec_dms(float(object_summary["declination"])),
-            }
-        )
-    except (KeyError, TypeError, ValueError):
-        pass
+def table_rows_with_coordinate_formats(values: dict) -> list[dict]:
+    rows = []
+    for field, value in values.items():
+        rows.append({"field": field, "value": value})
+        if field == "right_ascension":
+            try:
+                rows.append(
+                    {
+                        "field": "right_ascension_hms",
+                        "value": format_ra_hms(float(value)),
+                    }
+                )
+            except (TypeError, ValueError):
+                pass
+        if field == "declination":
+            try:
+                rows.append(
+                    {
+                        "field": "declination_dms",
+                        "value": format_dec_dms(float(value)),
+                    }
+                )
+            except (TypeError, ValueError):
+                pass
     return rows
+
+def object_summary_display_rows(object_summary: dict) -> list[dict]:
+    return table_rows_with_coordinate_formats(object_summary)
 
 def render_euclid_object_search(object_id: str) -> None:
     started_at = time.perf_counter()
@@ -986,12 +992,8 @@ def render_euclid_object_search(object_id: str) -> None:
             if morphology_df.empty:
                 st.info("No morphology catalogue row was found for this object_id.")
             else:
-                morphology_display = morphology_df.iloc[0].dropna().astype(str).reset_index()
-                morphology_display = morphology_display.rename(
-                    columns={
-                        "index": "field",
-                        morphology_display.columns[-1]: "value",
-                    }
+                morphology_display = pd.DataFrame(
+                    table_rows_with_coordinate_formats(morphology_df.iloc[0].dropna().to_dict())
                 )
                 st.dataframe(morphology_display, use_container_width=True, hide_index=True)
 
