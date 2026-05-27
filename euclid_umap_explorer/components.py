@@ -8,6 +8,7 @@ import time
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as st_components
 
 from .analysis import (
     add_cluster_extreme_roles,
@@ -41,6 +42,59 @@ from .images import (
 )
 from .runtime import log_app_event
 from .storage import path_exists
+
+OVERLAY_BUTTON_MESSAGES = {
+    "Run clustering": "Running BIRCH clustering...",
+    "Compute UMAP": "Computing UMAP...",
+    "Recompute UMAP": "Computing UMAP...",
+    "Compute hierarchical subclusters": "Computing hierarchical subclusters...",
+    "Compute semi-supervised UMAP": "Computing semi-supervised UMAP...",
+    "Compute PCA histograms": "Computing PCA histograms...",
+    "Update PCA histograms": "Computing PCA histograms...",
+    "Search": "Searching Euclid object...",
+}
+
+OVERLAY_STYLE = """
+    align-items: center;
+    background: rgba(3, 7, 18, 0.72);
+    backdrop-filter: blur(3px);
+    display: flex;
+    inset: 0;
+    justify-content: center;
+    pointer-events: all;
+    position: fixed;
+    z-index: 100000;
+"""
+
+OVERLAY_CARD_STYLE = """
+    background: #111923;
+    border: 1px solid rgba(248, 250, 252, 0.24);
+    border-radius: 10px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+    color: #f8fafc;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.4;
+    max-width: min(520px, calc(100vw - 2rem));
+    padding: 1.15rem 1.35rem;
+    text-align: center;
+"""
+
+OVERLAY_SPINNER_CSS = """
+    @keyframes euclid-processing-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    .euclid-processing-spinner {
+        animation: euclid-processing-spin 0.9s linear infinite;
+        border: 3px solid rgba(248, 250, 252, 0.25);
+        border-top-color: #ff5a52;
+        border-radius: 999px;
+        height: 2rem;
+        margin: 0 auto 0.8rem auto;
+        width: 2rem;
+    }
+"""
 
 def inject_plot_cursor_css() -> None:
     st.markdown(
@@ -156,6 +210,128 @@ def render_back_to_top_control() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+def install_click_processing_overlay() -> None:
+    button_messages = {
+        html.escape(label): html.escape(message)
+        for label, message in OVERLAY_BUTTON_MESSAGES.items()
+    }
+    st_components.html(
+        f"""
+        <script>
+        (() => {{
+            const buttonMessages = {button_messages!r};
+            const overlayId = "euclid-client-processing-overlay";
+
+            function ensureOverlay(root) {{
+                let overlay = root.getElementById(overlayId);
+                if (overlay) {{
+                    return overlay;
+                }}
+                overlay = root.createElement("div");
+                overlay.id = overlayId;
+                overlay.setAttribute("style", `{OVERLAY_STYLE}`);
+                overlay.innerHTML = `
+                    <div style="{OVERLAY_CARD_STYLE}">
+                        <style>{OVERLAY_SPINNER_CSS}</style>
+                        <div class="euclid-processing-spinner"></div>
+                        <span id="euclid-client-processing-message"></span>
+                    </div>
+                `;
+                root.body.appendChild(overlay);
+                return overlay;
+            }}
+
+            function showOverlay(message) {{
+                const root = window.parent.document;
+                const overlay = ensureOverlay(root);
+                const messageNode = root.getElementById("euclid-client-processing-message");
+                if (messageNode) {{
+                    messageNode.textContent = message;
+                }}
+                overlay.style.display = "flex";
+            }}
+
+            if (!window.parent.__euclidProcessingOverlayInstalled) {{
+                window.parent.__euclidProcessingOverlayInstalled = true;
+                window.parent.document.addEventListener("click", (event) => {{
+                    const button = event.target.closest("button");
+                    if (!button || button.disabled) {{
+                        return;
+                    }}
+                    const label = (button.innerText || button.textContent || "").trim();
+                    const message = buttonMessages[label];
+                    if (message) {{
+                        showOverlay(message);
+                    }}
+                }}, true);
+            }}
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+class ProcessingOverlay:
+    def __init__(self) -> None:
+        self.is_open = False
+
+    def open(self, message: str) -> None:
+        escaped_message = html.escape(message)
+        st_components.html(
+            f"""
+            <script>
+            (() => {{
+                const root = window.parent.document;
+                const overlayId = "euclid-client-processing-overlay";
+                let overlay = root.getElementById(overlayId);
+                if (!overlay) {{
+                    overlay = root.createElement("div");
+                    overlay.id = overlayId;
+                    overlay.setAttribute("style", `{OVERLAY_STYLE}`);
+                    overlay.innerHTML = `
+                        <div style="{OVERLAY_CARD_STYLE}">
+                            <style>{OVERLAY_SPINNER_CSS}</style>
+                            <div class="euclid-processing-spinner"></div>
+                            <span id="euclid-client-processing-message"></span>
+                        </div>
+                    `;
+                    root.body.appendChild(overlay);
+                }}
+                const messageNode = root.getElementById("euclid-client-processing-message");
+                if (messageNode) {{
+                    messageNode.textContent = "{escaped_message}";
+                }}
+                overlay.style.display = "flex";
+            }})();
+            </script>
+            """,
+            height=0,
+            width=0,
+        )
+        self.is_open = True
+
+    def close(self) -> None:
+        if not self.is_open:
+            return
+        st_components.html(
+            """
+            <script>
+            (() => {
+                const overlay = window.parent.document.getElementById(
+                    "euclid-client-processing-overlay"
+                );
+                if (overlay) {
+                    overlay.style.display = "none";
+                }
+            })();
+            </script>
+            """,
+            height=0,
+            width=0,
+        )
+        self.is_open = False
 
 def add_pca_filter() -> None:
     st.session_state["pca_filter_count"] = (
@@ -519,7 +695,9 @@ def render_cluster_histograms(
         st.info("This cluster does not contain non-lens objects for comparison.")
         return
 
-    with st.spinner("Computing PCA histograms..."):
+    overlay = ProcessingOverlay()
+    overlay.open("Computing PCA histograms...")
+    try:
         chart_columns = st.columns(2)
         for index, feature in enumerate(summary_features):
             fig = build_cluster_distplot_figure(cluster_df, feature, index)
@@ -532,6 +710,8 @@ def render_cluster_histograms(
                     config={"displaylogo": False, "responsive": True},
                     key=f"cluster_distplot_chart_{cluster_id}_{feature}",
                 )
+    finally:
+        overlay.close()
 
 def render_thumbnail_group_title(title: str) -> None:
     if title != "Canonical / anomalous":
@@ -745,20 +925,24 @@ def object_summary_display_rows(object_summary: dict) -> list[dict]:
 
 def render_euclid_object_search(object_id: str) -> None:
     started_at = time.perf_counter()
-    with st.spinner(f"Searching Euclid object {object_id}..."):
+    overlay = ProcessingOverlay()
+    overlay.open(f"Searching Euclid object {object_id}...")
+    try:
         result = fetch_euclid_object_summary(object_id)
 
-    object_summary = result["object_summary"]
-    mosaic_summary = result["mosaic_summary"]
-    morphology_df = load_morphology_object(MORPH_PATH, str(result["object_id"]))
-    log_app_event(
-        "object_search_completed",
-        duration_seconds=round(time.perf_counter() - started_at, 3),
-        has_precomputed_cutout=bool(result.get("cutout_path")),
-        has_morphology_row=not morphology_df.empty,
-        instrument=str(mosaic_summary.get("instrument_name", "")),
-        tile_index=str(mosaic_summary.get("tile_index", "")),
-    )
+        object_summary = result["object_summary"]
+        mosaic_summary = result["mosaic_summary"]
+        morphology_df = load_morphology_object(MORPH_PATH, str(result["object_id"]))
+        log_app_event(
+            "object_search_completed",
+            duration_seconds=round(time.perf_counter() - started_at, 3),
+            has_precomputed_cutout=bool(result.get("cutout_path")),
+            has_morphology_row=not morphology_df.empty,
+            instrument=str(mosaic_summary.get("instrument_name", "")),
+            tile_index=str(mosaic_summary.get("tile_index", "")),
+        )
+    finally:
+        overlay.close()
 
     with st.container(border=True):
         st.subheader("Object search")

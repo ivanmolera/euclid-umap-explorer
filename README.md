@@ -1,6 +1,6 @@
 # Euclid UMAP Explorer
 
-Streamlit web application for exploring Euclid astronomical-object clusters with UMAP, using PCA representations and a strong-lensing catalogue.
+Streamlit web application for exploring Euclid astronomical-object clusters with BIRCH, UMAP, PCA representations, morphology cutouts, and a lens-candidate catalogue.
 
 The application reads catalogues and image assets at runtime from configurable paths. Google Cloud Storage paths are supported through `gs://` URIs.
 
@@ -14,9 +14,9 @@ The analysis uses Euclid Q1 catalogue products published on Zenodo:
 Runtime data is expected to be available through the configured paths:
 
 - PCA representations: `PARQUET_PATH`
-- Strong-lensing catalogue: `LENS_PATH`
+- Lens-candidate catalogue: `LENS_PATH`
 - Morphology cutouts: `CUTOUT_BASE`
-- Strong-lens images: `LENS_IMG_BASE`
+- Lens-candidate images: `LENS_IMG_BASE`
 - Optional morphology catalogue: `MORPH_PATH`
 
 The `data/` directories in this repository are placeholders for local development workflows.
@@ -26,10 +26,10 @@ The `data/` directories in this repository are placeholders for local developmen
 - Loads the PCA catalogue `representations_pca_40.parquet`.
 - Automatically detects `feat_pca_*` columns.
 - Derives `object_id` from `id_str` when required.
-- Loads a strong-lensing catalogue and joins it with the PCA catalogue through `object_id`.
+- Loads a lens-candidate catalogue and joins it with the PCA catalogue through `object_id`.
 - Allows the user to select lens grades used in the join (`A`, `B`, `C`).
 - Runs BIRCH clustering with all available PCA components.
-- Runs BIRCH clustering on demand.
+- Runs BIRCH clustering only when the user clicks `Run clustering`.
 - Allows the user to select a cluster, PCA components, and UMAP parameters.
 - Supports multiple PCA threshold filters before computing UMAP.
 - Scales selected features with `StandardScaler`.
@@ -40,6 +40,7 @@ The `data/` directories in this repository are placeholders for local developmen
 - Computes compact lens vs non-lens PCA histograms for clusters containing lenses, limited to six selected UMAP components on screen.
 - Supports point selection from the UMAP plot.
 - Shows selected-object metadata, lens status, UMAP coordinates, selected PCA values, and available images.
+- Uses a client-side processing overlay for long-running actions such as BIRCH, UMAP, hierarchical subclustering, semi-supervised UMAP, histogram computation, and object search.
 - Loads morphology cutouts and lens images on demand from `CUTOUT_BASE` and `LENS_IMG_BASE`.
 
 ## Screenshots
@@ -73,7 +74,7 @@ export EUCLID_CACHE_DIR="$HOME/.cache/euclid-umap-explorer"
 
 `MORPH_PATH` is used to display the full morphology-catalogue row for the selected object when available.
 
-`EUCLID_USE_LOCAL_CACHE=0` disables local catalogue caching. This is the recommended setting for `gs://` paths.
+`EUCLID_USE_LOCAL_CACHE=0` disables copying catalogue files into the local cache. Algorithm and catalogue results are computed from the current session state rather than Streamlit `st.cache_data`.
 
 ## Local Setup
 

@@ -4,7 +4,6 @@ import time
 
 import numpy as np
 import pandas as pd
-import streamlit as st
 
 from .catalogs import load_lens_catalog, load_pca_catalog, merge_lens_flags
 from .config import MAX_ALGORITHM_SECONDS
@@ -83,7 +82,6 @@ def _run_birch_clustering_impl(
     return clustered_df, feature_cols
 
 
-@st.cache_data(show_spinner=True)
 def run_birch_clustering(
     parquet_path: str,
     lens_path: str,

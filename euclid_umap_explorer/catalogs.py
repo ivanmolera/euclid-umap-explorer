@@ -4,7 +4,6 @@ from typing import Iterable
 from pathlib import Path
 
 import pandas as pd
-import streamlit as st
 
 from .storage import cached_input_path, is_gcs_path
 
@@ -38,7 +37,6 @@ def ensure_object_id_from_id_str(df: pd.DataFrame) -> pd.DataFrame:
     df["object_id"] = normalize_object_ids(df["object_id"])
     return df
 
-@st.cache_data(show_spinner=False)
 def load_pca_catalog(parquet_path: str) -> tuple[pd.DataFrame, list[str]]:
     df = pd.read_parquet(cached_input_path(parquet_path))
     df = ensure_object_id_from_id_str(df)
@@ -63,7 +61,6 @@ def normalize_lens_grades(grades: Iterable[str]) -> tuple[str, ...]:
         sorted({str(grade).strip().upper() for grade in grades if str(grade).strip()})
     )
 
-@st.cache_data(show_spinner=False)
 def load_lens_catalog(lens_path: str, selected_grades: tuple[str, ...]) -> pd.DataFrame:
     lens_df = pd.read_csv(cached_input_path(lens_path), dtype={"object_id": "string"})
     if "object_id" not in lens_df.columns:
@@ -101,7 +98,6 @@ def merge_lens_flags(work_df: pd.DataFrame, lens_df: pd.DataFrame) -> pd.DataFra
 
     return merged
 
-@st.cache_data(show_spinner=False)
 def load_morphology_object(morph_path: str, object_id: str) -> pd.DataFrame:
     import pyarrow as pa
     import pyarrow.dataset as ds

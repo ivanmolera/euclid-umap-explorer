@@ -20,7 +20,9 @@ from .analysis import (
 from .birch import run_birch_clustering
 from .catalogs import normalize_lens_grades
 from .components import (
+    ProcessingOverlay,
     inject_plot_cursor_css,
+    install_click_processing_overlay,
     render_back_to_top_control,
     render_cluster_visual_summary,
     render_euclid_object_search,
@@ -79,6 +81,7 @@ def request_semisupervised_umap() -> None:
 def main() -> None:
     st.set_page_config(page_title=APP_TITLE, page_icon=str(EUCLID_FAVICON_PATH), layout="wide")
     inject_plot_cursor_css()
+    install_click_processing_overlay()
     render_back_to_top_control()
     st.title(APP_TITLE)
     loading_placeholder = st.empty()
@@ -194,7 +197,8 @@ This analysis uses Euclid Q1 catalogue products available at:
             st.exception(exc)
 
     clustering_requested = st.session_state.pop("cluster_requested", False)
-    if run_clustering or clustering_requested:
+    birch_requested = run_clustering or clustering_requested
+    if birch_requested:
         if not selected_lens_grades:
             st.warning("Select at least one lens grade before clustering.")
             st.stop()
@@ -219,45 +223,60 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.info("Click **Run clustering** button to clusterize data.")
         st.stop()
 
-    # Only individual catalogues are cached. Image folders are read on demand.
-    prepare_catalog_cache([PARQUET_PATH, LENS_PATH])
-
     params = st.session_state["cluster_params"]
     lens_grades = cluster_lens_grades(params)
-    try:
-        clustered_df, pca_columns = run_birch_clustering(
-            PARQUET_PATH,
-            LENS_PATH,
-            lens_grades,
-            float(params["threshold"]),
-            int(params["branching_factor"]),
-            int(params["batch_size"]),
-        )
-    except AlgorithmTimeoutError as exc:
-        log_app_event("birch_clustering_timeout", timeout_seconds=MAX_ALGORITHM_SECONDS)
-        st.error(
-            "BIRCH clustering was cancelled because it exceeded the "
-            f"{format_duration(MAX_ALGORITHM_SECONDS)} execution limit. "
-            "Try a less expensive configuration before running it again."
-        )
-        st.exception(exc)
-        st.stop()
-    except TimeoutError as exc:
-        st.error(
-            "The data source timed out while reading a catalogue. "
-            "If you are using a synchronized drive, make the files available offline or copy them to local cache first."
-        )
-        st.exception(exc)
-        st.stop()
-    except OSError as exc:
-        st.error(
-            "Could not read a catalogue from the configured paths. "
-            "If you are using a synchronized drive, check that the files are available offline."
-        )
-        st.exception(exc)
-        st.stop()
+    cached_cluster = st.session_state.get("cluster_result")
+    should_run_clustering = birch_requested or cached_cluster is None
 
-    cluster_summary_df = build_cluster_summary(clustered_df)
+    if should_run_clustering:
+        overlay = ProcessingOverlay()
+        try:
+            overlay.open("Running BIRCH clustering...")
+            # Only individual catalogues are cached. Image folders are read on demand.
+            prepare_catalog_cache([PARQUET_PATH, LENS_PATH])
+            clustered_df, pca_columns = run_birch_clustering(
+                PARQUET_PATH,
+                LENS_PATH,
+                lens_grades,
+                float(params["threshold"]),
+                int(params["branching_factor"]),
+                int(params["batch_size"]),
+            )
+            st.session_state["cluster_result"] = (clustered_df, pca_columns)
+            st.session_state["cluster_summary_df"] = build_cluster_summary(clustered_df)
+        except AlgorithmTimeoutError as exc:
+            log_app_event("birch_clustering_timeout", timeout_seconds=MAX_ALGORITHM_SECONDS)
+            st.error(
+                "BIRCH clustering was cancelled because it exceeded the "
+                f"{format_duration(MAX_ALGORITHM_SECONDS)} execution limit. "
+                "Try a less expensive configuration before running it again."
+            )
+            st.exception(exc)
+            st.stop()
+        except TimeoutError as exc:
+            st.error(
+                "The data source timed out while reading a catalogue. "
+                "If you are using a synchronized drive, make the files available offline or copy them to local cache first."
+            )
+            st.exception(exc)
+            st.stop()
+        except OSError as exc:
+            st.error(
+                "Could not read a catalogue from the configured paths. "
+                "If you are using a synchronized drive, check that the files are available offline."
+            )
+            st.exception(exc)
+            st.stop()
+        finally:
+            overlay.close()
+    else:
+        clustered_df, pca_columns = cached_cluster
+
+    cluster_summary_df = st.session_state.get("cluster_summary_df")
+    if cluster_summary_df is None:
+        cluster_summary_df = build_cluster_summary(clustered_df)
+        st.session_state["cluster_summary_df"] = cluster_summary_df
+    cluster_summary_df = cluster_summary_df.copy()
     cluster_summary_df["option"] = cluster_summary_df.apply(format_cluster_option, axis=1)
 
     left_metric, middle_metric, right_metric = st.columns(3)
@@ -460,7 +479,9 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.stop()
 
     if recalculate_umap:
+        overlay = ProcessingOverlay()
         try:
+            overlay.open("Computing UMAP...")
             filtered_cluster_df = add_cluster_extreme_roles(filtered_cluster_df, selected_features)
             display_df = sample_for_display(filtered_cluster_df, int(max_objects))
             log_app_event(
@@ -503,6 +524,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             st.exception(exc)
             st.stop()
         finally:
+            overlay.close()
             st.session_state["umap_running"] = False
             st.session_state["umap_requested"] = False
 
@@ -542,7 +564,9 @@ This analysis uses Euclid Q1 catalogue products available at:
         subclustered_df = None
 
     if st.session_state.get("subclustering_requested"):
+        overlay = ProcessingOverlay()
         try:
+            overlay.open("Computing hierarchical subclusters...")
             subclustered_df = compute_hierarchical_subclusters(
                 cluster_df,
                 selected_features,
@@ -565,6 +589,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             st.exception(exc)
             st.stop()
         finally:
+            overlay.close()
             st.session_state["subclustering_requested"] = False
 
         st.session_state["hierarchical_subcluster_df"] = subclustered_df
@@ -866,6 +891,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 semi_df = None
 
             if st.session_state.get("semisupervised_umap_requested"):
+                overlay = ProcessingOverlay()
                 semi_source_df = subclustered_df[
                     subclustered_df["hierarchical_subcluster"].astype(int)
                     == int(selected_semi_subcluster)
@@ -877,6 +903,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                     )
                     st.stop()
                 try:
+                    overlay.open("Computing semi-supervised UMAP...")
                     semi_df = compute_semisupervised_umap_embedding(
                         semi_source_df,
                         selected_features,
@@ -898,6 +925,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                     st.exception(exc)
                     st.stop()
                 finally:
+                    overlay.close()
                     st.session_state["semisupervised_umap_requested"] = False
 
                 st.session_state["semisupervised_umap_df"] = semi_df

@@ -4,7 +4,6 @@ from collections.abc import Iterable
 
 import numpy as np
 import pandas as pd
-import streamlit as st
 
 from .catalogs import load_morphology_object
 from .config import MORPH_PATH
@@ -45,7 +44,6 @@ def table_row_to_dict(row: object) -> dict[str, object]:
         columns = row.columns
     return {column: serializable_table_value(row[column]) for column in columns}
 
-@st.cache_data(show_spinner=False, ttl=24 * 60 * 60)
 def fetch_euclid_object_summary(
     object_id: str,
     search_radius_arcmin: float = 0.10,

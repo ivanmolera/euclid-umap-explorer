@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 
 import pandas as pd
-import streamlit as st
 
 from .analysis import sample_for_display
 from .config import MAX_ALGORITHM_SECONDS
@@ -54,7 +53,6 @@ def _compute_hierarchical_subclusters_impl(
     return clean
 
 
-@st.cache_data(show_spinner=True)
 def compute_hierarchical_subclusters(
     data: pd.DataFrame,
     selected_features: list[str],
