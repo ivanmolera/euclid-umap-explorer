@@ -754,23 +754,18 @@ def render_cluster_histograms(
         st.info("This cluster does not contain non-lens objects for comparison.")
         return
 
-    overlay = ProcessingOverlay()
-    overlay.open("Computing PCA histograms...")
-    try:
-        chart_columns = st.columns(2)
-        for index, feature in enumerate(summary_features):
-            fig = build_cluster_distplot_figure(cluster_df, feature, index)
-            if fig is None:
-                continue
-            with chart_columns[index % 2]:
-                st.plotly_chart(
-                    fig,
-                    use_container_width=True,
-                    config={"displaylogo": False, "responsive": True},
-                    key=f"cluster_distplot_chart_{cluster_id}_{feature}",
-                )
-    finally:
-        overlay.close()
+    chart_columns = st.columns(2)
+    for index, feature in enumerate(summary_features):
+        fig = build_cluster_distplot_figure(cluster_df, feature, index)
+        if fig is None:
+            continue
+        with chart_columns[index % 2]:
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+                config={"displaylogo": False, "responsive": True},
+                key=f"cluster_distplot_chart_{cluster_id}_{feature}",
+            )
 
 def render_thumbnail_group_title(title: str) -> None:
     if title != "Canonical / anomalous":
