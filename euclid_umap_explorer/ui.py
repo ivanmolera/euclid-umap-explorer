@@ -21,6 +21,7 @@ from .birch import run_birch_clustering
 from .catalogs import normalize_lens_grades
 from .components import (
     ProcessingOverlay,
+    close_processing_overlay,
     inject_plot_cursor_css,
     install_click_processing_overlay,
     render_back_to_top_control,
@@ -1046,3 +1047,5 @@ This analysis uses Euclid Q1 catalogue products available at:
                         show_morphology_catalogue_row(semi_selected_row)
                     with semi_pca_col:
                         show_selected_pca_components(semi_selected_row, selected_features)
+
+    close_processing_overlay()

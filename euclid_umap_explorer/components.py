@@ -315,10 +315,12 @@ class ProcessingOverlay:
 
     def open(self, message: str) -> None:
         escaped_message = html.escape(message)
+        nonce = time.time_ns()
         st_components.html(
             f"""
             <script>
             (() => {{
+                const nonce = "{nonce}";
                 const root = window.parent.document;
                 const overlayId = "euclid-client-processing-overlay";
                 let overlay = root.getElementById(overlayId);
@@ -349,25 +351,45 @@ class ProcessingOverlay:
         self.is_open = True
 
     def close(self) -> None:
-        if not self.is_open:
-            return
+        nonce = time.time_ns()
         st_components.html(
-            """
+            f"""
             <script>
-            (() => {
+            (() => {{
+                const nonce = "{nonce}";
                 const overlay = window.parent.document.getElementById(
                     "euclid-client-processing-overlay"
                 );
-                if (overlay) {
+                if (overlay) {{
                     overlay.style.display = "none";
-                }
-            })();
+                }}
+            }})();
             </script>
             """,
             height=0,
             width=0,
         )
         self.is_open = False
+
+def close_processing_overlay() -> None:
+    nonce = time.time_ns()
+    st_components.html(
+        f"""
+        <script>
+        (() => {{
+            const nonce = "{nonce}";
+            const overlay = window.parent.document.getElementById(
+                "euclid-client-processing-overlay"
+            );
+            if (overlay) {{
+                overlay.style.display = "none";
+            }}
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
 
 def add_pca_filter() -> None:
     st.session_state["pca_filter_count"] = (
