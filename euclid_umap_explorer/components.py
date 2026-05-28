@@ -214,14 +214,21 @@ def inject_plot_cursor_css() -> None:
             width: 1.35rem;
         }
         .sidebar-flow-help .concept-popover {
-            left: auto;
+            bottom: auto;
+            left: calc(100% + 0.75rem);
             min-width: 310px;
-            right: 0;
+            right: auto;
+            top: 0;
             white-space: normal;
         }
         .sidebar-flow-help .concept-popover::after {
-            left: auto;
-            right: 0.75rem;
+            border-bottom: 0.55rem solid transparent;
+            border-right: 0.55rem solid #111923;
+            border-top: 0.55rem solid transparent;
+            bottom: auto;
+            left: -0.52rem;
+            right: auto;
+            top: 0.3rem;
             transform: none;
         }
         </style>
