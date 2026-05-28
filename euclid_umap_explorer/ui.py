@@ -365,7 +365,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
 
     selected_option = st.selectbox(
-        "Cluster",
+        "Cluster selection",
         cluster_summary_df["option"].tolist(),
         index=default_cluster_option_index(cluster_summary_df),
     )

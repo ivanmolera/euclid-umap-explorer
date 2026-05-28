@@ -699,6 +699,7 @@ def build_cluster_distplot_figure(
     fig.update_xaxes(showgrid=False, zeroline=False)
     return fig
 
+@st.fragment
 def render_cluster_histograms(
     cluster_id: int,
     cluster_df: pd.DataFrame,
