@@ -47,6 +47,7 @@ OVERLAY_BUTTON_MESSAGES = {
     "Run clustering": "Running BIRCH clustering...",
     "Compute UMAP": "Computing UMAP...",
     "Recompute UMAP": "Computing UMAP...",
+    "Compute hierarchical clustering": "Computing hierarchical clustering...",
     "Compute hierarchical subclusters": "Computing hierarchical subclusters...",
     "Compute semi-supervised UMAP": "Computing semi-supervised UMAP...",
     "Compute PCA histograms": "Computing PCA histograms...",
@@ -196,6 +197,32 @@ def inject_plot_cursor_css() -> None:
         .concept-help:hover .concept-popover,
         .concept-help:focus .concept-popover {
             display: block;
+        }
+        .sidebar-flow-help {
+            line-height: 1;
+            text-align: right;
+        }
+        .sidebar-flow-help .concept-help {
+            border: 1px solid rgba(148, 163, 184, 0.65);
+            border-radius: 999px;
+            color: inherit;
+            font-size: 0.8rem;
+            font-weight: 800;
+            height: 1.35rem;
+            line-height: 1.25rem;
+            text-align: center;
+            width: 1.35rem;
+        }
+        .sidebar-flow-help .concept-popover {
+            left: auto;
+            min-width: 310px;
+            right: 0;
+            white-space: normal;
+        }
+        .sidebar-flow-help .concept-popover::after {
+            left: auto;
+            right: 0.75rem;
+            transform: none;
         }
         </style>
         """,
@@ -746,6 +773,26 @@ def render_help_label(label: str, help_text: str) -> None:
             <span class="concept-help" tabindex="0">
                 {escaped_label}
                 <span class="concept-popover">{escaped_help}</span>
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+def render_app_flow_help() -> None:
+    st.markdown(
+        """
+        <div class="sidebar-flow-help">
+            <span class="concept-help" tabindex="0">?
+                <span class="concept-popover">
+                    1. Group similar objects with BIRCH.<br>
+                    2. Compute lens-candidate density per cluster.<br>
+                    3. Inspect the clustering summary.<br>
+                    4. Select clusters with high labelled-lens density.<br>
+                    5. Visualize the selected cluster with UMAP and apply hierarchical clustering to find denser regions.<br>
+                    6. Use A/B/C labels to guide semi-supervised UMAP.<br>
+                    7. Prioritize unknown objects close to lens-rich labelled regions.
+                </span>
             </span>
         </div>
         """,

@@ -25,6 +25,7 @@ from .components import (
     install_click_processing_overlay,
     render_back_to_top_control,
     render_cluster_visual_summary,
+    render_app_flow_help,
     render_euclid_object_search,
     render_help_label,
     render_pca_filter_controls,
@@ -105,7 +106,11 @@ def main() -> None:
         logo_left, logo_center, logo_right = st.columns([1, 2, 1])
         with logo_center:
             st.image(str(EUCLID_LOGO_PATH), use_container_width=True)
-        st.caption(f"Version {APP_VERSION}")
+        version_col, flow_help_col = st.columns([4, 1])
+        with version_col:
+            st.caption(f"Version {APP_VERSION}")
+        with flow_help_col:
+            render_app_flow_help()
 
         st.header("Data")
         st.markdown(
@@ -359,25 +364,25 @@ This analysis uses Euclid Q1 catalogue products available at:
             selected_features,
         )
 
+    selected_option = st.selectbox(
+        "Cluster",
+        cluster_summary_df["option"].tolist(),
+        index=default_cluster_option_index(cluster_summary_df),
+    )
+    selected_cluster = int(
+        cluster_summary_df.loc[
+            cluster_summary_df["option"] == selected_option,
+            "cluster",
+        ].iloc[0]
+    )
+
+    cluster_df = clustered_df[clustered_df["cluster"] == selected_cluster].copy()
+    filtered_cluster_df = apply_pca_filters(cluster_df, pca_filters)
+
     with st.expander(
         "UMAP",
         expanded=st.session_state.get("umap_parameters_expanded", True),
     ):
-        selected_option = st.selectbox(
-            "Cluster",
-            cluster_summary_df["option"].tolist(),
-            index=default_cluster_option_index(cluster_summary_df),
-        )
-        selected_cluster = int(
-            cluster_summary_df.loc[
-                cluster_summary_df["option"] == selected_option,
-                "cluster",
-            ].iloc[0]
-        )
-
-        cluster_df = clustered_df[clustered_df["cluster"] == selected_cluster].copy()
-        filtered_cluster_df = apply_pca_filters(cluster_df, pca_filters)
-
         with st.form("umap_parameters_form"):
             umap_param_cols = st.columns([1, 1, 1])
             with umap_param_cols[0]:
@@ -436,7 +441,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             if umap_submitted:
                 request_umap_computation()
 
-    with st.expander("Hierarchical subclustering", expanded=False):
+    with st.expander("Hierarchical clustering", expanded=False):
         with st.form("hierarchical_subclustering_form"):
             subclustering_cols = st.columns([1, 1, 1])
             with subclustering_cols[0]:
@@ -459,10 +464,10 @@ This analysis uses Euclid Q1 catalogue products available at:
                     "Color UMAP by hierarchical subcluster",
                     value=bool(st.session_state.get("color_by_subcluster", False)),
                     key="color_by_subcluster",
-                )
+            )
             subclustering_ready = "umap_embedding_df" in st.session_state
             subclustering_submitted = st.form_submit_button(
-                "Compute hierarchical subclusters",
+                "Compute hierarchical clustering",
                 type="primary",
                 disabled=(not subclustering_ready)
                 or len(filtered_cluster_df) < 3,
@@ -566,7 +571,7 @@ This analysis uses Euclid Q1 catalogue products available at:
     if st.session_state.get("subclustering_requested"):
         overlay = ProcessingOverlay()
         try:
-            overlay.open("Computing hierarchical subclusters...")
+            overlay.open("Computing hierarchical clustering...")
             subclustered_df = compute_hierarchical_subclusters(
                 cluster_df,
                 selected_features,
@@ -582,7 +587,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 max_objects=int(max_subcluster_objects),
             )
             st.error(
-                "Hierarchical subclustering was cancelled because it exceeded the "
+                "Hierarchical clustering was cancelled because it exceeded the "
                 f"{format_duration(MAX_ALGORITHM_SECONDS)} execution limit. "
                 "Try reducing the maximum number of objects before running it again."
             )
@@ -767,7 +772,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             unsafe_allow_html=True,
         )
         if subclustered_df is not None and not subclustered_df.empty:
-            st.markdown("**Hierarchical subclustering summary**")
+            st.markdown("**Hierarchical clustering summary**")
             subcluster_summary_df = build_subcluster_summary(subclustered_df).copy()
             if not subcluster_summary_df.empty:
                 subcluster_summary_df["lens_rate"] = (
@@ -816,7 +821,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 show_selected_pca_components(selected_row, selected_features)
 
     if subclustered_df is not None and not subclustered_df.empty:
-        with st.expander("Semi-supervised UMAP for a subcluster", expanded=False):
+        with st.expander("Semi-supervised UMAP", expanded=False):
             st.caption(
                 "Supervised labels guide the projection as A=2, B=1, C=0, "
                 "and unknown objects=-1."
