@@ -4,6 +4,7 @@ import base64
 import hashlib
 import html
 import time
+from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
@@ -974,12 +975,39 @@ def format_ra_hms(ra_degrees: float) -> str:
     return f"{hours:02d}h {minutes:02d}m {seconds:06.3f}s"
 
 def format_dec_hms(dec_degrees: float) -> str:
+    return format_dec_dms(dec_degrees)
+
+def format_dec_dms(dec_degrees: float) -> str:
     sign = "-" if float(dec_degrees) < 0 else "+"
-    total_seconds = abs(float(dec_degrees)) / 15.0 * 3600.0
-    hours = int(total_seconds // 3600)
+    total_seconds = abs(float(dec_degrees)) * 3600.0
+    degrees = int(total_seconds // 3600)
     minutes = int((total_seconds % 3600) // 60)
     seconds = total_seconds % 60
-    return f"{sign}{hours:02d}h {minutes:02d}m {seconds:06.3f}s"
+    return f"{sign}{degrees:02d}° {minutes:02d}′ {seconds:06.3f}″"
+
+def aladin_target_coordinates(ra_degrees: float, dec_degrees: float) -> str:
+    ra_seconds_total = (float(ra_degrees) % 360.0) / 15.0 * 3600.0
+    ra_hours = int(ra_seconds_total // 3600)
+    ra_minutes = int((ra_seconds_total % 3600) // 60)
+    ra_seconds = ra_seconds_total % 60
+
+    dec_sign = "+" if float(dec_degrees) >= 0 else "-"
+    dec_seconds_total = abs(float(dec_degrees)) * 3600.0
+    dec_degrees_int = int(dec_seconds_total // 3600)
+    dec_minutes = int((dec_seconds_total % 3600) // 60)
+    dec_seconds = dec_seconds_total % 60
+
+    return (
+        f"{ra_hours:02d} {ra_minutes:02d} {ra_seconds:06.3f}"
+        f"{dec_sign}{dec_degrees_int:02d} {dec_minutes:02d} {dec_seconds:06.3f}"
+    )
+
+def aladin_url(ra_degrees: float, dec_degrees: float) -> str:
+    target = quote(aladin_target_coordinates(ra_degrees, dec_degrees), safe="")
+    return (
+        "https://aladin.unistra.fr/AladinLite/"
+        f"?target={target}&fov=0.02&survey=CDS%2FP%2FEuclid%2FQ1%2FVIS"
+    )
 
 def table_rows_with_coordinate_formats(values: dict) -> list[dict]:
     rows = []
@@ -999,8 +1027,8 @@ def table_rows_with_coordinate_formats(values: dict) -> list[dict]:
             try:
                 rows.append(
                     {
-                        "field": "declination_hms",
-                        "value": format_dec_hms(float(value)),
+                        "field": "declination_dms",
+                        "value": format_dec_dms(float(value)),
                     }
                 )
             except (TypeError, ValueError):
@@ -1016,6 +1044,7 @@ def object_search_morphology_values(morphology_row: dict) -> dict:
         "right_ascension",
         "right_ascension_hms",
         "declination",
+        "declination_dms",
         "declination_hms",
     }
     return {
@@ -1086,9 +1115,15 @@ def render_euclid_object_search(object_id: str) -> None:
         with image_col:
             cutout_path = result.get("cutout_path")
             if cutout_path:
+                aladin_link = aladin_url(ra_degrees, dec_degrees)
                 show_image(
                     str(cutout_path),
                     "Euclid VIS cutout",
+                    caption_markdown=(
+                        'Euclid VIS cutout '
+                        f'<a href="{aladin_link}" target="_blank" '
+                        'rel="noopener noreferrer">[View in Aladin]</a>'
+                    ),
                 )
             else:
                 st.info(

@@ -83,13 +83,17 @@ def thumbnail_image_src(path: str) -> str:
     image_type = "png" if str(path).lower().endswith(".png") else "jpeg"
     return f"data:image/{image_type};base64,{base64.b64encode(image_bytes).decode()}"
 
-def show_image(path: str, caption: str) -> None:
+def show_image(path: str, caption: str, caption_markdown: str | None = None) -> None:
     try:
         image = Image.open(BytesIO(load_image_bytes(path)))
     except Exception as exc:
         st.warning(f"Could not open the image: {exc}")
         return
-    st.image(image, caption=caption, use_container_width=True)
+    if caption_markdown:
+        st.image(image, use_container_width=True)
+        st.markdown(caption_markdown, unsafe_allow_html=True)
+    else:
+        st.image(image, caption=caption, use_container_width=True)
 
 def object_image_path(row: pd.Series, prefer_lens_image: bool = False) -> str | None:
     if prefer_lens_image:

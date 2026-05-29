@@ -88,12 +88,16 @@ def format_ra_hms(ra_degrees: float) -> str:
 
 
 def format_dec_hms(dec_degrees: float) -> str:
+    return format_dec_dms(dec_degrees)
+
+
+def format_dec_dms(dec_degrees: float) -> str:
     sign = "-" if float(dec_degrees) < 0 else "+"
-    total_seconds = abs(float(dec_degrees)) / 15.0 * 3600.0
-    hours = int(total_seconds // 3600)
+    total_seconds = abs(float(dec_degrees)) * 3600.0
+    degrees = int(total_seconds // 3600)
     minutes = int((total_seconds % 3600) // 60)
     seconds = total_seconds % 60
-    return f"{sign}{hours:02d}h {minutes:02d}m {seconds:06.3f}s"
+    return f"{sign}{degrees:02d}° {minutes:02d}′ {seconds:06.3f}″"
 
 
 def table_rows_with_coordinate_formats(
@@ -119,8 +123,8 @@ def table_rows_with_coordinate_formats(
                 rows.append(
                     {
                         "section": section,
-                        "field": "declination_hms",
-                        "value": format_dec_hms(float(value)),
+                        "field": "declination_dms",
+                        "value": format_dec_dms(float(value)),
                     }
                 )
             except (TypeError, ValueError):
@@ -160,8 +164,8 @@ def umap_download_df(
             lambda value: format_ra_hms(float(value)) if pd.notna(value) else ""
         )
     if "declination" in export_df.columns:
-        export_df["declination_hms"] = export_df["declination"].map(
-            lambda value: format_dec_hms(float(value)) if pd.notna(value) else ""
+        export_df["declination_dms"] = export_df["declination"].map(
+            lambda value: format_dec_dms(float(value)) if pd.notna(value) else ""
         )
 
     preferred_columns = [
@@ -172,7 +176,7 @@ def umap_download_df(
             "right_ascension",
             "right_ascension_hms",
             "declination",
-            "declination_hms",
+            "declination_dms",
             "umap_1",
             "umap_2",
             "semi_umap_1",
