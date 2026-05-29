@@ -486,56 +486,61 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.warning("Select at least one PCA component to build UMAP.")
         st.stop()
 
-    with st.expander(
-        "Clustering summary",
-        expanded=st.session_state.get("cluster_summary_expanded", False),
-    ):
-        st.markdown(
-            f"""
-            <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
-                <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
-                    Execution time:
-                </span>
-                <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
-                    {format_duration(clustered_df.attrs.get("processing_seconds"))}
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        cluster_download_df = cluster_summary_download_df(
-            clustered_df,
-            cluster_summary_df,
-            selected_features,
-        )
-        summary_display = cluster_download_df.copy()
-        summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
-        st.dataframe(
-            summary_display[
-                [
-                    "cluster",
-                    "n_objects",
-                    "n_lenses",
-                    "lens_rate",
-                    "canonical",
-                    "anomalous",
-                ]
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.download_button(
-            "Download clustering table",
-            data=dataframe_to_csv_bytes(cluster_download_df),
-            file_name="clustering_summary.csv",
-            mime="text/csv",
-        )
-        render_cluster_visual_summary(
-            clustered_df,
-            cluster_summary_df,
-            pca_columns,
-            selected_features,
-        )
+    skip_cluster_summary_render = bool(
+        st.session_state.get("umap_requested", False)
+    ) or bool(st.session_state.pop("skip_cluster_summary_once", False))
+
+    if not skip_cluster_summary_render:
+        with st.expander(
+            "Clustering summary",
+            expanded=st.session_state.get("cluster_summary_expanded", False),
+        ):
+            st.markdown(
+                f"""
+                <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
+                    <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
+                        Execution time:
+                    </span>
+                    <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
+                        {format_duration(clustered_df.attrs.get("processing_seconds"))}
+                    </span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            cluster_download_df = cluster_summary_download_df(
+                clustered_df,
+                cluster_summary_df,
+                selected_features,
+            )
+            summary_display = cluster_download_df.copy()
+            summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
+            st.dataframe(
+                summary_display[
+                    [
+                        "cluster",
+                        "n_objects",
+                        "n_lenses",
+                        "lens_rate",
+                        "canonical",
+                        "anomalous",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.download_button(
+                "Download clustering table",
+                data=dataframe_to_csv_bytes(cluster_download_df),
+                file_name="clustering_summary.csv",
+                mime="text/csv",
+            )
+            render_cluster_visual_summary(
+                clustered_df,
+                cluster_summary_df,
+                pca_columns,
+                selected_features,
+            )
 
     selected_option = st.selectbox(
         "Cluster selection",
@@ -714,6 +719,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         embedding_df["point_index"] = embedding_df.index
         st.session_state["umap_embedding_df"] = embedding_df
         st.session_state["umap_signature"] = umap_signature
+        st.session_state["skip_cluster_summary_once"] = True
         needs_recalculation = False
         st.rerun()
 

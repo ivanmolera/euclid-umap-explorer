@@ -942,7 +942,14 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
         st.info("No associated image was found in the configured paths.")
     else:
         if cutout_path is not None:
-            show_image(cutout_path, "Morphology cutout")
+            show_image(
+                cutout_path,
+                "Morphology cutout",
+                caption_markdown=aladin_caption_for_object(
+                    "Morphology cutout",
+                    row.get("object_id", ""),
+                ),
+            )
         if lens_path is not None:
             show_image(lens_path, "Strong-lens image")
 
@@ -1006,6 +1013,28 @@ def aladin_url(ra_degrees: float, dec_degrees: float) -> str:
         "https://aladin.unistra.fr/AladinLite/"
         f"?target={target}&fov=0.02&survey=CDS%2FP%2FEuclid%2FQ1%2Fcolor"
     )
+
+def aladin_caption(caption: str, ra_degrees: float, dec_degrees: float) -> str:
+    aladin_link = aladin_url(ra_degrees, dec_degrees)
+    return (
+        f"<span>{html.escape(caption)} </span>"
+        f'<a href="{aladin_link}" target="_blank" '
+        'rel="noopener noreferrer">[View in Aladin]</a>'
+    )
+
+def aladin_caption_for_object(caption: str, object_id: object) -> str | None:
+    morphology_df = load_morphology_object(MORPH_PATH, str(object_id))
+    if morphology_df.empty:
+        return None
+    morphology_row = morphology_df.iloc[0]
+    try:
+        return aladin_caption(
+            caption,
+            float(morphology_row["right_ascension"]),
+            float(morphology_row["declination"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
 
 def table_rows_with_coordinate_formats(values: dict) -> list[dict]:
     rows = []
