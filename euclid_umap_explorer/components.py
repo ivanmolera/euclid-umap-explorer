@@ -1004,6 +1004,20 @@ def table_rows_with_coordinate_formats(values: dict) -> list[dict]:
 def object_summary_display_rows(object_summary: dict) -> list[dict]:
     return table_rows_with_coordinate_formats(object_summary)
 
+def object_search_morphology_values(morphology_row: dict) -> dict:
+    redundant_fields = {
+        "object_id",
+        "right_ascension",
+        "right_ascension_hms",
+        "declination",
+        "declination_dms",
+    }
+    return {
+        field: value
+        for field, value in morphology_row.items()
+        if field not in redundant_fields
+    }
+
 def render_euclid_object_search(object_id: str) -> None:
     started_at = time.perf_counter()
     overlay = ProcessingOverlay()
@@ -1066,7 +1080,11 @@ def render_euclid_object_search(object_id: str) -> None:
                 st.info("No morphology catalogue row was found for this object_id.")
             else:
                 morphology_display = pd.DataFrame(
-                    table_rows_with_coordinate_formats(morphology_df.iloc[0].dropna().to_dict())
+                    table_rows_with_coordinate_formats(
+                        object_search_morphology_values(
+                            morphology_df.iloc[0].dropna().to_dict()
+                        )
+                    )
                 )
                 st.dataframe(morphology_display, use_container_width=True, hide_index=True)
 
