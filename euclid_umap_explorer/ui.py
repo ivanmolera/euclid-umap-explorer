@@ -208,6 +208,8 @@ This analysis uses Euclid Q1 catalogue products available at:
             log_app_event("object_search_failed", error_type=type(exc).__name__)
             st.error("Could not retrieve the Euclid cutout for this object_id.")
             st.exception(exc)
+        finally:
+            close_processing_overlay()
 
     clustering_requested = st.session_state.pop("cluster_requested", False)
     birch_requested = run_clustering or clustering_requested
@@ -233,6 +235,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
 
     if not st.session_state.get("cluster_ready"):
+        close_processing_overlay()
         st.info("Click **Run clustering** button to clusterize data.")
         st.stop()
 
