@@ -52,8 +52,6 @@ OVERLAY_BUTTON_MESSAGES = {
     "Compute hierarchical clustering": "Computing hierarchical clustering...",
     "Compute hierarchical subclusters": "Computing hierarchical subclusters...",
     "Compute semi-supervised UMAP": "Computing semi-supervised UMAP...",
-    "Compute PCA histograms": "Computing PCA histograms...",
-    "Update PCA histograms": "Computing PCA histograms...",
     "Search": "Searching Euclid object...",
 }
 
