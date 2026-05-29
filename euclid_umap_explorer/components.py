@@ -1019,15 +1019,15 @@ def object_search_morphology_values(morphology_row: dict) -> dict:
     }
 
 def render_euclid_object_search(object_id: str) -> None:
-    started_at = time.perf_counter()
-    overlay = ProcessingOverlay()
-    overlay.open(f"Searching Euclid object {object_id}...")
-    try:
+    cached_search = st.session_state.get("euclid_search_result")
+    if cached_search and cached_search.get("requested_object_id") == str(object_id):
+        result = cached_search["result"]
+        morphology_df = cached_search["morphology_df"]
+    else:
+        started_at = time.perf_counter()
         result = fetch_euclid_object_summary(object_id)
-
-        object_summary = result["object_summary"]
-        mosaic_summary = result["mosaic_summary"]
         morphology_df = load_morphology_object(MORPH_PATH, str(result["object_id"]))
+        mosaic_summary = result["mosaic_summary"]
         log_app_event(
             "object_search_completed",
             duration_seconds=round(time.perf_counter() - started_at, 3),
@@ -1036,8 +1036,14 @@ def render_euclid_object_search(object_id: str) -> None:
             instrument=str(mosaic_summary.get("instrument_name", "")),
             tile_index=str(mosaic_summary.get("tile_index", "")),
         )
-    finally:
-        overlay.close()
+        st.session_state["euclid_search_result"] = {
+            "requested_object_id": str(object_id),
+            "result": result,
+            "morphology_df": morphology_df,
+        }
+
+    object_summary = result["object_summary"]
+    mosaic_summary = result["mosaic_summary"]
 
     with st.container(border=True):
         st.subheader("Object search")
