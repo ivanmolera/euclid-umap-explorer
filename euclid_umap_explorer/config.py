@@ -55,6 +55,7 @@ SUMMARY_THUMBNAIL_WIDTH = 90
 SUMMARY_HISTOGRAM_BINS = 24
 SUMMARY_HISTOGRAM_FEATURE_LIMIT = 6
 SUMMARY_DISTPLOT_MAX_POINTS_PER_GROUP = 5_000
+DOWNLOAD_MAX_UMAP_ROWS = 5_000
 PCA_FILTER_OPERATORS = [">", ">=", "<", "<=", "between"]
 LENS_GRADE_HELP = (
     "Grade A: secure or almost secure lens candidates with clear lensing features "

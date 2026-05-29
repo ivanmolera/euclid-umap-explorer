@@ -43,6 +43,7 @@ from .config import (
     DEFAULT_BIRCH_THRESHOLD,
     DEFAULT_CLUSTER_FEATURES,
     DEFAULT_LENS_GRADES,
+    DOWNLOAD_MAX_UMAP_ROWS,
     EUCLID_FAVICON_PATH,
     EUCLID_LOGO_PATH,
     LENS_GRADE_HELP,
@@ -51,6 +52,12 @@ from .config import (
     MAX_ALGORITHM_SECONDS,
     PARAMETER_HELP,
     PARQUET_PATH,
+)
+from .downloads import (
+    cluster_summary_download_df,
+    dataframe_to_csv_bytes,
+    selected_point_indices,
+    umap_download_df,
 )
 from .euclid_search import is_valid_search_object_id, selected_point_index
 from .runtime import AlgorithmTimeoutError, format_duration, log_app_event
@@ -357,6 +364,17 @@ This analysis uses Euclid Q1 catalogue products available at:
             summary_display[["cluster", "n_objects", "n_lenses", "lens_rate"]],
             use_container_width=True,
             hide_index=True,
+        )
+        cluster_download_df = cluster_summary_download_df(
+            clustered_df,
+            cluster_summary_df,
+            selected_features,
+        )
+        st.download_button(
+            "Download clustering table",
+            data=dataframe_to_csv_bytes(cluster_download_df),
+            file_name="clustering_summary.csv",
+            mime="text/csv",
         )
         render_cluster_visual_summary(
             clustered_df,
@@ -798,8 +816,45 @@ This analysis uses Euclid Q1 catalogue products available at:
                     "doubleClick": "reset",
                 },
                 on_select="rerun",
-                selection_mode="points",
+                selection_mode=("points", "box", "lasso"),
                 key="umap_selection",
+            )
+
+            selected_indices = selected_point_indices(event)
+            umap_source_df = (
+                embedding_df.loc[embedding_df.index.intersection(selected_indices)]
+                if selected_indices
+                else embedding_df
+            )
+            umap_download_signature = (
+                "cluster_umap",
+                st.session_state.get("umap_signature"),
+                tuple(selected_indices),
+                tuple(selected_features),
+            )
+            if st.button("Prepare UMAP CSV", key="prepare_umap_download"):
+                prepared_df = umap_download_df(
+                    embedding_df,
+                    selected_features,
+                    selected_indices,
+                )
+                st.session_state["umap_download_signature"] = umap_download_signature
+                st.session_state["umap_download_rows"] = len(prepared_df)
+                st.session_state["umap_download_data"] = dataframe_to_csv_bytes(prepared_df)
+            if (
+                st.session_state.get("umap_download_signature")
+                == umap_download_signature
+            ):
+                st.download_button(
+                    "Download UMAP objects",
+                    data=st.session_state["umap_download_data"],
+                    file_name=f"cluster_{selected_cluster}_umap_objects.csv",
+                    mime="text/csv",
+                )
+            st.caption(
+                f"Downloads {min(len(umap_source_df), DOWNLOAD_MAX_UMAP_ROWS):,} "
+                f"of {len(umap_source_df):,} selected or loaded UMAP objects. "
+                "Use box or lasso selection to restrict the export."
             )
 
         selected_index = selected_point_index(event)
@@ -1025,8 +1080,59 @@ This analysis uses Euclid Q1 catalogue products available at:
                             "doubleClick": "reset",
                         },
                         on_select="rerun",
-                        selection_mode="points",
+                        selection_mode=("points", "box", "lasso"),
                         key="semisupervised_umap_chart",
+                    )
+
+                    semi_selected_indices = selected_point_indices(semi_event)
+                    semi_source_df = (
+                        semi_display_df.loc[
+                            semi_display_df.index.intersection(semi_selected_indices)
+                        ]
+                        if semi_selected_indices
+                        else semi_display_df
+                    )
+                    semi_download_signature = (
+                        "semisupervised_umap",
+                        semi_signature,
+                        tuple(semi_selected_indices),
+                        tuple(selected_features),
+                    )
+                    if st.button(
+                        "Prepare semi-supervised UMAP CSV",
+                        key="prepare_semisupervised_umap_download",
+                    ):
+                        prepared_semi_df = umap_download_df(
+                            semi_display_df,
+                            selected_features,
+                            semi_selected_indices,
+                        )
+                        st.session_state["semi_umap_download_signature"] = (
+                            semi_download_signature
+                        )
+                        st.session_state["semi_umap_download_rows"] = len(
+                            prepared_semi_df
+                        )
+                        st.session_state["semi_umap_download_data"] = (
+                            dataframe_to_csv_bytes(prepared_semi_df)
+                        )
+                    if (
+                        st.session_state.get("semi_umap_download_signature")
+                        == semi_download_signature
+                    ):
+                        st.download_button(
+                            "Download semi-supervised UMAP objects",
+                            data=st.session_state["semi_umap_download_data"],
+                            file_name=(
+                                f"subcluster_{selected_semi_subcluster}_"
+                                "semisupervised_umap_objects.csv"
+                            ),
+                            mime="text/csv",
+                        )
+                    st.caption(
+                        f"Downloads {min(len(semi_source_df), DOWNLOAD_MAX_UMAP_ROWS):,} "
+                        f"of {len(semi_source_df):,} selected or loaded UMAP objects. "
+                        "Use box or lasso selection to restrict the export."
                     )
 
                 semi_selected_index = selected_point_index(semi_event)

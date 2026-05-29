@@ -32,6 +32,7 @@ from .config import (
     SUMMARY_RANDOM_OBJECTS,
     SUMMARY_THUMBNAIL_WIDTH,
 )
+from .downloads import dataframe_to_csv_bytes, object_search_download_df
 from .euclid_search import fetch_euclid_object_summary
 from .images import (
     lens_image_path,
@@ -1068,6 +1069,18 @@ def render_euclid_object_search(object_id: str) -> None:
                     table_rows_with_coordinate_formats(morphology_df.iloc[0].dropna().to_dict())
                 )
                 st.dataframe(morphology_display, use_container_width=True, hide_index=True)
+
+        object_download_df = object_search_download_df(
+            object_summary,
+            morphology_df,
+            mosaic_summary,
+        )
+        st.download_button(
+            "Download object search data",
+            data=dataframe_to_csv_bytes(object_download_df),
+            file_name=f"object_search_{result['object_id']}.csv",
+            mime="text/csv",
+        )
 
 def validate_paths() -> pd.DataFrame:
     rows = [
