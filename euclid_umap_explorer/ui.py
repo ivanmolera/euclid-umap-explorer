@@ -87,6 +87,179 @@ def request_semisupervised_umap() -> None:
     st.session_state["semisupervised_umap_requested"] = True
 
 
+@st.fragment
+def render_cluster_umap_interaction(
+    fig: object,
+    embedding_df: pd.DataFrame,
+    selected_features: list[str],
+    selected_cluster: int,
+) -> None:
+    plot_col, detail_col = st.columns([2, 1])
+    with plot_col:
+        event = st.plotly_chart(
+            fig,
+            use_container_width=True,
+            config={
+                "displaylogo": False,
+                "scrollZoom": True,
+                "doubleClick": "reset",
+            },
+            on_select="rerun",
+            selection_mode=("points", "box", "lasso"),
+            key="umap_selection",
+        )
+
+        selected_indices = selected_point_indices(event)
+        umap_source_df = (
+            embedding_df.loc[embedding_df.index.intersection(selected_indices)]
+            if selected_indices
+            else embedding_df
+        )
+        umap_download_signature = (
+            "cluster_umap",
+            st.session_state.get("umap_signature"),
+            tuple(selected_indices),
+            tuple(selected_features),
+        )
+        if st.button("Generate UMAP CSV", key="prepare_umap_download"):
+            prepared_df = umap_download_df(
+                embedding_df,
+                selected_features,
+                selected_indices,
+            )
+            st.session_state["umap_download_signature"] = umap_download_signature
+            st.session_state["umap_download_rows"] = len(prepared_df)
+            st.session_state["umap_download_data"] = dataframe_to_csv_bytes(prepared_df)
+        if st.session_state.get("umap_download_signature") == umap_download_signature:
+            st.success(
+                f"CSV ready with {st.session_state['umap_download_rows']:,} rows."
+            )
+            st.download_button(
+                "Download UMAP objects",
+                data=st.session_state["umap_download_data"],
+                file_name=f"cluster_{selected_cluster}_umap_objects.csv",
+                mime="text/csv",
+            )
+        st.caption(
+            f"Downloads {min(len(umap_source_df), DOWNLOAD_MAX_UMAP_ROWS):,} "
+            f"of {len(umap_source_df):,} selected or loaded UMAP objects. "
+            "Use box or lasso selection to restrict the export."
+        )
+
+    selected_index = selected_point_index(event)
+    selected_row = (
+        embedding_df.loc[selected_index]
+        if selected_index is not None
+        else None
+    )
+    with detail_col:
+        if selected_row is None:
+            st.info("Select a point on the map to view its details and image.")
+        else:
+            show_object_details(selected_row, selected_features)
+
+    if selected_row is not None:
+        morphology_col, pca_col = st.columns([1, 1])
+        with morphology_col:
+            show_morphology_catalogue_row(selected_row)
+        with pca_col:
+            show_selected_pca_components(selected_row, selected_features)
+
+
+@st.fragment
+def render_semisupervised_umap_interaction(
+    semi_fig: object,
+    semi_display_df: pd.DataFrame,
+    selected_features: list[str],
+    semi_signature: tuple,
+    selected_semi_subcluster: int,
+) -> None:
+    semi_plot_col, semi_detail_col = st.columns([2, 1])
+    with semi_plot_col:
+        semi_event = st.plotly_chart(
+            semi_fig,
+            use_container_width=True,
+            config={
+                "displaylogo": False,
+                "scrollZoom": True,
+                "doubleClick": "reset",
+            },
+            on_select="rerun",
+            selection_mode=("points", "box", "lasso"),
+            key="semisupervised_umap_chart",
+        )
+
+        semi_selected_indices = selected_point_indices(semi_event)
+        semi_source_df = (
+            semi_display_df.loc[
+                semi_display_df.index.intersection(semi_selected_indices)
+            ]
+            if semi_selected_indices
+            else semi_display_df
+        )
+        semi_download_signature = (
+            "semisupervised_umap",
+            semi_signature,
+            tuple(semi_selected_indices),
+            tuple(selected_features),
+        )
+        if st.button(
+            "Generate semi-supervised UMAP CSV",
+            key="prepare_semisupervised_umap_download",
+        ):
+            prepared_semi_df = umap_download_df(
+                semi_display_df,
+                selected_features,
+                semi_selected_indices,
+            )
+            st.session_state["semi_umap_download_signature"] = semi_download_signature
+            st.session_state["semi_umap_download_rows"] = len(prepared_semi_df)
+            st.session_state["semi_umap_download_data"] = dataframe_to_csv_bytes(
+                prepared_semi_df
+            )
+        if (
+            st.session_state.get("semi_umap_download_signature")
+            == semi_download_signature
+        ):
+            st.success(
+                "CSV ready with "
+                f"{st.session_state['semi_umap_download_rows']:,} rows."
+            )
+            st.download_button(
+                "Download semi-supervised UMAP objects",
+                data=st.session_state["semi_umap_download_data"],
+                file_name=(
+                    f"subcluster_{selected_semi_subcluster}_"
+                    "semisupervised_umap_objects.csv"
+                ),
+                mime="text/csv",
+            )
+        st.caption(
+            f"Downloads {min(len(semi_source_df), DOWNLOAD_MAX_UMAP_ROWS):,} "
+            f"of {len(semi_source_df):,} selected or loaded UMAP objects. "
+            "Use box or lasso selection to restrict the export."
+        )
+
+    semi_selected_index = selected_point_index(semi_event)
+    semi_selected_row = (
+        semi_display_df.loc[semi_selected_index]
+        if semi_selected_index is not None
+        else None
+    )
+    with semi_detail_col:
+        if semi_selected_row is None:
+            st.info("Select a point on the map to view its details and image.")
+        else:
+            show_object_details(semi_selected_row, selected_features)
+
+    if semi_selected_row is not None:
+        semi_morphology_col, semi_pca_col = st.columns([1, 1])
+        with semi_morphology_col:
+            show_morphology_catalogue_row(semi_selected_row)
+        with semi_pca_col:
+            show_selected_pca_components(semi_selected_row, selected_features)
+
+
 def main() -> None:
     st.set_page_config(page_title=APP_TITLE, page_icon=str(EUCLID_FAVICON_PATH), layout="wide")
     inject_plot_cursor_css()
@@ -817,79 +990,12 @@ This analysis uses Euclid Q1 catalogue products available at:
                     hide_index=True,
                 )
 
-        plot_col, detail_col = st.columns([2, 1])
-        with plot_col:
-            event = st.plotly_chart(
-                fig,
-                use_container_width=True,
-                config={
-                    "displaylogo": False,
-                    "scrollZoom": True,
-                    "doubleClick": "reset",
-                },
-                on_select="rerun",
-                selection_mode=("points", "box", "lasso"),
-                key="umap_selection",
-            )
-
-            selected_indices = selected_point_indices(event)
-            umap_source_df = (
-                embedding_df.loc[embedding_df.index.intersection(selected_indices)]
-                if selected_indices
-                else embedding_df
-            )
-            umap_download_signature = (
-                "cluster_umap",
-                st.session_state.get("umap_signature"),
-                tuple(selected_indices),
-                tuple(selected_features),
-            )
-            if st.button("Generate UMAP CSV", key="prepare_umap_download"):
-                prepared_df = umap_download_df(
-                    embedding_df,
-                    selected_features,
-                    selected_indices,
-                )
-                st.session_state["umap_download_signature"] = umap_download_signature
-                st.session_state["umap_download_rows"] = len(prepared_df)
-                st.session_state["umap_download_data"] = dataframe_to_csv_bytes(prepared_df)
-            if (
-                st.session_state.get("umap_download_signature")
-                == umap_download_signature
-            ):
-                st.success(
-                    f"CSV ready with {st.session_state['umap_download_rows']:,} rows."
-                )
-                st.download_button(
-                    "Download UMAP objects",
-                    data=st.session_state["umap_download_data"],
-                    file_name=f"cluster_{selected_cluster}_umap_objects.csv",
-                    mime="text/csv",
-                )
-            st.caption(
-                f"Downloads {min(len(umap_source_df), DOWNLOAD_MAX_UMAP_ROWS):,} "
-                f"of {len(umap_source_df):,} selected or loaded UMAP objects. "
-                "Use box or lasso selection to restrict the export."
-            )
-
-        selected_index = selected_point_index(event)
-        selected_row = (
-            embedding_df.loc[selected_index]
-            if selected_index is not None
-            else None
+        render_cluster_umap_interaction(
+            fig,
+            embedding_df,
+            selected_features,
+            selected_cluster,
         )
-        with detail_col:
-            if selected_row is None:
-                st.info("Select a point on the map to view its details and image.")
-            else:
-                show_object_details(selected_row, selected_features)
-
-        if selected_row is not None:
-            morphology_col, pca_col = st.columns([1, 1])
-            with morphology_col:
-                show_morphology_catalogue_row(selected_row)
-            with pca_col:
-                show_selected_pca_components(selected_row, selected_features)
 
     if subclustered_df is not None and not subclustered_df.empty:
         with st.expander("Semi-supervised UMAP", expanded=False):
@@ -1084,93 +1190,12 @@ This analysis uses Euclid Q1 catalogue products available at:
                     dragmode="zoom",
                     clickmode="event+select",
                 )
-                semi_plot_col, semi_detail_col = st.columns([2, 1])
-                with semi_plot_col:
-                    semi_event = st.plotly_chart(
-                        semi_fig,
-                        use_container_width=True,
-                        config={
-                            "displaylogo": False,
-                            "scrollZoom": True,
-                            "doubleClick": "reset",
-                        },
-                        on_select="rerun",
-                        selection_mode=("points", "box", "lasso"),
-                        key="semisupervised_umap_chart",
-                    )
-
-                    semi_selected_indices = selected_point_indices(semi_event)
-                    semi_source_df = (
-                        semi_display_df.loc[
-                            semi_display_df.index.intersection(semi_selected_indices)
-                        ]
-                        if semi_selected_indices
-                        else semi_display_df
-                    )
-                    semi_download_signature = (
-                        "semisupervised_umap",
-                        semi_signature,
-                        tuple(semi_selected_indices),
-                        tuple(selected_features),
-                    )
-                    if st.button(
-                        "Generate semi-supervised UMAP CSV",
-                        key="prepare_semisupervised_umap_download",
-                    ):
-                        prepared_semi_df = umap_download_df(
-                            semi_display_df,
-                            selected_features,
-                            semi_selected_indices,
-                        )
-                        st.session_state["semi_umap_download_signature"] = (
-                            semi_download_signature
-                        )
-                        st.session_state["semi_umap_download_rows"] = len(
-                            prepared_semi_df
-                        )
-                        st.session_state["semi_umap_download_data"] = (
-                            dataframe_to_csv_bytes(prepared_semi_df)
-                        )
-                    if (
-                        st.session_state.get("semi_umap_download_signature")
-                        == semi_download_signature
-                    ):
-                        st.success(
-                            "CSV ready with "
-                            f"{st.session_state['semi_umap_download_rows']:,} rows."
-                        )
-                        st.download_button(
-                            "Download semi-supervised UMAP objects",
-                            data=st.session_state["semi_umap_download_data"],
-                            file_name=(
-                                f"subcluster_{selected_semi_subcluster}_"
-                                "semisupervised_umap_objects.csv"
-                            ),
-                            mime="text/csv",
-                        )
-                    st.caption(
-                        f"Downloads {min(len(semi_source_df), DOWNLOAD_MAX_UMAP_ROWS):,} "
-                        f"of {len(semi_source_df):,} selected or loaded UMAP objects. "
-                        "Use box or lasso selection to restrict the export."
-                    )
-
-                semi_selected_index = selected_point_index(semi_event)
-                semi_selected_row = (
-                    semi_display_df.loc[semi_selected_index]
-                    if semi_selected_index is not None
-                    else None
+                render_semisupervised_umap_interaction(
+                    semi_fig,
+                    semi_display_df,
+                    selected_features,
+                    semi_signature,
+                    selected_semi_subcluster,
                 )
-                with semi_detail_col:
-                    if semi_selected_row is None:
-                        st.info("Select a point on the map to view its details and image.")
-                    else:
-                        show_object_details(semi_selected_row, selected_features)
-
-                if semi_selected_row is not None:
-                    semi_morphology_col, semi_pca_col = st.columns([1, 1])
-                    with semi_morphology_col:
-                        show_morphology_catalogue_row(semi_selected_row)
-                    with semi_pca_col:
-                        show_selected_pca_components(semi_selected_row, selected_features)
 
     close_processing_overlay()
