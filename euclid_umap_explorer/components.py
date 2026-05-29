@@ -15,7 +15,7 @@ from .analysis import (
     format_pca_filter,
     lens_grade_sort_key,
 )
-from .catalogs import load_morphology_object
+from .catalogs import load_lens_catalog, load_morphology_object, normalize_object_ids
 from .config import (
     CUTOUT_BASE,
     DEFAULT_CLUSTER_FEATURES,
@@ -1018,15 +1018,35 @@ def object_search_morphology_values(morphology_row: dict) -> dict:
         if field not in redundant_fields
     }
 
+def object_lens_candidate_summary(object_id: object) -> dict[str, object]:
+    lens_df = load_lens_catalog(LENS_PATH, tuple(LENS_GRADE_OPTIONS))
+    normalized_object_id = normalize_object_ids(pd.Series([object_id])).iloc[0]
+    matching_rows = lens_df[
+        normalize_object_ids(lens_df["object_id"]) == normalized_object_id
+    ]
+    if matching_rows.empty:
+        return {
+            "is_lens_candidate": "No",
+            "lens_candidate_grade": "",
+        }
+
+    grade = matching_rows.iloc[0].get("grade", "")
+    return {
+        "is_lens_candidate": "Yes",
+        "lens_candidate_grade": str(grade).strip().upper(),
+    }
+
 def render_euclid_object_search(object_id: str) -> None:
     cached_search = st.session_state.get("euclid_search_result")
     if cached_search and cached_search.get("requested_object_id") == str(object_id):
         result = cached_search["result"]
         morphology_df = cached_search["morphology_df"]
+        lens_candidate_summary = cached_search.get("lens_candidate_summary", {})
     else:
         started_at = time.perf_counter()
         result = fetch_euclid_object_summary(object_id)
         morphology_df = load_morphology_object(MORPH_PATH, str(result["object_id"]))
+        lens_candidate_summary = object_lens_candidate_summary(result["object_id"])
         mosaic_summary = result["mosaic_summary"]
         log_app_event(
             "object_search_completed",
@@ -1040,9 +1060,10 @@ def render_euclid_object_search(object_id: str) -> None:
             "requested_object_id": str(object_id),
             "result": result,
             "morphology_df": morphology_df,
+            "lens_candidate_summary": lens_candidate_summary,
         }
 
-    object_summary = result["object_summary"]
+    object_summary = {**result["object_summary"], **lens_candidate_summary}
     mosaic_summary = result["mosaic_summary"]
 
     with st.container(border=True):
