@@ -115,35 +115,24 @@ def render_cluster_umap_interaction(
             if selected_indices
             else embedding_df
         )
-        umap_download_signature = (
-            "cluster_umap",
-            st.session_state.get("umap_signature"),
-            tuple(selected_indices),
-            tuple(selected_features),
+        prepared_df = umap_download_df(
+            embedding_df,
+            selected_features,
+            selected_indices,
         )
-        if st.button("Generate UMAP CSV", key="prepare_umap_download"):
-            prepared_df = umap_download_df(
-                embedding_df,
-                selected_features,
-                selected_indices,
-            )
-            st.session_state["umap_download_signature"] = umap_download_signature
-            st.session_state["umap_download_rows"] = len(prepared_df)
-            st.session_state["umap_download_data"] = dataframe_to_csv_bytes(prepared_df)
-        if st.session_state.get("umap_download_signature") == umap_download_signature:
-            st.success(
-                f"CSV ready with {st.session_state['umap_download_rows']:,} rows."
-            )
+        download_col, help_col = st.columns([1, 2])
+        with download_col:
             st.download_button(
-                "Download UMAP objects",
-                data=st.session_state["umap_download_data"],
+                "Download object selection",
+                data=dataframe_to_csv_bytes(prepared_df),
                 file_name=f"cluster_{selected_cluster}_umap_objects.csv",
                 mime="text/csv",
             )
+        with help_col:
+            st.caption("Use box or lasso selection to restrict the export")
         st.caption(
             f"Downloads {min(len(umap_source_df), DOWNLOAD_MAX_UMAP_ROWS):,} "
-            f"of {len(umap_source_df):,} selected or loaded UMAP objects. "
-            "Use box or lasso selection to restrict the export."
+            f"of {len(umap_source_df):,} selected or loaded UMAP objects."
         )
 
     selected_index = selected_point_index(event)
@@ -197,47 +186,27 @@ def render_semisupervised_umap_interaction(
             if semi_selected_indices
             else semi_display_df
         )
-        semi_download_signature = (
-            "semisupervised_umap",
-            semi_signature,
-            tuple(semi_selected_indices),
-            tuple(selected_features),
+        prepared_semi_df = umap_download_df(
+            semi_display_df,
+            selected_features,
+            semi_selected_indices,
         )
-        if st.button(
-            "Generate semi-supervised UMAP CSV",
-            key="prepare_semisupervised_umap_download",
-        ):
-            prepared_semi_df = umap_download_df(
-                semi_display_df,
-                selected_features,
-                semi_selected_indices,
-            )
-            st.session_state["semi_umap_download_signature"] = semi_download_signature
-            st.session_state["semi_umap_download_rows"] = len(prepared_semi_df)
-            st.session_state["semi_umap_download_data"] = dataframe_to_csv_bytes(
-                prepared_semi_df
-            )
-        if (
-            st.session_state.get("semi_umap_download_signature")
-            == semi_download_signature
-        ):
-            st.success(
-                "CSV ready with "
-                f"{st.session_state['semi_umap_download_rows']:,} rows."
-            )
+        semi_download_col, semi_help_col = st.columns([1, 2])
+        with semi_download_col:
             st.download_button(
-                "Download semi-supervised UMAP objects",
-                data=st.session_state["semi_umap_download_data"],
+                "Download object selection",
+                data=dataframe_to_csv_bytes(prepared_semi_df),
                 file_name=(
                     f"subcluster_{selected_semi_subcluster}_"
                     "semisupervised_umap_objects.csv"
                 ),
                 mime="text/csv",
             )
+        with semi_help_col:
+            st.caption("Use box or lasso selection to restrict the export")
         st.caption(
             f"Downloads {min(len(semi_source_df), DOWNLOAD_MAX_UMAP_ROWS):,} "
-            f"of {len(semi_source_df):,} selected or loaded UMAP objects. "
-            "Use box or lasso selection to restrict the export."
+            f"of {len(semi_source_df):,} selected or loaded UMAP objects."
         )
 
     semi_selected_index = selected_point_index(semi_event)
