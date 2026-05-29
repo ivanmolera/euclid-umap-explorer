@@ -87,13 +87,13 @@ def format_ra_hms(ra_degrees: float) -> str:
     return f"{hours:02d}h {minutes:02d}m {seconds:06.3f}s"
 
 
-def format_dec_dms(dec_degrees: float) -> str:
+def format_dec_hms(dec_degrees: float) -> str:
     sign = "-" if float(dec_degrees) < 0 else "+"
-    total_seconds = abs(float(dec_degrees)) * 3600.0
-    degrees = int(total_seconds // 3600)
+    total_seconds = abs(float(dec_degrees)) / 15.0 * 3600.0
+    hours = int(total_seconds // 3600)
     minutes = int((total_seconds % 3600) // 60)
     seconds = total_seconds % 60
-    return f"{sign}{degrees:02d}d {minutes:02d}m {seconds:05.2f}s"
+    return f"{sign}{hours:02d}h {minutes:02d}m {seconds:06.3f}s"
 
 
 def table_rows_with_coordinate_formats(
@@ -119,8 +119,8 @@ def table_rows_with_coordinate_formats(
                 rows.append(
                     {
                         "section": section,
-                        "field": "declination_dms",
-                        "value": format_dec_dms(float(value)),
+                        "field": "declination_hms",
+                        "value": format_dec_hms(float(value)),
                     }
                 )
             except (TypeError, ValueError):
@@ -156,7 +156,7 @@ def umap_download_df(
                 pass
         if "declination" in output_row:
             try:
-                output_row["declination_dms"] = format_dec_dms(
+                output_row["declination_hms"] = format_dec_hms(
                     float(output_row["declination"])
                 )
             except (TypeError, ValueError):

@@ -967,13 +967,13 @@ def format_ra_hms(ra_degrees: float) -> str:
     seconds = total_seconds % 60
     return f"{hours:02d}h {minutes:02d}m {seconds:06.3f}s"
 
-def format_dec_dms(dec_degrees: float) -> str:
+def format_dec_hms(dec_degrees: float) -> str:
     sign = "-" if float(dec_degrees) < 0 else "+"
-    total_seconds = abs(float(dec_degrees)) * 3600.0
-    degrees = int(total_seconds // 3600)
+    total_seconds = abs(float(dec_degrees)) / 15.0 * 3600.0
+    hours = int(total_seconds // 3600)
     minutes = int((total_seconds % 3600) // 60)
     seconds = total_seconds % 60
-    return f"{sign}{degrees:02d}d {minutes:02d}m {seconds:05.2f}s"
+    return f"{sign}{hours:02d}h {minutes:02d}m {seconds:06.3f}s"
 
 def table_rows_with_coordinate_formats(values: dict) -> list[dict]:
     rows = []
@@ -993,8 +993,8 @@ def table_rows_with_coordinate_formats(values: dict) -> list[dict]:
             try:
                 rows.append(
                     {
-                        "field": "declination_dms",
-                        "value": format_dec_dms(float(value)),
+                        "field": "declination_hms",
+                        "value": format_dec_hms(float(value)),
                     }
                 )
             except (TypeError, ValueError):
@@ -1010,7 +1010,7 @@ def object_search_morphology_values(morphology_row: dict) -> dict:
         "right_ascension",
         "right_ascension_hms",
         "declination",
-        "declination_dms",
+        "declination_hms",
     }
     return {
         field: value
