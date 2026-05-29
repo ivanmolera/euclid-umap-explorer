@@ -109,6 +109,12 @@ def inject_plot_cursor_css() -> None:
         .js-plotly-plot .plotly .cursor-pointer {
             cursor: default !important;
         }
+        section[data-testid="stSidebar"] div[data-testid="stButton"] button:disabled {
+            background-color: #ff5a52 !important;
+            border-color: #ff5a52 !important;
+            color: #ffffff !important;
+            opacity: 1 !important;
+        }
         .lens-status {
             border-radius: 8px;
             font-weight: 700;

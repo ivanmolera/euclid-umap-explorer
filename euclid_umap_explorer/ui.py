@@ -361,17 +361,26 @@ This analysis uses Euclid Q1 catalogue products available at:
             """,
             unsafe_allow_html=True,
         )
-        summary_display = cluster_summary_df.copy()
-        summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
-        st.dataframe(
-            summary_display[["cluster", "n_objects", "n_lenses", "lens_rate"]],
-            use_container_width=True,
-            hide_index=True,
-        )
         cluster_download_df = cluster_summary_download_df(
             clustered_df,
             cluster_summary_df,
             selected_features,
+        )
+        summary_display = cluster_download_df.copy()
+        summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
+        st.dataframe(
+            summary_display[
+                [
+                    "cluster",
+                    "n_objects",
+                    "n_lenses",
+                    "lens_rate",
+                    "canonical",
+                    "anomalous",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
         )
         st.download_button(
             "Download clustering table",
