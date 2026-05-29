@@ -6,7 +6,7 @@ from io import StringIO
 import pandas as pd
 
 from .analysis import add_cluster_extreme_roles
-from .catalogs import load_morphology_object
+from .catalogs import load_morphology_object, load_morphology_objects, normalize_object_ids
 from .config import DOWNLOAD_MAX_UMAP_ROWS, MORPH_PATH
 
 
@@ -142,30 +142,37 @@ def umap_download_df(
         base_df = embedding_df.copy()
 
     base_df = base_df.head(max_rows)
-    rows = []
-    for _, row in base_df.iterrows():
-        object_id = row.get("object_id")
-        output_row = morphology_row_for_object(object_id)
-        output_row.setdefault("object_id", object_id)
-        if "right_ascension" in output_row:
-            try:
-                output_row["right_ascension_hms"] = format_ra_hms(
-                    float(output_row["right_ascension"])
-                )
-            except (TypeError, ValueError):
-                pass
-        if "declination" in output_row:
-            try:
-                output_row["declination_hms"] = format_dec_hms(
-                    float(output_row["declination"])
-                )
-            except (TypeError, ValueError):
-                pass
+    base_df = base_df.copy()
+    base_df["object_id"] = normalize_object_ids(base_df["object_id"])
+    morphology_df = load_morphology_objects(MORPH_PATH, base_df["object_id"])
+    if not morphology_df.empty:
+        export_df = base_df.merge(
+            morphology_df,
+            on="object_id",
+            how="left",
+            suffixes=("", "_morphology"),
+        )
+    else:
+        export_df = base_df
 
-        for feature in selected_features:
-            output_row[feature] = row.get(feature)
+    if "right_ascension" in export_df.columns:
+        export_df["right_ascension_hms"] = export_df["right_ascension"].map(
+            lambda value: format_ra_hms(float(value)) if pd.notna(value) else ""
+        )
+    if "declination" in export_df.columns:
+        export_df["declination_hms"] = export_df["declination"].map(
+            lambda value: format_dec_hms(float(value)) if pd.notna(value) else ""
+        )
 
+    preferred_columns = [
+        column
         for column in (
+            "object_id",
+            "id_str",
+            "right_ascension",
+            "right_ascension_hms",
+            "declination",
+            "declination_hms",
             "umap_1",
             "umap_2",
             "semi_umap_1",
@@ -176,13 +183,14 @@ def umap_download_df(
             "lens_grade",
             "point_role",
             "semi_supervised_label",
-        ):
-            if column in row.index:
-                output_row[column] = row.get(column)
-
-        rows.append(output_row)
-
-    return pd.DataFrame(rows)
+            *selected_features,
+        )
+        if column in export_df.columns
+    ]
+    remaining_columns = [
+        column for column in export_df.columns if column not in preferred_columns
+    ]
+    return export_df[preferred_columns + remaining_columns]
 
 
 def object_search_download_df(

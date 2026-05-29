@@ -133,3 +133,46 @@ def load_morphology_object(morph_path: str, object_id: str) -> pd.DataFrame:
         return pd.DataFrame()
 
     return table.slice(0, 1).to_pandas()
+
+def load_morphology_objects(morph_path: str, object_ids: Iterable[object]) -> pd.DataFrame:
+    import pyarrow as pa
+    import pyarrow.dataset as ds
+    import pyarrow.fs as pafs
+
+    normalized_ids = normalize_object_ids(pd.Series(list(object_ids))).dropna()
+    if normalized_ids.empty:
+        return pd.DataFrame()
+
+    if is_gcs_path(morph_path):
+        filesystem, path = pafs.FileSystem.from_uri(morph_path)
+        dataset = ds.dataset(path, format="parquet", filesystem=filesystem)
+    else:
+        path = cached_input_path(morph_path)
+        if not Path(path).exists():
+            return pd.DataFrame()
+        dataset = ds.dataset(path, format="parquet")
+
+    if "object_id" not in dataset.schema.names:
+        return pd.DataFrame()
+
+    field_type = dataset.schema.field("object_id").type
+    if pa.types.is_integer(field_type):
+        filter_values = []
+        for value in normalized_ids:
+            try:
+                filter_values.append(int(value))
+            except ValueError:
+                continue
+        if not filter_values:
+            return pd.DataFrame()
+        values = pa.array(filter_values, type=field_type)
+    else:
+        values = pa.array(normalized_ids.astype(str).tolist(), type=field_type)
+
+    table = dataset.to_table(filter=ds.field("object_id").isin(values))
+    if table.num_rows == 0:
+        return pd.DataFrame()
+
+    df = table.to_pandas()
+    df["object_id"] = normalize_object_ids(df["object_id"])
+    return df.drop_duplicates("object_id")

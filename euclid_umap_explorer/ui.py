@@ -844,7 +844,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 tuple(selected_indices),
                 tuple(selected_features),
             )
-            if st.button("Prepare UMAP CSV", key="prepare_umap_download"):
+            if st.button("Generate UMAP CSV", key="prepare_umap_download"):
                 prepared_df = umap_download_df(
                     embedding_df,
                     selected_features,
@@ -857,6 +857,9 @@ This analysis uses Euclid Q1 catalogue products available at:
                 st.session_state.get("umap_download_signature")
                 == umap_download_signature
             ):
+                st.success(
+                    f"CSV ready with {st.session_state['umap_download_rows']:,} rows."
+                )
                 st.download_button(
                     "Download UMAP objects",
                     data=st.session_state["umap_download_data"],
@@ -1111,7 +1114,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                         tuple(selected_features),
                     )
                     if st.button(
-                        "Prepare semi-supervised UMAP CSV",
+                        "Generate semi-supervised UMAP CSV",
                         key="prepare_semisupervised_umap_download",
                     ):
                         prepared_semi_df = umap_download_df(
@@ -1132,6 +1135,10 @@ This analysis uses Euclid Q1 catalogue products available at:
                         st.session_state.get("semi_umap_download_signature")
                         == semi_download_signature
                     ):
+                        st.success(
+                            "CSV ready with "
+                            f"{st.session_state['semi_umap_download_rows']:,} rows."
+                        )
                         st.download_button(
                             "Download semi-supervised UMAP objects",
                             data=st.session_state["semi_umap_download_data"],
