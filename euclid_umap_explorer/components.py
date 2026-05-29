@@ -1006,7 +1006,7 @@ def aladin_url(ra_degrees: float, dec_degrees: float) -> str:
     target = quote(aladin_target_coordinates(ra_degrees, dec_degrees), safe="")
     return (
         "https://aladin.unistra.fr/AladinLite/"
-        f"?target={target}&fov=0.02&survey=CDS%2FP%2FEuclid%2FQ1%2FVIS"
+        f"?target={target}&fov=0.02&survey=CDS%2FP%2FEuclid%2FQ1%2Fcolor"
     )
 
 def table_rows_with_coordinate_formats(values: dict) -> list[dict]:
@@ -1120,7 +1120,7 @@ def render_euclid_object_search(object_id: str) -> None:
                     str(cutout_path),
                     "Euclid VIS cutout",
                     caption_markdown=(
-                        'Euclid VIS cutout '
+                        '<span>Euclid VIS cutout </span>'
                         f'<a href="{aladin_link}" target="_blank" '
                         'rel="noopener noreferrer">[View in Aladin]</a>'
                     ),

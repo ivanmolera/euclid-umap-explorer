@@ -91,7 +91,22 @@ def show_image(path: str, caption: str, caption_markdown: str | None = None) -> 
         return
     if caption_markdown:
         st.image(image, use_container_width=True)
-        st.markdown(caption_markdown, unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div style="
+                color: rgba(49, 51, 63, 0.6);
+                font-family: inherit;
+                font-size: 0.875rem;
+                line-height: 1.25;
+                margin-top: -0.35rem;
+                text-align: center;
+                width: 100%;
+            ">
+                {caption_markdown}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     else:
         st.image(image, caption=caption, use_container_width=True)
 
