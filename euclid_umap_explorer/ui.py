@@ -14,6 +14,7 @@ from .analysis import (
     format_pca_filter,
     normalize_pca_filters,
     PCA_SELECTION_PRESETS,
+    pca_filter_signature,
     pca_features_for_preset,
     sample_for_display,
 )
@@ -38,6 +39,8 @@ from .components import (
 from .config import (
     APP_TITLE,
     APP_VERSION,
+    DENDROGRAM_MAX_OBJECTS,
+    DENDROGRAM_TRUNCATE_CLUSTERS,
     DEFAULT_BIRCH_BATCH_SIZE,
     DEFAULT_BIRCH_BRANCHING_FACTOR,
     DEFAULT_BIRCH_THRESHOLD,
@@ -65,6 +68,7 @@ from .storage import path_exists, prepare_catalog_cache
 from .subclustering import (
     build_subcluster_summary,
     build_subclustering_signature,
+    build_dendrogram_figure,
     compute_hierarchical_subclusters,
 )
 from .umap import (
@@ -85,6 +89,22 @@ def request_subclustering() -> None:
 
 def request_semisupervised_umap() -> None:
     st.session_state["semisupervised_umap_requested"] = True
+
+
+def render_execution_time(seconds: object) -> None:
+    st.markdown(
+        f"""
+        <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
+            <span style="color: var(--text-color); font-size: 0.95rem; opacity: 0.65;">
+                Execution time:
+            </span>
+            <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
+                {format_duration(seconds)}
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 @st.fragment
@@ -287,7 +307,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
         if search_submitted:
             st.session_state["euclid_search_object_id"] = search_object_id
-            st.session_state["skip_cluster_summary_once"] = True
+            st.session_state["skip_cluster_summary_visual_once"] = True
 
         st.header("Lens candidates")
         render_help_label("Lens grades", LENS_GRADE_HELP)
@@ -490,25 +510,16 @@ This analysis uses Euclid Q1 catalogue products available at:
     skip_cluster_summary_render = bool(
         st.session_state.get("umap_requested", False)
     ) or bool(st.session_state.pop("skip_cluster_summary_once", False))
+    skip_cluster_summary_visual = bool(
+        st.session_state.pop("skip_cluster_summary_visual_once", False)
+    )
 
     if not skip_cluster_summary_render:
         with st.expander(
             "Clustering summary",
             expanded=st.session_state.get("cluster_summary_expanded", False),
         ):
-            st.markdown(
-                f"""
-                <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
-                    <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
-                        Execution time:
-                    </span>
-                    <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
-                        {format_duration(clustered_df.attrs.get("processing_seconds"))}
-                    </span>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            render_execution_time(clustered_df.attrs.get("processing_seconds"))
             cluster_download_df = cluster_summary_download_df(
                 clustered_df,
                 cluster_summary_df,
@@ -536,12 +547,15 @@ This analysis uses Euclid Q1 catalogue products available at:
                 file_name="clustering_summary.csv",
                 mime="text/csv",
             )
-            render_cluster_visual_summary(
-                clustered_df,
-                cluster_summary_df,
-                pca_columns,
-                selected_features,
-            )
+            if not skip_cluster_summary_visual:
+                render_cluster_visual_summary(
+                    clustered_df,
+                    cluster_summary_df,
+                    pca_columns,
+                    selected_features,
+                )
+            else:
+                st.caption("Visual cluster examples were not refreshed for this action.")
 
     selected_option = st.selectbox(
         "Cluster selection",
@@ -569,8 +583,8 @@ This analysis uses Euclid Q1 catalogue products available at:
                 n_neighbors = st.slider(
                     "n_neighbors",
                     2,
-                    100,
-                    25,
+                    50,
+                    10,
                     label_visibility="collapsed",
                 )
             with umap_param_cols[1]:
@@ -621,6 +635,34 @@ This analysis uses Euclid Q1 catalogue products available at:
                 request_umap_computation()
 
     with st.expander("Hierarchical clustering", expanded=False):
+        dendrogram_signature = (
+            int(selected_cluster),
+            tuple(selected_features),
+            pca_filter_signature(pca_filters),
+            int(DENDROGRAM_MAX_OBJECTS),
+            int(DENDROGRAM_TRUNCATE_CLUSTERS),
+        )
+        if st.button("Compute dendrogram preview"):
+            try:
+                st.session_state["hierarchical_dendrogram_fig"] = build_dendrogram_figure(
+                    filtered_cluster_df,
+                    selected_features,
+                    DENDROGRAM_MAX_OBJECTS,
+                    DENDROGRAM_TRUNCATE_CLUSTERS,
+                )
+                st.session_state["hierarchical_dendrogram_signature"] = dendrogram_signature
+            except ValueError as exc:
+                st.info(str(exc))
+
+        if st.session_state.get("hierarchical_dendrogram_signature") == dendrogram_signature:
+            st.plotly_chart(
+                st.session_state["hierarchical_dendrogram_fig"],
+                use_container_width=True,
+                config={"displaylogo": False},
+            )
+            st.caption(
+                "Dendrogram preview uses a sampled, truncated view of the selected cluster."
+            )
         with st.form("hierarchical_subclustering_form"):
             subclustering_cols = st.columns([1, 1, 1])
             with subclustering_cols[0]:
@@ -938,19 +980,7 @@ This analysis uses Euclid Q1 catalogue products available at:
     )
 
     with st.expander("UMAP summary", expanded=True):
-        st.markdown(
-            f"""
-            <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
-                <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
-                    Execution time:
-                </span>
-                <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
-                    {format_duration(embedding_df.attrs.get("processing_seconds"))}
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        render_execution_time(embedding_df.attrs.get("processing_seconds"))
         if subclustered_df is not None and not subclustered_df.empty:
             st.markdown("**Hierarchical clustering summary**")
             subcluster_summary_df = build_subcluster_summary(subclustered_df).copy()
@@ -1010,8 +1040,8 @@ This analysis uses Euclid Q1 catalogue products available at:
                     semi_n_neighbors = st.slider(
                         "n_neighbors",
                         2,
-                        100,
-                        25,
+                        50,
+                        10,
                         key="semisupervised_n_neighbors",
                         label_visibility="collapsed",
                     )
@@ -1090,19 +1120,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 st.session_state["semisupervised_umap_signature"] = semi_signature
 
             if semi_df is not None and not semi_df.empty:
-                st.markdown(
-                    f"""
-                    <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
-                        <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
-                            Execution time:
-                        </span>
-                        <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
-                            {format_duration(semi_df.attrs.get("processing_seconds"))}
-                        </span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+                render_execution_time(semi_df.attrs.get("processing_seconds"))
                 semi_metric_cols = st.columns(4)
                 semi_metric_cols[0].metric("Subcluster objects", f"{len(semi_df):,}")
                 semi_metric_cols[1].metric(
