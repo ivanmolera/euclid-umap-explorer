@@ -108,7 +108,7 @@ def render_execution_time(seconds: object) -> None:
 
 
 @st.fragment
-def render_object_search_section() -> None:
+def render_object_search_controls() -> None:
     st.header("Data")
     st.markdown(
         """
@@ -135,6 +135,9 @@ This analysis uses Euclid Q1 catalogue products available at:
     if search_submitted:
         st.session_state["euclid_search_object_id"] = search_object_id
 
+
+@st.fragment
+def render_object_search_results() -> None:
     searched_object_id = st.session_state.get("euclid_search_object_id")
     if searched_object_id:
         try:
@@ -376,7 +379,9 @@ def main() -> None:
         with flow_help_col:
             render_app_flow_help()
 
-        render_object_search_section()
+        render_object_search_controls()
+
+    render_object_search_results()
 
     with st.sidebar:
         st.header("Lens candidates")
