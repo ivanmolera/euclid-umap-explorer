@@ -287,6 +287,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
         if search_submitted:
             st.session_state["euclid_search_object_id"] = search_object_id
+            st.session_state["skip_cluster_summary_once"] = True
 
         st.header("Lens candidates")
         render_help_label("Lens grades", LENS_GRADE_HELP)
