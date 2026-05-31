@@ -205,6 +205,43 @@ def render_clustering_summary_section(
 
 
 @st.fragment
+def render_dendrogram_preview_section(
+    filtered_cluster_df: pd.DataFrame,
+    selected_cluster: int,
+    selected_features: list[str],
+    pca_filters: tuple[dict, ...],
+) -> None:
+    dendrogram_signature = (
+        int(selected_cluster),
+        tuple(selected_features),
+        pca_filter_signature(pca_filters),
+        int(DENDROGRAM_MAX_OBJECTS),
+        int(DENDROGRAM_TRUNCATE_CLUSTERS),
+    )
+    if st.button("Compute dendrogram preview"):
+        try:
+            st.session_state["hierarchical_dendrogram_fig"] = build_dendrogram_figure(
+                filtered_cluster_df,
+                selected_features,
+                DENDROGRAM_MAX_OBJECTS,
+                DENDROGRAM_TRUNCATE_CLUSTERS,
+            )
+            st.session_state["hierarchical_dendrogram_signature"] = dendrogram_signature
+        except ValueError as exc:
+            st.info(str(exc))
+
+    if st.session_state.get("hierarchical_dendrogram_signature") == dendrogram_signature:
+        st.plotly_chart(
+            st.session_state["hierarchical_dendrogram_fig"],
+            use_container_width=True,
+            config={"displaylogo": False},
+        )
+        st.caption(
+            "Dendrogram preview uses a sampled, truncated view of the selected cluster."
+        )
+
+
+@st.fragment
 def render_cluster_umap_interaction(
     fig: object,
     embedding_df: pd.DataFrame,
@@ -649,34 +686,12 @@ def main() -> None:
                 request_umap_computation()
 
     with st.expander("Hierarchical clustering", expanded=False):
-        dendrogram_signature = (
-            int(selected_cluster),
-            tuple(selected_features),
-            pca_filter_signature(pca_filters),
-            int(DENDROGRAM_MAX_OBJECTS),
-            int(DENDROGRAM_TRUNCATE_CLUSTERS),
+        render_dendrogram_preview_section(
+            filtered_cluster_df,
+            selected_cluster,
+            selected_features,
+            pca_filters,
         )
-        if st.button("Compute dendrogram preview"):
-            try:
-                st.session_state["hierarchical_dendrogram_fig"] = build_dendrogram_figure(
-                    filtered_cluster_df,
-                    selected_features,
-                    DENDROGRAM_MAX_OBJECTS,
-                    DENDROGRAM_TRUNCATE_CLUSTERS,
-                )
-                st.session_state["hierarchical_dendrogram_signature"] = dendrogram_signature
-            except ValueError as exc:
-                st.info(str(exc))
-
-        if st.session_state.get("hierarchical_dendrogram_signature") == dendrogram_signature:
-            st.plotly_chart(
-                st.session_state["hierarchical_dendrogram_fig"],
-                use_container_width=True,
-                config={"displaylogo": False},
-            )
-            st.caption(
-                "Dendrogram preview uses a sampled, truncated view of the selected cluster."
-            )
         with st.form("hierarchical_subclustering_form"):
             subclustering_cols = st.columns([1, 1, 1])
             with subclustering_cols[0]:
