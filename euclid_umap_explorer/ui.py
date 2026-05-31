@@ -108,6 +108,101 @@ def render_execution_time(seconds: object) -> None:
 
 
 @st.fragment
+def render_object_search_section() -> None:
+    with st.sidebar:
+        st.header("Data")
+        st.markdown(
+            """
+This analysis uses Euclid Q1 catalogue products available at:
+
+- [The Strong Lensing Discovery Engine](https://zenodo.org/records/15025832)
+- [First visual morphology catalogue](https://zenodo.org/records/15106473)
+            """
+        )
+        search_input_col, search_button_col = st.columns([3, 1])
+        with search_input_col:
+            object_id_search_value = st.text_input(
+                "object_id",
+                placeholder="object_id",
+                label_visibility="collapsed",
+                key="object_id_search_value",
+            )
+        search_object_id = object_id_search_value.strip()
+        search_submitted = search_button_col.button(
+            "Search",
+            type="primary",
+            disabled=not is_valid_search_object_id(search_object_id),
+        )
+        if search_submitted:
+            st.session_state["euclid_search_object_id"] = search_object_id
+
+    searched_object_id = st.session_state.get("euclid_search_object_id")
+    if searched_object_id:
+        try:
+            render_euclid_object_search(searched_object_id)
+        except ValueError as exc:
+            log_app_event("object_search_failed", error_type=type(exc).__name__)
+            st.warning(str(exc))
+        except ImportError as exc:
+            log_app_event("object_search_failed", error_type=type(exc).__name__)
+            st.error("The Euclid object search dependencies are not installed.")
+            st.exception(exc)
+        except Exception as exc:
+            log_app_event("object_search_failed", error_type=type(exc).__name__)
+            st.error("Could not retrieve the Euclid cutout for this object_id.")
+            st.exception(exc)
+        finally:
+            close_processing_overlay()
+
+
+@st.fragment
+def render_clustering_summary_section(
+    clustered_df: pd.DataFrame,
+    cluster_summary_df: pd.DataFrame,
+    pca_columns: list[str],
+    selected_features: list[str],
+) -> None:
+    with st.expander(
+        "Clustering summary",
+        expanded=st.session_state.get("cluster_summary_expanded", False),
+    ):
+        render_execution_time(clustered_df.attrs.get("processing_seconds"))
+        cluster_download_df = cluster_summary_download_df(
+            clustered_df,
+            cluster_summary_df,
+            selected_features,
+        )
+        summary_display = cluster_download_df.copy()
+        summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
+        st.dataframe(
+            summary_display[
+                [
+                    "cluster",
+                    "n_objects",
+                    "n_lenses",
+                    "lens_rate",
+                    "canonical",
+                    "anomalous",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.download_button(
+            "Download clustering table",
+            data=dataframe_to_csv_bytes(cluster_download_df),
+            file_name="clustering_summary.csv",
+            mime="text/csv",
+        )
+        render_cluster_visual_summary(
+            clustered_df,
+            cluster_summary_df,
+            pca_columns,
+            selected_features,
+        )
+
+
+@st.fragment
 def render_cluster_umap_interaction(
     fig: object,
     embedding_df: pd.DataFrame,
@@ -282,32 +377,9 @@ def main() -> None:
         with flow_help_col:
             render_app_flow_help()
 
-        st.header("Data")
-        st.markdown(
-            """
-This analysis uses Euclid Q1 catalogue products available at:
+    render_object_search_section()
 
-- [The Strong Lensing Discovery Engine](https://zenodo.org/records/15025832)
-- [First visual morphology catalogue](https://zenodo.org/records/15106473)
-            """
-        )
-        search_input_col, search_button_col = st.columns([3, 1])
-        with search_input_col:
-            object_id_search_value = st.text_input(
-                "object_id",
-                placeholder="object_id",
-                label_visibility="collapsed",
-                key="object_id_search_value",
-            )
-        search_object_id = object_id_search_value.strip()
-        search_submitted = search_button_col.button(
-            "Search",
-            type="primary",
-            disabled=not is_valid_search_object_id(search_object_id),
-        )
-        if search_submitted:
-            st.session_state["euclid_search_object_id"] = search_object_id
-
+    with st.sidebar:
         st.header("Lens candidates")
         render_help_label("Lens grades", LENS_GRADE_HELP)
         selected_lens_grades = st.multiselect(
@@ -354,24 +426,6 @@ This analysis uses Euclid Q1 catalogue products available at:
                 type="primary",
                 on_click=request_clustering,
             )
-
-    searched_object_id = st.session_state.get("euclid_search_object_id")
-    if searched_object_id:
-        try:
-            render_euclid_object_search(searched_object_id)
-        except ValueError as exc:
-            log_app_event("object_search_failed", error_type=type(exc).__name__)
-            st.warning(str(exc))
-        except ImportError as exc:
-            log_app_event("object_search_failed", error_type=type(exc).__name__)
-            st.error("The Euclid object search dependencies are not installed.")
-            st.exception(exc)
-        except Exception as exc:
-            log_app_event("object_search_failed", error_type=type(exc).__name__)
-            st.error("Could not retrieve the Euclid cutout for this object_id.")
-            st.exception(exc)
-        finally:
-            close_processing_overlay()
 
     clustering_requested = st.session_state.pop("cluster_requested", False)
     birch_requested = run_clustering or clustering_requested
@@ -506,44 +560,12 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.warning("Select at least one PCA component to build UMAP.")
         st.stop()
 
-    with st.expander(
-        "Clustering summary",
-        expanded=st.session_state.get("cluster_summary_expanded", False),
-    ):
-        render_execution_time(clustered_df.attrs.get("processing_seconds"))
-        cluster_download_df = cluster_summary_download_df(
-            clustered_df,
-            cluster_summary_df,
-            selected_features,
-        )
-        summary_display = cluster_download_df.copy()
-        summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
-        st.dataframe(
-            summary_display[
-                [
-                    "cluster",
-                    "n_objects",
-                    "n_lenses",
-                    "lens_rate",
-                    "canonical",
-                    "anomalous",
-                ]
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.download_button(
-            "Download clustering table",
-            data=dataframe_to_csv_bytes(cluster_download_df),
-            file_name="clustering_summary.csv",
-            mime="text/csv",
-        )
-        render_cluster_visual_summary(
-            clustered_df,
-            cluster_summary_df,
-            pca_columns,
-            selected_features,
-        )
+    render_clustering_summary_section(
+        clustered_df,
+        cluster_summary_df,
+        pca_columns,
+        selected_features,
+    )
 
     selected_option = st.selectbox(
         "Cluster selection",
