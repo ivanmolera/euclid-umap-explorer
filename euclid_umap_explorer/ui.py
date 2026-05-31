@@ -307,7 +307,6 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
         if search_submitted:
             st.session_state["euclid_search_object_id"] = search_object_id
-            st.session_state["skip_cluster_summary_visual_once"] = True
 
         st.header("Lens candidates")
         render_help_label("Lens grades", LENS_GRADE_HELP)
@@ -507,10 +506,6 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.warning("Select at least one PCA component to build UMAP.")
         st.stop()
 
-    skip_cluster_summary_visual = bool(st.session_state.get("umap_requested", False)) or bool(
-        st.session_state.pop("skip_cluster_summary_visual_once", False)
-    )
-
     with st.expander(
         "Clustering summary",
         expanded=st.session_state.get("cluster_summary_expanded", False),
@@ -543,15 +538,12 @@ This analysis uses Euclid Q1 catalogue products available at:
             file_name="clustering_summary.csv",
             mime="text/csv",
         )
-        if not skip_cluster_summary_visual:
-            render_cluster_visual_summary(
-                clustered_df,
-                cluster_summary_df,
-                pca_columns,
-                selected_features,
-            )
-        else:
-            st.caption("Visual cluster examples were not refreshed for this action.")
+        render_cluster_visual_summary(
+            clustered_df,
+            cluster_summary_df,
+            pca_columns,
+            selected_features,
+        )
 
     selected_option = st.selectbox(
         "Cluster selection",
@@ -758,7 +750,6 @@ This analysis uses Euclid Q1 catalogue products available at:
         embedding_df["point_index"] = embedding_df.index
         st.session_state["umap_embedding_df"] = embedding_df
         st.session_state["umap_signature"] = umap_signature
-        st.session_state["skip_cluster_summary_visual_once"] = True
         needs_recalculation = False
         st.rerun()
 
