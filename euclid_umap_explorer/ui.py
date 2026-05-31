@@ -109,32 +109,31 @@ def render_execution_time(seconds: object) -> None:
 
 @st.fragment
 def render_object_search_section() -> None:
-    with st.sidebar:
-        st.header("Data")
-        st.markdown(
-            """
+    st.header("Data")
+    st.markdown(
+        """
 This analysis uses Euclid Q1 catalogue products available at:
 
 - [The Strong Lensing Discovery Engine](https://zenodo.org/records/15025832)
 - [First visual morphology catalogue](https://zenodo.org/records/15106473)
-            """
+        """
+    )
+    search_input_col, search_button_col = st.columns([3, 1])
+    with search_input_col:
+        object_id_search_value = st.text_input(
+            "object_id",
+            placeholder="object_id",
+            label_visibility="collapsed",
+            key="object_id_search_value",
         )
-        search_input_col, search_button_col = st.columns([3, 1])
-        with search_input_col:
-            object_id_search_value = st.text_input(
-                "object_id",
-                placeholder="object_id",
-                label_visibility="collapsed",
-                key="object_id_search_value",
-            )
-        search_object_id = object_id_search_value.strip()
-        search_submitted = search_button_col.button(
-            "Search",
-            type="primary",
-            disabled=not is_valid_search_object_id(search_object_id),
-        )
-        if search_submitted:
-            st.session_state["euclid_search_object_id"] = search_object_id
+    search_object_id = object_id_search_value.strip()
+    search_submitted = search_button_col.button(
+        "Search",
+        type="primary",
+        disabled=not is_valid_search_object_id(search_object_id),
+    )
+    if search_submitted:
+        st.session_state["euclid_search_object_id"] = search_object_id
 
     searched_object_id = st.session_state.get("euclid_search_object_id")
     if searched_object_id:
@@ -377,7 +376,7 @@ def main() -> None:
         with flow_help_col:
             render_app_flow_help()
 
-    render_object_search_section()
+        render_object_search_section()
 
     with st.sidebar:
         st.header("Lens candidates")
