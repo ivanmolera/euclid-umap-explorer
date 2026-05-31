@@ -94,12 +94,11 @@ def show_image(path: str, caption: str, caption_markdown: str | None = None) -> 
         st.markdown(
             f"""
             <div style="
-                color: var(--text-color);
+                color: rgba(49, 51, 63, 0.6);
                 font-family: inherit;
                 font-size: 0.875rem;
                 line-height: 1.25;
                 margin-top: -0.35rem;
-                opacity: 0.65;
                 text-align: center;
                 width: 100%;
             ">

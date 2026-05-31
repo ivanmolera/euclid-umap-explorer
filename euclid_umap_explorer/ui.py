@@ -14,7 +14,6 @@ from .analysis import (
     format_pca_filter,
     normalize_pca_filters,
     PCA_SELECTION_PRESETS,
-    pca_filter_signature,
     pca_features_for_preset,
     sample_for_display,
 )
@@ -39,8 +38,6 @@ from .components import (
 from .config import (
     APP_TITLE,
     APP_VERSION,
-    DENDROGRAM_MAX_OBJECTS,
-    DENDROGRAM_TRUNCATE_CLUSTERS,
     DEFAULT_BIRCH_BATCH_SIZE,
     DEFAULT_BIRCH_BRANCHING_FACTOR,
     DEFAULT_BIRCH_THRESHOLD,
@@ -68,7 +65,6 @@ from .storage import path_exists, prepare_catalog_cache
 from .subclustering import (
     build_subcluster_summary,
     build_subclustering_signature,
-    build_dendrogram_figure,
     compute_hierarchical_subclusters,
 )
 from .umap import (
@@ -89,156 +85,6 @@ def request_subclustering() -> None:
 
 def request_semisupervised_umap() -> None:
     st.session_state["semisupervised_umap_requested"] = True
-
-
-def render_execution_time(seconds: object) -> None:
-    st.markdown(
-        f"""
-        <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
-            <span style="color: var(--text-color); font-size: 0.95rem; opacity: 0.65;">
-                Execution time:
-            </span>
-            <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
-                {format_duration(seconds)}
-            </span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-@st.fragment
-def render_object_search_controls() -> None:
-    st.header("Data")
-    st.markdown(
-        """
-This analysis uses Euclid Q1 catalogue products available at:
-
-- [The Strong Lensing Discovery Engine](https://zenodo.org/records/15025832)
-- [First visual morphology catalogue](https://zenodo.org/records/15106473)
-        """
-    )
-    search_input_col, search_button_col = st.columns([3, 1])
-    with search_input_col:
-        object_id_search_value = st.text_input(
-            "object_id",
-            placeholder="object_id",
-            label_visibility="collapsed",
-            key="object_id_search_value",
-        )
-    search_object_id = object_id_search_value.strip()
-    search_submitted = search_button_col.button(
-        "Search",
-        type="primary",
-        disabled=not is_valid_search_object_id(search_object_id),
-    )
-    if search_submitted:
-        st.session_state["euclid_search_object_id"] = search_object_id
-
-
-@st.fragment
-def render_object_search_results() -> None:
-    searched_object_id = st.session_state.get("euclid_search_object_id")
-    if searched_object_id:
-        try:
-            render_euclid_object_search(searched_object_id)
-        except ValueError as exc:
-            log_app_event("object_search_failed", error_type=type(exc).__name__)
-            st.warning(str(exc))
-        except ImportError as exc:
-            log_app_event("object_search_failed", error_type=type(exc).__name__)
-            st.error("The Euclid object search dependencies are not installed.")
-            st.exception(exc)
-        except Exception as exc:
-            log_app_event("object_search_failed", error_type=type(exc).__name__)
-            st.error("Could not retrieve the Euclid cutout for this object_id.")
-            st.exception(exc)
-        finally:
-            close_processing_overlay()
-
-
-@st.fragment
-def render_clustering_summary_section(
-    clustered_df: pd.DataFrame,
-    cluster_summary_df: pd.DataFrame,
-    pca_columns: list[str],
-    selected_features: list[str],
-) -> None:
-    with st.expander(
-        "Clustering summary",
-        expanded=st.session_state.get("cluster_summary_expanded", False),
-    ):
-        render_execution_time(clustered_df.attrs.get("processing_seconds"))
-        cluster_download_df = cluster_summary_download_df(
-            clustered_df,
-            cluster_summary_df,
-            selected_features,
-        )
-        summary_display = cluster_download_df.copy()
-        summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
-        st.dataframe(
-            summary_display[
-                [
-                    "cluster",
-                    "n_objects",
-                    "n_lenses",
-                    "lens_rate",
-                    "canonical",
-                    "anomalous",
-                ]
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.download_button(
-            "Download clustering table",
-            data=dataframe_to_csv_bytes(cluster_download_df),
-            file_name="clustering_summary.csv",
-            mime="text/csv",
-        )
-        render_cluster_visual_summary(
-            clustered_df,
-            cluster_summary_df,
-            pca_columns,
-            selected_features,
-        )
-
-
-@st.fragment
-def render_dendrogram_preview_section(
-    filtered_cluster_df: pd.DataFrame,
-    selected_cluster: int,
-    selected_features: list[str],
-    pca_filters: tuple[dict, ...],
-) -> None:
-    dendrogram_signature = (
-        int(selected_cluster),
-        tuple(selected_features),
-        pca_filter_signature(pca_filters),
-        int(DENDROGRAM_MAX_OBJECTS),
-        int(DENDROGRAM_TRUNCATE_CLUSTERS),
-    )
-    if st.button("Compute dendrogram preview"):
-        try:
-            st.session_state["hierarchical_dendrogram_fig"] = build_dendrogram_figure(
-                filtered_cluster_df,
-                selected_features,
-                DENDROGRAM_MAX_OBJECTS,
-                DENDROGRAM_TRUNCATE_CLUSTERS,
-            )
-            st.session_state["hierarchical_dendrogram_signature"] = dendrogram_signature
-        except ValueError as exc:
-            st.info(str(exc))
-
-    if st.session_state.get("hierarchical_dendrogram_signature") == dendrogram_signature:
-        st.plotly_chart(
-            st.session_state["hierarchical_dendrogram_fig"],
-            use_container_width=True,
-            config={"displaylogo": False},
-        )
-        st.caption(
-            "Dendrogram preview uses a sampled, truncated view of the selected cluster."
-        )
 
 
 @st.fragment
@@ -416,11 +262,33 @@ def main() -> None:
         with flow_help_col:
             render_app_flow_help()
 
-        render_object_search_controls()
+        st.header("Data")
+        st.markdown(
+            """
+This analysis uses Euclid Q1 catalogue products available at:
 
-    render_object_search_results()
+- [The Strong Lensing Discovery Engine](https://zenodo.org/records/15025832)
+- [First visual morphology catalogue](https://zenodo.org/records/15106473)
+            """
+        )
+        search_input_col, search_button_col = st.columns([3, 1])
+        with search_input_col:
+            object_id_search_value = st.text_input(
+                "object_id",
+                placeholder="object_id",
+                label_visibility="collapsed",
+                key="object_id_search_value",
+            )
+        search_object_id = object_id_search_value.strip()
+        search_submitted = search_button_col.button(
+            "Search",
+            type="primary",
+            disabled=not is_valid_search_object_id(search_object_id),
+        )
+        if search_submitted:
+            st.session_state["euclid_search_object_id"] = search_object_id
+            st.session_state["skip_cluster_summary_once"] = True
 
-    with st.sidebar:
         st.header("Lens candidates")
         render_help_label("Lens grades", LENS_GRADE_HELP)
         selected_lens_grades = st.multiselect(
@@ -467,6 +335,24 @@ def main() -> None:
                 type="primary",
                 on_click=request_clustering,
             )
+
+    searched_object_id = st.session_state.get("euclid_search_object_id")
+    if searched_object_id:
+        try:
+            render_euclid_object_search(searched_object_id)
+        except ValueError as exc:
+            log_app_event("object_search_failed", error_type=type(exc).__name__)
+            st.warning(str(exc))
+        except ImportError as exc:
+            log_app_event("object_search_failed", error_type=type(exc).__name__)
+            st.error("The Euclid object search dependencies are not installed.")
+            st.exception(exc)
+        except Exception as exc:
+            log_app_event("object_search_failed", error_type=type(exc).__name__)
+            st.error("Could not retrieve the Euclid cutout for this object_id.")
+            st.exception(exc)
+        finally:
+            close_processing_overlay()
 
     clustering_requested = st.session_state.pop("cluster_requested", False)
     birch_requested = run_clustering or clustering_requested
@@ -601,12 +487,61 @@ def main() -> None:
         st.warning("Select at least one PCA component to build UMAP.")
         st.stop()
 
-    render_clustering_summary_section(
-        clustered_df,
-        cluster_summary_df,
-        pca_columns,
-        selected_features,
-    )
+    skip_cluster_summary_render = bool(
+        st.session_state.get("umap_requested", False)
+    ) or bool(st.session_state.pop("skip_cluster_summary_once", False))
+
+    if not skip_cluster_summary_render:
+        with st.expander(
+            "Clustering summary",
+            expanded=st.session_state.get("cluster_summary_expanded", False),
+        ):
+            st.markdown(
+                f"""
+                <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
+                    <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
+                        Execution time:
+                    </span>
+                    <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
+                        {format_duration(clustered_df.attrs.get("processing_seconds"))}
+                    </span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            cluster_download_df = cluster_summary_download_df(
+                clustered_df,
+                cluster_summary_df,
+                selected_features,
+            )
+            summary_display = cluster_download_df.copy()
+            summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
+            st.dataframe(
+                summary_display[
+                    [
+                        "cluster",
+                        "n_objects",
+                        "n_lenses",
+                        "lens_rate",
+                        "canonical",
+                        "anomalous",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.download_button(
+                "Download clustering table",
+                data=dataframe_to_csv_bytes(cluster_download_df),
+                file_name="clustering_summary.csv",
+                mime="text/csv",
+            )
+            render_cluster_visual_summary(
+                clustered_df,
+                cluster_summary_df,
+                pca_columns,
+                selected_features,
+            )
 
     selected_option = st.selectbox(
         "Cluster selection",
@@ -634,8 +569,8 @@ def main() -> None:
                 n_neighbors = st.slider(
                     "n_neighbors",
                     2,
-                    50,
-                    10,
+                    100,
+                    25,
                     label_visibility="collapsed",
                 )
             with umap_param_cols[1]:
@@ -686,12 +621,6 @@ def main() -> None:
                 request_umap_computation()
 
     with st.expander("Hierarchical clustering", expanded=False):
-        render_dendrogram_preview_section(
-            filtered_cluster_df,
-            selected_cluster,
-            selected_features,
-            pca_filters,
-        )
         with st.form("hierarchical_subclustering_form"):
             subclustering_cols = st.columns([1, 1, 1])
             with subclustering_cols[0]:
@@ -791,6 +720,7 @@ def main() -> None:
         embedding_df["point_index"] = embedding_df.index
         st.session_state["umap_embedding_df"] = embedding_df
         st.session_state["umap_signature"] = umap_signature
+        st.session_state["skip_cluster_summary_once"] = True
         needs_recalculation = False
         st.rerun()
 
@@ -1008,7 +938,19 @@ def main() -> None:
     )
 
     with st.expander("UMAP summary", expanded=True):
-        render_execution_time(embedding_df.attrs.get("processing_seconds"))
+        st.markdown(
+            f"""
+            <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
+                <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
+                    Execution time:
+                </span>
+                <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
+                    {format_duration(embedding_df.attrs.get("processing_seconds"))}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         if subclustered_df is not None and not subclustered_df.empty:
             st.markdown("**Hierarchical clustering summary**")
             subcluster_summary_df = build_subcluster_summary(subclustered_df).copy()
@@ -1068,8 +1010,8 @@ def main() -> None:
                     semi_n_neighbors = st.slider(
                         "n_neighbors",
                         2,
-                        50,
-                        10,
+                        100,
+                        25,
                         key="semisupervised_n_neighbors",
                         label_visibility="collapsed",
                     )
@@ -1148,7 +1090,19 @@ def main() -> None:
                 st.session_state["semisupervised_umap_signature"] = semi_signature
 
             if semi_df is not None and not semi_df.empty:
-                render_execution_time(semi_df.attrs.get("processing_seconds"))
+                st.markdown(
+                    f"""
+                    <div style="display: flex; align-items: baseline; gap: 0.45rem; margin-bottom: 0.75rem;">
+                        <span style="color: rgba(250, 250, 250, 0.72); font-size: 0.95rem;">
+                            Execution time:
+                        </span>
+                        <span style="font-size: 1.8rem; font-weight: 600; line-height: 1;">
+                            {format_duration(semi_df.attrs.get("processing_seconds"))}
+                        </span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
                 semi_metric_cols = st.columns(4)
                 semi_metric_cols[0].metric("Subcluster objects", f"{len(semi_df):,}")
                 semi_metric_cols[1].metric(

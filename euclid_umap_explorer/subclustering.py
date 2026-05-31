@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 
 import pandas as pd
-import plotly.graph_objects as go
 
 from .analysis import sample_for_display
 from .config import MAX_ALGORITHM_SECONDS
@@ -102,57 +101,3 @@ def build_subcluster_summary(subclustered_df: pd.DataFrame) -> pd.DataFrame:
     )
     summary_df["lens_rate"] = summary_df["n_lenses"] / summary_df["n_objects"]
     return summary_df
-
-
-def build_dendrogram_figure(
-    data: pd.DataFrame,
-    selected_features: list[str],
-    max_objects: int,
-    truncate_clusters: int,
-) -> go.Figure:
-    from scipy.cluster.hierarchy import dendrogram, linkage
-    from sklearn.preprocessing import StandardScaler
-
-    clean = data.dropna(subset=selected_features).copy()
-    clean = sample_for_display(clean, max_objects)
-    if len(clean) < 3:
-        raise ValueError("At least 3 objects are required to build a dendrogram.")
-
-    scaled = StandardScaler().fit_transform(clean[selected_features])
-    linkage_matrix = linkage(scaled, method="ward", metric="euclidean")
-    dendrogram_data = dendrogram(
-        linkage_matrix,
-        no_plot=True,
-        truncate_mode="lastp",
-        p=min(int(truncate_clusters), len(clean)),
-        show_leaf_counts=True,
-    )
-
-    fig = go.Figure()
-    for x_values, y_values in zip(
-        dendrogram_data["icoord"],
-        dendrogram_data["dcoord"],
-    ):
-        fig.add_trace(
-            go.Scatter(
-                x=x_values,
-                y=y_values,
-                mode="lines",
-                line={"color": "#5b7fb0", "width": 1.4},
-                hoverinfo="skip",
-                showlegend=False,
-            )
-        )
-
-    fig.update_layout(
-        title=(
-            f"Hierarchical dendrogram preview "
-            f"({len(clean):,} sampled objects, Ward linkage)"
-        ),
-        xaxis_title="Truncated leaves",
-        yaxis_title="Distance",
-        margin={"l": 10, "r": 10, "t": 45, "b": 35},
-        height=320,
-    )
-    fig.update_xaxes(showticklabels=False)
-    return fig
