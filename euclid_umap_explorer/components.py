@@ -838,11 +838,52 @@ def render_cluster_visual_summary(
     pca_columns: list[str],
     selected_features: list[str],
 ) -> None:
+    view_model = build_cluster_summary_view_model(
+        clustered_df,
+        cluster_summary_df,
+        pca_columns,
+        selected_features,
+    )
+    render_cluster_visual_summary_view_model(view_model, clustered_df)
+
+def cluster_summary_signature(
+    clustered_df: pd.DataFrame,
+    cluster_summary_df: pd.DataFrame,
+    pca_columns: list[str],
+    selected_features: list[str],
+) -> tuple:
+    cluster_values = tuple(
+        tuple(row)
+        for row in cluster_summary_df[
+            ["cluster", "n_objects", "n_lenses", "lens_rate"]
+        ].itertuples(index=False, name=None)
+    )
+    return (
+        id(clustered_df),
+        cluster_values,
+        tuple(pca_columns),
+        tuple(selected_features),
+    )
+
+def summary_features_for_visuals(
+    pca_columns: list[str],
+    selected_features: list[str],
+) -> list[str]:
     summary_features = [
         feature for feature in selected_features if feature in pca_columns
     ] or [feature for feature in DEFAULT_CLUSTER_FEATURES if feature in pca_columns]
-    summary_features = summary_features or pca_columns[: min(4, len(pca_columns))]
+    return summary_features or pca_columns[: min(4, len(pca_columns))]
+
+def build_cluster_summary_view_model(
+    clustered_df: pd.DataFrame,
+    cluster_summary_df: pd.DataFrame,
+    pca_columns: list[str],
+    selected_features: list[str],
+) -> dict:
+    summary_features = summary_features_for_visuals(pca_columns, selected_features)
     histogram_features = summary_features[:SUMMARY_HISTOGRAM_FEATURE_LIMIT]
+    cluster_download_rows = []
+    visual_clusters = []
 
     for _, summary_row in cluster_summary_df.iterrows():
         cluster_id = int(summary_row["cluster"])
@@ -852,42 +893,96 @@ def render_cluster_visual_summary(
             summary_features,
             cluster_id,
         )
+        canonical = ""
+        anomalous = ""
+        if canonical_row is not None:
+            canonical = str(canonical_row.get("object_id", ""))
+        if anomaly_row is not None:
+            anomalous = str(anomaly_row.get("object_id", ""))
+
+        cluster_download_rows.append(
+            {
+                "cluster": cluster_id,
+                "n_objects": int(summary_row["n_objects"]),
+                "n_lenses": int(summary_row["n_lenses"]),
+                "lens_rate": float(summary_row["lens_rate"]),
+                "canonical": canonical,
+                "anomalous": anomalous,
+            }
+        )
+
+        lens_captions = []
+        for row in lens_rows:
+            lens_grade = row.get("lens_grade", "")
+            if pd.isna(lens_grade) or not str(lens_grade).strip():
+                lens_captions.append("Grade ?")
+            else:
+                lens_captions.append(f"Grade {str(lens_grade).strip()}")
+
+        visual_clusters.append(
+            {
+                "cluster_id": cluster_id,
+                "n_objects": int(summary_row["n_objects"]),
+                "n_lenses": int(summary_row["n_lenses"]),
+                "lens_rate": float(summary_row["lens_rate"]),
+                "canonical_row": canonical_row,
+                "anomaly_row": anomaly_row,
+                "random_rows": random_rows,
+                "lens_rows": lens_rows,
+                "lens_captions": lens_captions,
+            }
+        )
+
+    return {
+        "cluster_download_df": pd.DataFrame(cluster_download_rows),
+        "histogram_features": histogram_features,
+        "clusters": visual_clusters,
+    }
+
+def render_cluster_visual_summary_view_model(
+    view_model: dict,
+    clustered_df: pd.DataFrame,
+) -> None:
+    for cluster_model in view_model["clusters"]:
+        cluster_id = int(cluster_model["cluster_id"])
 
         with st.container(border=True):
             stats_cols = st.columns([1, 1, 1, 1])
             stats_cols[0].metric("Cluster", cluster_id)
-            stats_cols[1].metric("Objects", f"{int(summary_row['n_objects']):,}")
-            stats_cols[2].metric("Lenses", f"{int(summary_row['n_lenses']):,}")
-            stats_cols[3].metric("Density", f"{summary_row['lens_rate'] * 100:.3f}%")
+            stats_cols[1].metric("Objects", f"{cluster_model['n_objects']:,}")
+            stats_cols[2].metric("Lenses", f"{cluster_model['n_lenses']:,}")
+            stats_cols[3].metric("Density", f"{cluster_model['lens_rate'] * 100:.3f}%")
 
             image_cols = st.columns([2, 3, 5])
             with image_cols[0]:
                 show_thumbnail_group(
                     "Canonical / anomalous",
-                    [canonical_row, anomaly_row],
+                    [cluster_model["canonical_row"], cluster_model["anomaly_row"]],
                     ["Canonical", "Anomalous"],
                 )
             with image_cols[1]:
                 show_thumbnail_group(
                     "Random",
-                    random_rows,
-                    [f"Random {index + 1}" for index in range(len(random_rows))],
+                    cluster_model["random_rows"],
+                    [
+                        f"Random {index + 1}"
+                        for index in range(len(cluster_model["random_rows"]))
+                    ],
                 )
             with image_cols[2]:
-                lens_captions = []
-                for row in lens_rows:
-                    lens_grade = row.get("lens_grade", "")
-                    if pd.isna(lens_grade) or not str(lens_grade).strip():
-                        lens_captions.append("Grade ?")
-                    else:
-                        lens_captions.append(f"Grade {str(lens_grade).strip()}")
                 show_thumbnail_group(
                     "Labelled lens candidates in the cluster",
-                    lens_rows,
-                    lens_captions,
+                    cluster_model["lens_rows"],
+                    cluster_model["lens_captions"],
                     prefer_lens_image=True,
                 )
-            render_cluster_histograms(cluster_id, cluster_df, histogram_features)
+            if cluster_model["n_lenses"] > 0:
+                cluster_df = clustered_df[clustered_df["cluster"] == cluster_id].copy()
+                render_cluster_histograms(
+                    cluster_id,
+                    cluster_df,
+                    view_model["histogram_features"],
+                )
 
 def show_lens_status(row: pd.Series) -> None:
     is_lens = bool(row.get("is_lens", False))

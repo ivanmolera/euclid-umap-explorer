@@ -22,12 +22,14 @@ from .birch import run_birch_clustering
 from .catalogs import normalize_lens_grades
 from .components import (
     ProcessingOverlay,
+    build_cluster_summary_view_model,
     close_processing_overlay,
+    cluster_summary_signature,
     inject_plot_cursor_css,
     install_click_processing_overlay,
     render_back_to_top_control,
-    render_cluster_visual_summary,
     render_app_flow_help,
+    render_cluster_visual_summary_view_model,
     render_euclid_object_search,
     render_help_label,
     render_pca_filter_controls,
@@ -57,7 +59,6 @@ from .config import (
     PARQUET_PATH,
 )
 from .downloads import (
-    cluster_summary_download_df,
     dataframe_to_csv_bytes,
     selected_point_indices,
     umap_download_df,
@@ -543,16 +544,28 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.warning("Select at least one PCA component to build UMAP.")
         st.stop()
 
+    current_summary_signature = cluster_summary_signature(
+        clustered_df,
+        cluster_summary_df,
+        pca_columns,
+        selected_features,
+    )
+    if st.session_state.get("cluster_summary_view_signature") != current_summary_signature:
+        st.session_state["cluster_summary_view_model"] = build_cluster_summary_view_model(
+            clustered_df,
+            cluster_summary_df,
+            pca_columns,
+            selected_features,
+        )
+        st.session_state["cluster_summary_view_signature"] = current_summary_signature
+    cluster_summary_view_model = st.session_state["cluster_summary_view_model"]
+
     with st.expander(
         "Clustering summary",
         expanded=st.session_state.get("cluster_summary_expanded", False),
     ):
         render_execution_time(clustered_df.attrs.get("processing_seconds"))
-        cluster_download_df = cluster_summary_download_df(
-            clustered_df,
-            cluster_summary_df,
-            selected_features,
-        )
+        cluster_download_df = cluster_summary_view_model["cluster_download_df"]
         summary_display = cluster_download_df.copy()
         summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
         st.dataframe(
@@ -575,11 +588,9 @@ This analysis uses Euclid Q1 catalogue products available at:
             file_name="clustering_summary.csv",
             mime="text/csv",
         )
-        render_cluster_visual_summary(
+        render_cluster_visual_summary_view_model(
+            cluster_summary_view_model,
             clustered_df,
-            cluster_summary_df,
-            pca_columns,
-            selected_features,
         )
 
     selected_option = st.selectbox(

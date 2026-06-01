@@ -78,10 +78,16 @@ def load_image_bytes(path: str) -> bytes:
     return image_bytes
 
 def thumbnail_image_src(path: str) -> str:
+    cache = st.session_state.setdefault("thumbnail_image_src_cache", {})
+    if path in cache:
+        return cache[path]
+
     image_bytes = load_image_bytes(path)
     Image.open(BytesIO(image_bytes)).verify()
     image_type = "png" if str(path).lower().endswith(".png") else "jpeg"
-    return f"data:image/{image_type};base64,{base64.b64encode(image_bytes).decode()}"
+    image_src = f"data:image/{image_type};base64,{base64.b64encode(image_bytes).decode()}"
+    cache[path] = image_src
+    return image_src
 
 def show_image(path: str, caption: str, caption_markdown: str | None = None) -> None:
     try:
