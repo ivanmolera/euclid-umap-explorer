@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import time
+from collections import OrderedDict
 from io import BytesIO
 from pathlib import Path
 
@@ -9,7 +10,13 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 
-from .config import CUTOUT_BASE, LENS_IMG_BASE
+from .config import (
+    CUTOUT_BASE,
+    IMAGE_BYTES_CACHE_MAX_ITEMS,
+    LENS_IMG_BASE,
+    SUMMARY_THUMBNAIL_PIXEL_SIZE,
+    THUMBNAIL_CACHE_MAX_ITEMS,
+)
 from .runtime import log_app_event
 from .storage import gcs_filesystem, is_gcs_path, join_data_path, path_exists
 
@@ -58,7 +65,20 @@ def lens_image_path(lens_id_str: object) -> str | None:
     path = join_data_path(LENS_IMG_BASE, str(lens_id_str), "rgb_1.png")
     return path if image_path_exists(path) else None
 
+def session_lru_cache(key: str) -> OrderedDict:
+    cache = st.session_state.setdefault(key, OrderedDict())
+    if not isinstance(cache, OrderedDict):
+        cache = OrderedDict(cache)
+        st.session_state[key] = cache
+    return cache
+
 def load_image_bytes(path: str) -> bytes:
+    cache = session_lru_cache("image_bytes_cache")
+    if path in cache:
+        image_bytes = cache.pop(path)
+        cache[path] = image_bytes
+        return image_bytes
+
     started_at = time.perf_counter()
     if is_gcs_path(path):
         with gcs_filesystem().open(path, "rb") as image_file:
@@ -75,18 +95,35 @@ def load_image_bytes(path: str) -> bytes:
         bytes=int(len(image_bytes)),
         suffix=Path(str(path)).suffix.lower(),
     )
+    cache[path] = image_bytes
+    while len(cache) > IMAGE_BYTES_CACHE_MAX_ITEMS:
+        cache.popitem(last=False)
     return image_bytes
 
 def thumbnail_image_src(path: str) -> str:
-    cache = st.session_state.setdefault("thumbnail_image_src_cache", {})
+    cache = session_lru_cache("thumbnail_image_src_cache")
     if path in cache:
-        return cache[path]
+        image_src = cache.pop(path)
+        cache[path] = image_src
+        return image_src
 
     image_bytes = load_image_bytes(path)
-    Image.open(BytesIO(image_bytes)).verify()
-    image_type = "png" if str(path).lower().endswith(".png") else "jpeg"
-    image_src = f"data:image/{image_type};base64,{base64.b64encode(image_bytes).decode()}"
+    with Image.open(BytesIO(image_bytes)) as image:
+        image = image.convert("RGB")
+        image.thumbnail(
+            (SUMMARY_THUMBNAIL_PIXEL_SIZE, SUMMARY_THUMBNAIL_PIXEL_SIZE),
+            Image.Resampling.LANCZOS,
+        )
+        thumbnail_buffer = BytesIO()
+        image.save(thumbnail_buffer, format="JPEG", quality=82, optimize=True)
+
+    image_src = (
+        "data:image/jpeg;base64,"
+        f"{base64.b64encode(thumbnail_buffer.getvalue()).decode()}"
+    )
     cache[path] = image_src
+    while len(cache) > THUMBNAIL_CACHE_MAX_ITEMS:
+        cache.popitem(last=False)
     return image_src
 
 def show_image(path: str, caption: str, caption_markdown: str | None = None) -> None:
