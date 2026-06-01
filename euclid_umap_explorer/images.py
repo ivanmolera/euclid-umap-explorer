@@ -185,7 +185,11 @@ def show_image(path: str, caption: str, caption_markdown: str | None = None) -> 
     st.markdown(
         f"""
         <div style="text-align: center; width: 100%;">
-            <img src="{image_src}" alt="{html.escape(caption)}" style="height: auto; max-width: 100%;" />
+            <img
+                src="{image_src}"
+                alt="{html.escape(caption)}"
+                style="display: block; height: auto; margin: 0 auto; max-width: 100%; width: min(100%, 640px);"
+            />
         </div>
         """,
         unsafe_allow_html=True,
