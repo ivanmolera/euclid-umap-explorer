@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import time
 from collections import OrderedDict
 from io import BytesIO
@@ -12,6 +13,8 @@ from PIL import Image
 
 from .config import (
     CUTOUT_BASE,
+    DISPLAY_IMAGE_CACHE_MAX_ITEMS,
+    DISPLAY_IMAGE_MAX_PIXEL_SIZE,
     IMAGE_BYTES_CACHE_MAX_ITEMS,
     LENS_IMG_BASE,
     SUMMARY_THUMBNAIL_PIXEL_SIZE,
@@ -126,33 +129,68 @@ def thumbnail_image_src(path: str) -> str:
         cache.popitem(last=False)
     return image_src
 
+def display_image_src(path: str) -> str:
+    cache_key = f"{path}|{DISPLAY_IMAGE_MAX_PIXEL_SIZE}"
+    cache = session_lru_cache("display_image_src_cache")
+    if cache_key in cache:
+        image_src = cache.pop(cache_key)
+        cache[cache_key] = image_src
+        return image_src
+
+    image_bytes = load_image_bytes(path)
+    with Image.open(BytesIO(image_bytes)) as image:
+        image = image.convert("RGB")
+        image.thumbnail(
+            (DISPLAY_IMAGE_MAX_PIXEL_SIZE, DISPLAY_IMAGE_MAX_PIXEL_SIZE),
+            Image.Resampling.LANCZOS,
+        )
+        display_buffer = BytesIO()
+        image.save(display_buffer, format="JPEG", quality=90, optimize=True)
+
+    image_src = (
+        "data:image/jpeg;base64,"
+        f"{base64.b64encode(display_buffer.getvalue()).decode()}"
+    )
+    cache[cache_key] = image_src
+    while len(cache) > DISPLAY_IMAGE_CACHE_MAX_ITEMS:
+        cache.popitem(last=False)
+    return image_src
+
+def render_image_caption(caption: str, caption_markdown: str | None) -> None:
+    caption_content = caption_markdown or caption
+    st.markdown(
+        f"""
+        <div style="
+            color: var(--text-color);
+            font-family: inherit;
+            font-size: 0.875rem;
+            line-height: 1.25;
+            margin-top: 0.25rem;
+            opacity: 0.65;
+            text-align: center;
+            width: 100%;
+        ">
+            {caption_content}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 def show_image(path: str, caption: str, caption_markdown: str | None = None) -> None:
     try:
-        image = Image.open(BytesIO(load_image_bytes(path)))
+        image_src = display_image_src(path)
     except Exception as exc:
         st.warning(f"Could not open the image: {exc}")
         return
-    if caption_markdown:
-        st.image(image, use_container_width=True)
-        st.markdown(
-            f"""
-            <div style="
-                color: var(--text-color);
-                font-family: inherit;
-                font-size: 0.875rem;
-                line-height: 1.25;
-                margin-top: -0.35rem;
-                opacity: 0.65;
-                text-align: center;
-                width: 100%;
-            ">
-                {caption_markdown}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        st.image(image, caption=caption, use_container_width=True)
+    st.markdown(
+        f"""
+        <div style="text-align: center; width: 100%;">
+            <img src="{image_src}" alt="{html.escape(caption)}" style="height: auto; max-width: 100%;" />
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    render_image_caption(caption, caption_markdown)
 
 def object_image_path(row: pd.Series, prefer_lens_image: bool = False) -> str | None:
     if prefer_lens_image:
