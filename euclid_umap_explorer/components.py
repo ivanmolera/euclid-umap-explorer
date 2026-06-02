@@ -11,6 +11,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as st_components
 
+from .arc_detection import detect_arc_overlay_src
 from .analysis import (
     add_cluster_extreme_roles,
     format_pca_filter,
@@ -20,6 +21,7 @@ from .catalogs import load_lens_catalog, load_morphology_object, normalize_objec
 from .config import (
     CUTOUT_BASE,
     DEFAULT_CLUSTER_FEATURES,
+    DISPLAY_IMAGE_RENDER_SIZE_PX,
     LENS_GRADE_OPTIONS,
     LENS_IMG_BASE,
     LENS_PATH,
@@ -1012,6 +1014,52 @@ def show_lens_status(row: pd.Series) -> None:
         unsafe_allow_html=True,
     )
 
+
+def render_arc_detection_control(path: str, label: str) -> None:
+    key_digest = hashlib.sha1(str(path).encode("utf-8")).hexdigest()[:12]
+    button_key = f"detect_arc_like_structures_{label}_{key_digest}"
+    if st.button("Detect arc-like structures", key=button_key, type="secondary"):
+        st.session_state[f"{button_key}_show"] = True
+
+    if st.session_state.get(f"{button_key}_show", False):
+        try:
+            overlay_src = detect_arc_overlay_src(path)
+        except Exception as exc:
+            st.warning(f"Could not run arc-like structure detection: {exc}")
+            return
+
+        st.markdown(
+            f"""
+            <div style="text-align: center; width: 100%; margin-top: 0.5rem;">
+                <img
+                    src="{overlay_src}"
+                    alt="Arc-like structure detection overlay"
+                    style="
+                        display: block;
+                        height: {DISPLAY_IMAGE_RENDER_SIZE_PX}px;
+                        margin: 0 auto;
+                        object-fit: contain;
+                        width: {DISPLAY_IMAGE_RENDER_SIZE_PX}px;
+                    "
+                />
+                <div style="
+                    color: var(--text-color);
+                    font-family: inherit;
+                    font-size: 0.875rem;
+                    line-height: 1.25;
+                    margin-top: 0.25rem;
+                    opacity: 0.65;
+                    text-align: center;
+                    width: 100%;
+                ">
+                    Arc-like structure candidates
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
     st.subheader("Selected object")
     show_lens_status(row)
@@ -1047,8 +1095,10 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
                     row.get("object_id", ""),
                 ),
             )
+            render_arc_detection_control(cutout_path, "selected_morphology")
         if lens_path is not None:
             show_image(lens_path, "Strong-lens image")
+            render_arc_detection_control(lens_path, "selected_lens")
 
 def show_morphology_catalogue_row(row: pd.Series) -> None:
     morphology_df = load_morphology_object(MORPH_PATH, str(row.get("object_id", "")))
@@ -1249,6 +1299,7 @@ def render_euclid_object_search(object_id: str) -> None:
                         'rel="noopener noreferrer">[View in Aladin]</a>'
                     ),
                 )
+                render_arc_detection_control(str(cutout_path), "search_cutout")
             else:
                 st.info(
                     "No precomputed JPEG cutout was found for this object. "
