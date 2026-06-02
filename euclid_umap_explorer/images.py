@@ -15,6 +15,7 @@ from .config import (
     CUTOUT_BASE,
     DISPLAY_IMAGE_CACHE_MAX_ITEMS,
     DISPLAY_IMAGE_MAX_PIXEL_SIZE,
+    DISPLAY_IMAGE_RENDER_SIZE_PX,
     IMAGE_BYTES_CACHE_MAX_ITEMS,
     LENS_IMG_BASE,
     SUMMARY_THUMBNAIL_PIXEL_SIZE,
@@ -188,7 +189,13 @@ def show_image(path: str, caption: str, caption_markdown: str | None = None) -> 
             <img
                 src="{image_src}"
                 alt="{html.escape(caption)}"
-                style="display: block; height: auto; margin: 0 auto; max-width: 100%; width: min(100%, 640px);"
+                style="
+                    display: block;
+                    height: {DISPLAY_IMAGE_RENDER_SIZE_PX}px;
+                    margin: 0 auto;
+                    object-fit: contain;
+                    width: {DISPLAY_IMAGE_RENDER_SIZE_PX}px;
+                "
             />
         </div>
         """,

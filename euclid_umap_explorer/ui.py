@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import streamlit as st
+from PIL import Image
 
 from .analysis import (
     add_cluster_extreme_roles,
@@ -288,7 +289,8 @@ def render_semisupervised_umap_interaction(
 
 
 def main() -> None:
-    st.set_page_config(page_title=APP_TITLE, page_icon=str(EUCLID_FAVICON_PATH), layout="wide")
+    page_icon = Image.open(EUCLID_FAVICON_PATH) if EUCLID_FAVICON_PATH.exists() else None
+    st.set_page_config(page_title=APP_TITLE, page_icon=page_icon, layout="wide")
     inject_plot_cursor_css()
     install_click_processing_overlay()
     render_back_to_top_control()
