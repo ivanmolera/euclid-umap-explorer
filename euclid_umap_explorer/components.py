@@ -818,13 +818,15 @@ def render_app_flow_help() -> None:
         <div class="sidebar-flow-help">
             <span class="concept-help" tabindex="0">?
                 <span class="concept-popover">
-                    1. Group similar objects with BIRCH.<br>
+                    <strong>Analysis flow</strong><br>
+                    1. BIRCH clustering to group similar objects.<br>
                     2. Compute lens-candidate density per cluster.<br>
                     3. Inspect the clustering summary.<br>
-                    4. Select clusters with high labelled-lens density.<br>
-                    5. Visualize the selected cluster with UMAP and apply hierarchical clustering to find denser regions.<br>
-                    6. Use A/B/C labels to guide semi-supervised UMAP.<br>
-                    7. Prioritize unknown objects close to lens-rich labelled regions.
+                    4. Select clusters with high lens-candidate density.<br>
+                    5. Select and filter PCA components.<br>
+                    6. Visualize the selected cluster with UMAP and apply hierarchical clustering to find denser regions.<br>
+                    7. Use A/B/C labels to guide semi-supervised UMAP.<br>
+                    8. Prioritize unknown objects close to lens-rich labelled regions.
                 </span>
             </span>
         </div>
