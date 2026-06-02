@@ -91,6 +91,7 @@ def request_subclustering() -> None:
 
 def request_semisupervised_umap() -> None:
     st.session_state["semisupervised_umap_requested"] = True
+    st.session_state["semisupervised_umap_expanded"] = True
 
 
 def render_execution_time(seconds: object) -> None:
@@ -1019,7 +1020,10 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
 
     if subclustered_df is not None and not subclustered_df.empty:
-        with st.expander("Semi-supervised UMAP", expanded=False):
+        with st.expander(
+            "Semi-supervised UMAP",
+            expanded=st.session_state.get("semisupervised_umap_expanded", False),
+        ):
             st.caption(
                 "Supervised labels guide the projection as A=2, B=1, C=0, "
                 "and unknown objects=-1."
@@ -1133,6 +1137,7 @@ This analysis uses Euclid Q1 catalogue products available at:
 
                 st.session_state["semisupervised_umap_df"] = semi_df
                 st.session_state["semisupervised_umap_signature"] = semi_signature
+                st.session_state["semisupervised_umap_expanded"] = True
 
             if semi_df is not None and not semi_df.empty:
                 render_execution_time(semi_df.attrs.get("processing_seconds"))
