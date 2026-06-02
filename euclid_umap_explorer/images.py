@@ -177,12 +177,7 @@ def render_image_caption(caption: str, caption_markdown: str | None) -> None:
         unsafe_allow_html=True,
     )
 
-def show_image(path: str, caption: str, caption_markdown: str | None = None) -> None:
-    try:
-        image_src = display_image_src(path)
-    except Exception as exc:
-        st.warning(f"Could not open the image: {exc}")
-        return
+def render_image_src(image_src: str, caption: str) -> None:
     st.markdown(
         f"""
         <div style="text-align: center; width: 100%;">
@@ -201,6 +196,14 @@ def show_image(path: str, caption: str, caption_markdown: str | None = None) -> 
         """,
         unsafe_allow_html=True,
     )
+
+def show_image(path: str, caption: str, caption_markdown: str | None = None) -> None:
+    try:
+        image_src = display_image_src(path)
+    except Exception as exc:
+        st.warning(f"Could not open the image: {exc}")
+        return
+    render_image_src(image_src, caption)
     render_image_caption(caption, caption_markdown)
 
 def object_image_path(row: pd.Series, prefer_lens_image: bool = False) -> str | None:

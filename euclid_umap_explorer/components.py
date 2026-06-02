@@ -21,7 +21,6 @@ from .catalogs import load_lens_catalog, load_morphology_object, normalize_objec
 from .config import (
     CUTOUT_BASE,
     DEFAULT_CLUSTER_FEATURES,
-    DISPLAY_IMAGE_RENDER_SIZE_PX,
     LENS_GRADE_OPTIONS,
     LENS_IMG_BASE,
     LENS_PATH,
@@ -38,10 +37,12 @@ from .config import (
 from .downloads import dataframe_to_csv_bytes, object_search_download_df
 from .euclid_search import fetch_euclid_object_summary
 from .images import (
+    display_image_src,
     lens_image_path,
     morphology_cutout_path,
     object_image_path,
-    show_image,
+    render_image_caption,
+    render_image_src,
     thumbnail_image_src,
 )
 from .runtime import log_app_event
@@ -1015,49 +1016,39 @@ def show_lens_status(row: pd.Series) -> None:
     )
 
 
-def render_arc_detection_control(path: str, label: str) -> None:
+def show_detectable_image(
+    path: str,
+    caption: str,
+    label: str,
+    caption_markdown: str | None = None,
+) -> None:
     key_digest = hashlib.sha1(str(path).encode("utf-8")).hexdigest()[:12]
     button_key = f"detect_arc_like_structures_{label}_{key_digest}"
-    if st.button("Detect arc-like structures", key=button_key, type="secondary"):
-        st.session_state[f"{button_key}_show"] = True
+    active_key = f"{button_key}_active"
+    active = bool(st.session_state.get(active_key, False))
 
-    if st.session_state.get(f"{button_key}_show", False):
+    if active:
         try:
-            overlay_src = detect_arc_overlay_src(path)
+            image_src = detect_arc_overlay_src(path)
         except Exception as exc:
             st.warning(f"Could not run arc-like structure detection: {exc}")
             return
+        image_caption = "Arc-like structure candidates"
+    else:
+        try:
+            image_src = display_image_src(path)
+        except Exception as exc:
+            st.warning(f"Could not open the image: {exc}")
+            return
+        image_caption = caption
 
-        st.markdown(
-            f"""
-            <div style="text-align: center; width: 100%; margin-top: 0.5rem;">
-                <img
-                    src="{overlay_src}"
-                    alt="Arc-like structure detection overlay"
-                    style="
-                        display: block;
-                        height: {DISPLAY_IMAGE_RENDER_SIZE_PX}px;
-                        margin: 0 auto;
-                        object-fit: contain;
-                        width: {DISPLAY_IMAGE_RENDER_SIZE_PX}px;
-                    "
-                />
-                <div style="
-                    color: var(--text-color);
-                    font-family: inherit;
-                    font-size: 0.875rem;
-                    line-height: 1.25;
-                    margin-top: 0.25rem;
-                    opacity: 0.65;
-                    text-align: center;
-                    width: 100%;
-                ">
-                    Arc-like structure candidates
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    render_image_src(image_src, image_caption)
+    render_image_caption(image_caption, caption_markdown if not active else None)
+
+    button_label = "Show original image" if active else "Detect arc-like structures"
+    if st.button(button_label, key=button_key, type="secondary"):
+        st.session_state[active_key] = not active
+        st.rerun()
 
 
 def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
@@ -1087,18 +1078,17 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
         st.info("No associated image was found in the configured paths.")
     else:
         if cutout_path is not None:
-            show_image(
+            show_detectable_image(
                 cutout_path,
                 "Morphology cutout",
+                "selected_morphology",
                 caption_markdown=aladin_caption_for_object(
                     "Morphology cutout",
                     row.get("object_id", ""),
                 ),
             )
-            render_arc_detection_control(cutout_path, "selected_morphology")
         if lens_path is not None:
-            show_image(lens_path, "Strong-lens image")
-            render_arc_detection_control(lens_path, "selected_lens")
+            show_detectable_image(lens_path, "Strong-lens image", "selected_lens")
 
 def show_morphology_catalogue_row(row: pd.Series) -> None:
     morphology_df = load_morphology_object(MORPH_PATH, str(row.get("object_id", "")))
@@ -1290,16 +1280,16 @@ def render_euclid_object_search(object_id: str) -> None:
             cutout_path = result.get("cutout_path")
             if cutout_path:
                 aladin_link = aladin_url(ra_degrees, dec_degrees)
-                show_image(
+                show_detectable_image(
                     str(cutout_path),
                     "Euclid VIS cutout",
+                    "search_cutout",
                     caption_markdown=(
                         '<span>Euclid VIS cutout </span>'
                         f'<a href="{aladin_link}" target="_blank" '
                         'rel="noopener noreferrer">[View in Aladin]</a>'
                     ),
                 )
-                render_arc_detection_control(str(cutout_path), "search_cutout")
             else:
                 st.info(
                     "No precomputed JPEG cutout was found for this object. "
