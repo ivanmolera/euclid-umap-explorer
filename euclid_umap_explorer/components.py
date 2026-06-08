@@ -676,6 +676,9 @@ def feature_bin_size(values: list[float]) -> float:
 def can_show_kde(values: list[float]) -> bool:
     return len(values) > 1 and len(set(values)) > 1
 
+def format_decimal_comma(value: float, decimals: int = 2) -> str:
+    return f"{value:.{decimals}f}".replace(".", ",")
+
 def recommended_pca_filter(cluster_df: pd.DataFrame, feature: str) -> dict | None:
     if "is_lens" not in cluster_df.columns or feature not in cluster_df.columns:
         return None
@@ -891,13 +894,22 @@ def render_cluster_histograms(
                     "filter": (
                         f"{recommendation['feature']} "
                         f"{recommendation['operator']} "
-                        f"{recommendation['value']:.4g}"
+                        f"{format_decimal_comma(recommendation['value'], 4)}"
                     ),
                     "objects": recommendation["n_selected"],
                     "lenses": recommendation["n_lenses"],
-                    "lens_rate_%": round(recommendation["lens_rate"] * 100, 3),
-                    "enrichment_x": round(recommendation["enrichment"], 2),
-                    "recall_%": round(recommendation["recall"] * 100, 2),
+                    "lens_rate_%": format_decimal_comma(
+                        recommendation["lens_rate"] * 100,
+                        3,
+                    ),
+                    "enrichment_x": format_decimal_comma(
+                        recommendation["enrichment"],
+                        2,
+                    ),
+                    "recall_%": format_decimal_comma(
+                        recommendation["recall"] * 100,
+                        2,
+                    ),
                 }
                 for recommendation in valid_recommendations
             ]
@@ -908,7 +920,7 @@ def render_cluster_histograms(
             "Apply best PCA filter for this cluster: "
             f"{best_recommendation['feature']} "
             f"{best_recommendation['operator']} "
-            f"{best_recommendation['value']:.4g}"
+            f"{format_decimal_comma(best_recommendation['value'], 4)}"
         )
         if st.button(
             button_label,
