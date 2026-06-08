@@ -887,7 +887,6 @@ def render_cluster_histograms(
         reverse=True,
     )
     if valid_recommendations:
-        best_recommendation = valid_recommendations[0]
         recommendation_display = pd.DataFrame(
             [
                 {
@@ -931,19 +930,25 @@ def render_cluster_histograms(
             unsafe_allow_html=True,
         )
         st.dataframe(recommendation_display, use_container_width=True, hide_index=True)
-        button_label = (
-            "Apply best PCA filter for this cluster: "
-            f"{best_recommendation['feature']} "
-            f"{best_recommendation['operator']} "
-            f"{format_decimal_comma(best_recommendation['value'], 4)}"
-        )
-        if st.button(
-            button_label,
-            key=f"apply_best_pca_filter_{cluster_id}",
-            type="secondary",
-        ):
-            queue_recommended_pca_filter(best_recommendation)
-            st.rerun()
+        st.markdown("**Apply PCA filter**")
+        button_columns = st.columns(2)
+        for recommendation_index, recommendation in enumerate(valid_recommendations):
+            button_label = (
+                f"Apply {recommendation['feature']} "
+                f"{recommendation['operator']} "
+                f"{format_decimal_comma(recommendation['value'], 4)}"
+            )
+            with button_columns[recommendation_index % 2]:
+                if st.button(
+                    button_label,
+                    key=(
+                        f"apply_pca_filter_{cluster_id}_"
+                        f"{recommendation['feature']}_{recommendation_index}"
+                    ),
+                    type="secondary",
+                ):
+                    queue_recommended_pca_filter(recommendation)
+                    st.rerun()
     else:
         st.caption("No stable PCA threshold recommendation was found for this cluster.")
 
