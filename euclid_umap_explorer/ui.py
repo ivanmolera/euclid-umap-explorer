@@ -23,6 +23,7 @@ from .birch import run_birch_clustering
 from .catalogs import normalize_lens_grades
 from .components import (
     ProcessingOverlay,
+    apply_pending_recommended_pca_filter,
     build_cluster_summary_view_model,
     close_processing_overlay,
     cluster_summary_signature,
@@ -540,6 +541,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             pca_columns,
             key="selected_pca_components",
         )
+        apply_pending_recommended_pca_filter()
         raw_pca_filters = render_pca_filter_controls(pca_columns)
         pca_filters = normalize_pca_filters(raw_pca_filters, pca_columns)
 

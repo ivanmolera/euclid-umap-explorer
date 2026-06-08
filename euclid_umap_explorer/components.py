@@ -27,6 +27,9 @@ from .config import (
     MORPH_PATH,
     PARQUET_PATH,
     PCA_FILTER_OPERATORS,
+    PCA_FILTER_RECOMMENDATION_MIN_LENSES,
+    PCA_FILTER_RECOMMENDATION_MIN_OBJECTS,
+    PCA_FILTER_RECOMMENDATION_MIN_RECALL,
     SUMMARY_DISTPLOT_MAX_POINTS_PER_GROUP,
     SUMMARY_HISTOGRAM_BINS,
     SUMMARY_HISTOGRAM_FEATURE_LIMIT,
@@ -673,10 +676,102 @@ def feature_bin_size(values: list[float]) -> float:
 def can_show_kde(values: list[float]) -> bool:
     return len(values) > 1 and len(set(values)) > 1
 
+def recommended_pca_filter(cluster_df: pd.DataFrame, feature: str) -> dict | None:
+    if "is_lens" not in cluster_df.columns or feature not in cluster_df.columns:
+        return None
+
+    work_df = cluster_df[[feature, "is_lens"]].dropna().copy()
+    if work_df.empty:
+        return None
+
+    work_df["is_lens"] = work_df["is_lens"].astype(bool)
+    total_objects = len(work_df)
+    total_lenses = int(work_df["is_lens"].sum())
+    if total_lenses == 0 or total_lenses == total_objects:
+        return None
+
+    base_lens_rate = total_lenses / total_objects
+    values = work_df[feature].astype(float)
+    candidate_thresholds = np.unique(np.percentile(values, np.linspace(5, 95, 91)))
+    best: dict | None = None
+
+    min_objects = min(
+        max(PCA_FILTER_RECOMMENDATION_MIN_OBJECTS, int(total_objects * 0.005)),
+        max(total_objects - 1, 1),
+    )
+    min_lenses = min(PCA_FILTER_RECOMMENDATION_MIN_LENSES, total_lenses)
+
+    for threshold in candidate_thresholds:
+        for operator, selected_mask in (
+            (">=", values >= threshold),
+            ("<=", values <= threshold),
+        ):
+            selected = work_df[selected_mask]
+            n_selected = len(selected)
+            if n_selected < min_objects:
+                continue
+
+            n_lenses = int(selected["is_lens"].sum())
+            if n_lenses < min_lenses:
+                continue
+
+            lens_rate = n_lenses / n_selected
+            recall = n_lenses / total_lenses
+            if recall < PCA_FILTER_RECOMMENDATION_MIN_RECALL:
+                continue
+
+            enrichment = lens_rate / base_lens_rate if base_lens_rate else 0.0
+            score = enrichment * np.sqrt(recall)
+            recommendation = {
+                "feature": feature,
+                "operator": operator,
+                "value": float(threshold),
+                "n_selected": int(n_selected),
+                "n_lenses": int(n_lenses),
+                "lens_rate": float(lens_rate),
+                "base_lens_rate": float(base_lens_rate),
+                "recall": float(recall),
+                "enrichment": float(enrichment),
+                "score": float(score),
+            }
+            if best is None or recommendation["score"] > best["score"]:
+                best = recommendation
+
+    return best
+
+def queue_recommended_pca_filter(recommendation: dict) -> None:
+    st.session_state["pending_recommended_pca_filter"] = {
+        "feature": recommendation["feature"],
+        "operator": recommendation["operator"],
+        "value": float(recommendation["value"]),
+    }
+
+def apply_pending_recommended_pca_filter() -> None:
+    recommendation = st.session_state.pop("pending_recommended_pca_filter", None)
+    if recommendation is None:
+        return
+
+    target_feature = recommendation["feature"]
+    filter_count = int(st.session_state.get("pca_filter_count", 0))
+    target_index = filter_count
+    for index in range(filter_count):
+        if st.session_state.get(f"pca_filter_{index}_feature") == target_feature:
+            target_index = index
+            break
+
+    if target_index == filter_count:
+        st.session_state["pca_filter_count"] = filter_count + 1
+
+    st.session_state[f"pca_filter_{target_index}_enabled"] = True
+    st.session_state[f"pca_filter_{target_index}_feature"] = target_feature
+    st.session_state[f"pca_filter_{target_index}_operator"] = recommendation["operator"]
+    st.session_state[f"pca_filter_{target_index}_value"] = float(recommendation["value"])
+
 def build_cluster_distplot_figure(
     cluster_df: pd.DataFrame,
     feature: str,
     feature_index: int,
+    recommendation: dict | None = None,
 ) -> object | None:
     import plotly.figure_factory as ff
 
@@ -729,6 +824,18 @@ def build_cluster_distplot_figure(
     )
     fig.update_traces(opacity=0.72, selector={"type": "histogram"})
     fig.update_traces(line={"width": 2.0}, selector={"mode": "lines"})
+    if recommendation is not None:
+        threshold = float(recommendation["value"])
+        fig.add_vline(
+            x=threshold,
+            line_dash="dash",
+            line_width=2,
+            line_color="#ffcc00",
+            annotation_text=f"{recommendation['operator']} {threshold:.3g}",
+            annotation_position="top right",
+            annotation_font_size=10,
+            annotation_font_color="#ffcc00",
+        )
     fig.update_xaxes(showgrid=False, zeroline=False)
     return fig
 
@@ -763,9 +870,64 @@ def render_cluster_histograms(
         st.info("This cluster does not contain non-lens objects for comparison.")
         return
 
+    recommendations = {
+        feature: recommended_pca_filter(cluster_df, feature)
+        for feature in summary_features
+    }
+    valid_recommendations = sorted(
+        [
+            recommendation
+            for recommendation in recommendations.values()
+            if recommendation is not None
+        ],
+        key=lambda recommendation: recommendation["score"],
+        reverse=True,
+    )
+    if valid_recommendations:
+        best_recommendation = valid_recommendations[0]
+        recommendation_display = pd.DataFrame(
+            [
+                {
+                    "filter": (
+                        f"{recommendation['feature']} "
+                        f"{recommendation['operator']} "
+                        f"{recommendation['value']:.4g}"
+                    ),
+                    "objects": recommendation["n_selected"],
+                    "lenses": recommendation["n_lenses"],
+                    "lens_rate_%": round(recommendation["lens_rate"] * 100, 3),
+                    "enrichment_x": round(recommendation["enrichment"], 2),
+                    "recall_%": round(recommendation["recall"] * 100, 2),
+                }
+                for recommendation in valid_recommendations
+            ]
+        )
+        st.markdown("**Recommended PCA thresholds**")
+        st.dataframe(recommendation_display, use_container_width=True, hide_index=True)
+        button_label = (
+            "Apply best PCA filter for this cluster: "
+            f"{best_recommendation['feature']} "
+            f"{best_recommendation['operator']} "
+            f"{best_recommendation['value']:.4g}"
+        )
+        if st.button(
+            button_label,
+            key=f"apply_best_pca_filter_{cluster_id}",
+            type="secondary",
+        ):
+            queue_recommended_pca_filter(best_recommendation)
+            st.rerun()
+    else:
+        st.caption("No stable PCA threshold recommendation was found for this cluster.")
+
     chart_columns = st.columns(2)
     for index, feature in enumerate(summary_features):
-        fig = build_cluster_distplot_figure(cluster_df, feature, index)
+        fig = build_cluster_distplot_figure(
+            cluster_df,
+            feature,
+            index,
+            recommendations.get(feature),
+        )
         if fig is None:
             continue
         with chart_columns[index % 2]:
