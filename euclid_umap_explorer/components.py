@@ -914,7 +914,22 @@ def render_cluster_histograms(
                 for recommendation in valid_recommendations
             ]
         )
-        st.markdown("**Recommended PCA thresholds**")
+        st.markdown(
+            """
+            <div style="font-weight: 700; margin-bottom: 0.35rem;">
+                Recommended PCA thresholds
+                <span class="concept-help" tabindex="0" style="margin-left: 0.25rem;">?
+                    <span class="concept-popover">
+                        For each PCA component, the table shows the threshold that best enriches
+                        lens candidates against unknown objects in this cluster, balancing lens
+                        enrichment and lens recall. These thresholds are exploratory filters,
+                        not confirmed classification rules.
+                    </span>
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.dataframe(recommendation_display, use_container_width=True, hide_index=True)
         button_label = (
             "Apply best PCA filter for this cluster: "
