@@ -27,6 +27,8 @@ from .components import (
     build_cluster_summary_view_model,
     close_processing_overlay,
     cluster_summary_signature,
+    format_decimal_comma,
+    format_thousands_dot,
     inject_plot_cursor_css,
     install_click_processing_overlay,
     render_back_to_top_control,
@@ -500,9 +502,15 @@ This analysis uses Euclid Q1 catalogue products available at:
     cluster_summary_df["option"] = cluster_summary_df.apply(format_cluster_option, axis=1)
 
     left_metric, middle_metric, right_metric = st.columns(3)
-    left_metric.metric("Clustered objects", f"{len(clustered_df):,}")
-    middle_metric.metric("Clusters", f"{clustered_df['cluster'].nunique():,}")
-    right_metric.metric("Lenses", f"{int(clustered_df['is_lens'].sum()):,}")
+    left_metric.metric("Clustered objects", format_thousands_dot(len(clustered_df)))
+    middle_metric.metric(
+        "Clusters",
+        format_thousands_dot(clustered_df["cluster"].nunique()),
+    )
+    right_metric.metric(
+        "Lenses",
+        format_thousands_dot(int(clustered_df["is_lens"].sum())),
+    )
     st.caption(f"Lens grades used: {', '.join(lens_grades)}")
 
     with st.sidebar:
@@ -572,14 +580,16 @@ This analysis uses Euclid Q1 catalogue products available at:
         render_execution_time(clustered_df.attrs.get("processing_seconds"))
         cluster_download_df = cluster_summary_view_model["cluster_download_df"]
         summary_display = cluster_download_df.copy()
-        summary_display["lens_rate"] = (summary_display["lens_rate"] * 100).round(3)
+        summary_display["lens_rate_%"] = summary_display["lens_rate"].map(
+            lambda value: format_decimal_comma(float(value) * 100, 2)
+        )
         st.dataframe(
             summary_display[
                 [
                     "cluster",
                     "n_objects",
                     "n_lenses",
-                    "lens_rate",
+                    "lens_rate_%",
                     "canonical",
                     "anomalous",
                 ]

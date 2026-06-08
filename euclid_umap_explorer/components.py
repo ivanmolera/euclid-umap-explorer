@@ -679,6 +679,9 @@ def can_show_kde(values: list[float]) -> bool:
 def format_decimal_comma(value: float, decimals: int = 2) -> str:
     return f"{value:.{decimals}f}".replace(".", ",")
 
+def format_thousands_dot(value: int | float) -> str:
+    return f"{int(value):,}".replace(",", ".")
+
 def recommended_pca_filter(cluster_df: pd.DataFrame, feature: str) -> dict | None:
     if "is_lens" not in cluster_df.columns or feature not in cluster_df.columns:
         return None
@@ -887,32 +890,6 @@ def render_cluster_histograms(
         reverse=True,
     )
     if valid_recommendations:
-        recommendation_display = pd.DataFrame(
-            [
-                {
-                    "filter": (
-                        f"{recommendation['feature']} "
-                        f"{recommendation['operator']} "
-                        f"{format_decimal_comma(recommendation['value'], 4)}"
-                    ),
-                    "objects": recommendation["n_selected"],
-                    "lenses": recommendation["n_lenses"],
-                    "lens_rate_%": format_decimal_comma(
-                        recommendation["lens_rate"] * 100,
-                        3,
-                    ),
-                    "enrichment_x": format_decimal_comma(
-                        recommendation["enrichment"],
-                        2,
-                    ),
-                    "recall_%": format_decimal_comma(
-                        recommendation["recall"] * 100,
-                        2,
-                    ),
-                }
-                for recommendation in valid_recommendations
-            ]
-        )
         st.markdown(
             """
             <div style="font-weight: 700; margin-bottom: 0.35rem;">
@@ -929,16 +906,41 @@ def render_cluster_histograms(
             """,
             unsafe_allow_html=True,
         )
-        st.dataframe(recommendation_display, use_container_width=True, hide_index=True)
-        st.markdown("**Apply PCA filter**")
-        button_columns = st.columns(2)
-        for recommendation_index, recommendation in enumerate(valid_recommendations):
-            button_label = (
-                f"Apply {recommendation['feature']} "
-                f"{recommendation['operator']} "
-                f"{format_decimal_comma(recommendation['value'], 4)}"
+        header_cols = st.columns([1.05, 1.8, 0.9, 0.8, 1.0, 1.0, 0.9])
+        headers = [
+            "filter",
+            "threshold",
+            "objects",
+            "lenses",
+            "lens_rate_%",
+            "enrichment_x",
+            "recall_%",
+        ]
+        for header_col, header in zip(header_cols, headers):
+            align = (
+                "right"
+                if header in {"lens_rate_%", "enrichment_x", "recall_%"}
+                else "left"
             )
-            with button_columns[recommendation_index % 2]:
+            header_col.markdown(
+                f"""
+                <div style="
+                    border-bottom: 1px solid rgba(128, 128, 128, 0.35);
+                    font-size: 0.82rem;
+                    font-weight: 700;
+                    padding: 0.25rem 0;
+                    text-align: {align};
+                ">{html.escape(header)}</div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        for recommendation_index, recommendation in enumerate(valid_recommendations):
+            row_cols = st.columns([1.05, 1.8, 0.9, 0.8, 1.0, 1.0, 0.9])
+            button_label = (
+                "Apply filter"
+            )
+            with row_cols[0]:
                 if st.button(
                     button_label,
                     key=(
@@ -949,6 +951,36 @@ def render_cluster_histograms(
                 ):
                     queue_recommended_pca_filter(recommendation)
                     st.rerun()
+            threshold_text = (
+                f"{recommendation['feature']} "
+                f"{recommendation['operator']} "
+                f"{format_decimal_comma(recommendation['value'], 4)}"
+            )
+            row_values = [
+                threshold_text,
+                format_thousands_dot(recommendation["n_selected"]),
+                format_thousands_dot(recommendation["n_lenses"]),
+                format_decimal_comma(recommendation["lens_rate"] * 100, 2),
+                format_decimal_comma(recommendation["enrichment"], 2),
+                format_decimal_comma(recommendation["recall"] * 100, 2),
+            ]
+            for value_col, value, align in zip(
+                row_cols[1:],
+                row_values,
+                ["left", "left", "left", "right", "right", "right"],
+            ):
+                value_col.markdown(
+                    f"""
+                    <div style="
+                        border-bottom: 1px solid rgba(128, 128, 128, 0.16);
+                        font-size: 0.88rem;
+                        min-height: 2.25rem;
+                        padding: 0.45rem 0;
+                        text-align: {align};
+                    ">{html.escape(str(value))}</div>
+                    """,
+                    unsafe_allow_html=True,
+                )
     else:
         st.caption("No stable PCA threshold recommendation was found for this cluster.")
 
@@ -1148,9 +1180,18 @@ def render_cluster_visual_summary_view_model(
         with st.container(border=True):
             stats_cols = st.columns([1, 1, 1, 1])
             stats_cols[0].metric("Cluster", cluster_id)
-            stats_cols[1].metric("Objects", f"{cluster_model['n_objects']:,}")
-            stats_cols[2].metric("Lenses", f"{cluster_model['n_lenses']:,}")
-            stats_cols[3].metric("Density", f"{cluster_model['lens_rate'] * 100:.3f}%")
+            stats_cols[1].metric(
+                "Objects",
+                format_thousands_dot(cluster_model["n_objects"]),
+            )
+            stats_cols[2].metric(
+                "Lenses",
+                format_thousands_dot(cluster_model["n_lenses"]),
+            )
+            stats_cols[3].metric(
+                "Density",
+                f"{format_decimal_comma(cluster_model['lens_rate'] * 100, 2)}%",
+            )
 
             image_cols = st.columns([2, 3, 5])
             with image_cols[0]:
