@@ -6,88 +6,106 @@ from io import BytesIO
 
 import numpy as np
 from PIL import Image
-from scipy import ndimage
 
 from .config import ARC_DETECTION_CACHE_MAX_ITEMS
 
 
-def _robust_normalize(gray: np.ndarray) -> np.ndarray:
-    low, high = np.percentile(gray, [1, 99.5])
-    if high <= low:
-        return np.zeros_like(gray, dtype=np.float32)
-    normalized = (gray - low) / (high - low)
-    return np.clip(normalized, 0.0, 1.0).astype(np.float32)
+PERCENTILE_THRESHOLD = 94.0
+MIN_CONTOUR_POINTS = 5
+AREA_RANGE = (25.0, 90.0)
+LENGTH_RANGE = (20.0, 45.0)
+ASPECT_RATIO_RANGE = (1.3, 2.2)
+FILL_RATIO_RANGE = (0.25, 0.55)
+BBOX_WIDTH_RANGE = (8, 22)
+BBOX_HEIGHT_RANGE = (5, 16)
+BACKGROUND_KERNEL_SIZE = (31, 31)
+MORPH_KERNEL_SIZE = (3, 3)
 
 
-def _component_geometry(yx: np.ndarray) -> tuple[float, float, float]:
-    if len(yx) < 3:
-        return 0.0, 0.0, 0.0
-
-    centered = yx - yx.mean(axis=0, keepdims=True)
-    covariance = np.cov(centered, rowvar=False)
-    eigenvalues = np.linalg.eigvalsh(covariance)
-    major = float(np.sqrt(max(eigenvalues[-1], 0.0)))
-    minor = float(np.sqrt(max(eigenvalues[0], 1e-6)))
-    elongation = major / minor
-    eccentricity = float(np.sqrt(max(0.0, 1.0 - (minor * minor) / max(major * major, 1e-6))))
-
-    y_min, x_min = yx.min(axis=0)
-    y_max, x_max = yx.max(axis=0)
-    box_area = max(float((y_max - y_min + 1) * (x_max - x_min + 1)), 1.0)
-    fill_fraction = float(len(yx) / box_area)
-    return elongation, eccentricity, fill_fraction
+def _cv2():
+    try:
+        import cv2
+    except ImportError as exc:
+        raise RuntimeError(
+            "OpenCV is required to detect arc-like structures. "
+            "Install dependencies with `pip install -r requirements.txt`."
+        ) from exc
+    return cv2
 
 
-def _positive_percentile(values: np.ndarray, percentile: float) -> float:
-    positive = values[values > 1e-6]
-    if len(positive) == 0:
-        return float(np.percentile(values, percentile))
-    return float(np.percentile(positive, percentile))
+def _pil_to_rgb_array(image: Image.Image) -> np.ndarray:
+    return np.asarray(image.convert("RGB"), dtype=np.uint8)
+
+
+def _robust_gray_normalize(gray: np.ndarray) -> np.ndarray:
+    p1, p99 = np.percentile(gray, (1, 99))
+    if p99 <= p1:
+        return np.zeros_like(gray, dtype=np.uint8)
+    gray_clip = np.clip(gray, p1, p99)
+    return ((gray_clip - p1) / (p99 - p1 + 1e-6) * 255).astype(np.uint8)
+
+
+def _enhanced_residual(gray: np.ndarray) -> np.ndarray:
+    cv2 = _cv2()
+    gray_norm = _robust_gray_normalize(gray)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray_eq = clahe.apply(gray_norm)
+    background = cv2.GaussianBlur(gray_eq, BACKGROUND_KERNEL_SIZE, 0)
+    residual = cv2.subtract(gray_eq, background)
+    return cv2.normalize(residual, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+
+def _candidate_binary_mask(residual: np.ndarray) -> np.ndarray:
+    cv2 = _cv2()
+    threshold = np.percentile(residual, PERCENTILE_THRESHOLD)
+    binary_raw = (residual >= threshold).astype(np.uint8) * 255
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, MORPH_KERNEL_SIZE)
+    binary_clean = cv2.morphologyEx(binary_raw, cv2.MORPH_OPEN, kernel, iterations=1)
+    binary_clean = cv2.morphologyEx(binary_clean, cv2.MORPH_CLOSE, kernel, iterations=2)
+    return cv2.dilate(binary_clean, kernel, iterations=1)
+
+
+def _is_arc_like_contour(contour: np.ndarray) -> bool:
+    cv2 = _cv2()
+    if len(contour) < MIN_CONTOUR_POINTS:
+        return False
+
+    area = float(cv2.contourArea(contour))
+    length = float(cv2.arcLength(contour, closed=False))
+    x, y, width, height = cv2.boundingRect(contour)
+    bbox_area = width * height
+    if bbox_area == 0:
+        return False
+
+    aspect_ratio = max(width, height) / max(1, min(width, height))
+    fill_ratio = area / bbox_area
+    return (
+        AREA_RANGE[0] <= area <= AREA_RANGE[1]
+        and LENGTH_RANGE[0] <= length <= LENGTH_RANGE[1]
+        and ASPECT_RATIO_RANGE[0] <= aspect_ratio <= ASPECT_RATIO_RANGE[1]
+        and FILL_RATIO_RANGE[0] <= fill_ratio <= FILL_RATIO_RANGE[1]
+        and BBOX_WIDTH_RANGE[0] <= width <= BBOX_WIDTH_RANGE[1]
+        and BBOX_HEIGHT_RANGE[0] <= height <= BBOX_HEIGHT_RANGE[1]
+    )
 
 
 def detect_arc_mask(image: Image.Image) -> np.ndarray:
-    gray = np.asarray(image.convert("L"), dtype=np.float32)
-    normalized = _robust_normalize(gray)
+    cv2 = _cv2()
+    rgb = _pil_to_rgb_array(image)
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    residual = _enhanced_residual(gray)
+    binary_clean = _candidate_binary_mask(residual)
+    contours, _ = cv2.findContours(binary_clean, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
 
-    smooth = ndimage.gaussian_filter(normalized, sigma=1.2)
-    background = ndimage.gaussian_filter(normalized, sigma=8.0)
-    residual = np.clip(smooth - background, 0.0, 1.0)
+    mask = np.zeros(gray.shape, dtype=np.uint8)
+    for contour in contours:
+        if _is_arc_like_contour(contour):
+            cv2.drawContours(mask, [contour], -1, 255, thickness=cv2.FILLED)
 
-    sobel_y = ndimage.sobel(smooth, axis=0)
-    sobel_x = ndimage.sobel(smooth, axis=1)
-    gradient = np.hypot(sobel_y, sobel_x)
-    gradient = _robust_normalize(gradient)
-
-    bright_threshold = _positive_percentile(residual, 74.0)
-    soft_bright_threshold = _positive_percentile(residual, 55.0)
-    edge_threshold = _positive_percentile(gradient, 70.0)
-    candidate = (residual >= bright_threshold) | (
-        (residual >= soft_bright_threshold) & (gradient >= edge_threshold)
-    )
-
-    candidate = ndimage.binary_closing(candidate, structure=np.ones((3, 3)))
-
-    labels, n_labels = ndimage.label(candidate)
-    mask = np.zeros_like(candidate, dtype=bool)
-    image_area = candidate.size
-    min_area = max(12, int(image_area * 0.0002))
-    max_area = max(min_area + 1, int(image_area * 0.08))
-
-    for label_id in range(1, n_labels + 1):
-        yx = np.argwhere(labels == label_id)
-        area = len(yx)
-        if area < min_area or area > max_area:
-            continue
-
-        elongation, eccentricity, fill_fraction = _component_geometry(yx)
-        if elongation < 1.8 or eccentricity < 0.72:
-            continue
-        if fill_fraction > 0.88:
-            continue
-
-        mask[labels == label_id] = True
-
-    return ndimage.binary_dilation(mask, structure=np.ones((3, 3)))
+    if np.any(mask):
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, MORPH_KERNEL_SIZE)
+        mask = cv2.dilate(mask, kernel, iterations=1)
+    return mask.astype(bool)
 
 
 def arc_overlay_image(image: Image.Image, mask: np.ndarray) -> Image.Image:
@@ -99,7 +117,7 @@ def arc_overlay_image(image: Image.Image, mask: np.ndarray) -> Image.Image:
 
 
 def detect_arc_overlay_src(path: str, max_size: int = 900) -> str:
-    cache_key = f"{path}|{max_size}|arc_detection_v1"
+    cache_key = f"{path}|{max_size}|arc_detection_opencv_v1"
     digest = hashlib.sha1(cache_key.encode("utf-8")).hexdigest()
 
     from streamlit import session_state
