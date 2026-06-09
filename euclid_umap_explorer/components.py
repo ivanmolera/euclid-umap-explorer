@@ -889,6 +889,24 @@ def render_cluster_histograms(
         key=lambda recommendation: recommendation["score"],
         reverse=True,
     )
+    chart_columns = st.columns(2)
+    for index, feature in enumerate(summary_features):
+        fig = build_cluster_distplot_figure(
+            cluster_df,
+            feature,
+            index,
+            recommendations.get(feature),
+        )
+        if fig is None:
+            continue
+        with chart_columns[index % 2]:
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+                config={"displaylogo": False, "responsive": True},
+                key=f"cluster_distplot_chart_{cluster_id}_{feature}",
+            )
+
     if valid_recommendations:
         st.markdown(
             """
@@ -984,23 +1002,6 @@ def render_cluster_histograms(
     else:
         st.caption("No stable PCA threshold recommendation was found for this cluster.")
 
-    chart_columns = st.columns(2)
-    for index, feature in enumerate(summary_features):
-        fig = build_cluster_distplot_figure(
-            cluster_df,
-            feature,
-            index,
-            recommendations.get(feature),
-        )
-        if fig is None:
-            continue
-        with chart_columns[index % 2]:
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-                config={"displaylogo": False, "responsive": True},
-                key=f"cluster_distplot_chart_{cluster_id}_{feature}",
-            )
 
 def render_thumbnail_group_title(title: str) -> None:
     if title != "Canonical / anomalous":
