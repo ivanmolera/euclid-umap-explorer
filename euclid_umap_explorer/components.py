@@ -1048,14 +1048,17 @@ def render_app_flow_help() -> None:
             <span class="concept-help" tabindex="0">?
                 <span class="concept-popover">
                     <strong>Analysis flow</strong><br>
-                    1. BIRCH clustering to group similar objects.<br>
-                    2. Compute lens-candidate density per cluster.<br>
-                    3. Inspect the clustering summary.<br>
-                    4. Select clusters with high lens-candidate density.<br>
-                    5. Select and filter PCA components.<br>
-                    6. Visualize the selected cluster with UMAP and apply hierarchical clustering to find denser regions.<br>
-                    7. Use A/B/C labels to guide semi-supervised UMAP.<br>
-                    8. Prioritize unknown objects close to lens-rich labelled regions.
+                    1. Run BIRCH over the full PCA catalogue.<br>
+                    2. Rank clusters by lens-candidate density.<br>
+                    3. Visually inspect enriched clusters.<br>
+                    4. Compute PCA histograms and recommended thresholds.<br>
+                    5. Apply PCA filters to isolate enriched regions.<br>
+                    6. Generate UMAP for the filtered subset.<br>
+                    7. Apply hierarchical subclustering.<br>
+                    8. Use A/B/C labels to guide semi-supervised UMAP in promising subclusters.<br>
+                    9. Export Unknown objects close to lens-rich regions.<br>
+                    10. Visually review cutouts and cross-check them in Aladin.<br>
+                    11. Use prioritized candidates for human inspection, active learning, or downstream models.
                 </span>
             </span>
         </div>
