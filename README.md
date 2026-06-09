@@ -1,8 +1,10 @@
 # Euclid UMAP Explorer
 
-Streamlit web application for exploring Euclid astronomical-object clusters with BIRCH, UMAP, PCA representations, morphology cutouts, and a lens-candidate catalogue.
+Euclid UMAP Explorer is a Streamlit web application for exploratory analysis of Euclid astronomical objects, morphology-based PCA representations, and labelled strong-lensing candidates.
 
-The application reads catalogues and image assets at runtime from configurable paths. Google Cloud Storage paths are supported through `gs://` URIs.
+The application is designed to help identify regions of morphology/PCA space that are enriched in strong-lens candidates, inspect those regions visually, and prioritize unlabelled objects that may be scientifically interesting for follow-up.
+
+It does not classify objects as confirmed gravitational lenses. Instead, it provides an interactive analysis layer for clustering, dimensionality reduction, visual inspection, PCA thresholding, and candidate prioritization.
 
 ## Data Sources
 
@@ -11,7 +13,17 @@ The analysis uses Euclid Q1 catalogue products published on Zenodo:
 - [Euclid Quick Data Release (Q1): First visual morphology catalogue](https://zenodo.org/records/15106473)
 - [Euclid Quick Data Release (Q1): The Strong Lensing Discovery Engine](https://zenodo.org/records/15025832)
 
-Runtime data is expected to be available through the configured paths:
+The app combines:
+
+- Euclid visual morphology catalogue data.
+- PCA representations, currently `feat_pca_0` through `feat_pca_39`.
+- A strong-lensing candidate catalogue.
+- Morphology cutouts.
+- Lens-candidate images, when available.
+
+Objects are joined through `object_id`. Objects present in the strong-lensing catalogue are treated as labelled lens candidates; all other objects are treated as `Unknown`, not as confirmed non-lenses.
+
+Runtime data is expected to be available through configurable paths:
 
 - PCA representations: `PARQUET_PATH`
 - Lens-candidate catalogue: `LENS_PATH`
@@ -21,37 +33,159 @@ Runtime data is expected to be available through the configured paths:
 
 The `data/` directories in this repository are placeholders for local development workflows.
 
+## Lens Candidate Grades
+
+The application supports strong-lens candidate grades `A`, `B`, and `C`.
+
+- **Grade A**: secure or almost secure lens candidates with clear lensing features such as arcs, multiple images, or Einstein-ring-like structures.
+- **Grade B**: probable lens candidates with visually compatible features that require additional confirmation.
+- **Grade C**: possible lens candidates with lens-like morphology that may also be explained by other physical structures, such as spiral arms, galaxy interactions, or complex morphology.
+
+The user can select which grades are included in the analysis. By default, grades `A`, `B`, and `C` are selected.
+
+## Analysis Flow
+
+The intended workflow is:
+
+1. Run BIRCH clustering over all available PCA components.
+2. Compute lens-candidate density per cluster.
+3. Inspect the clustering summary and visual examples.
+4. Select clusters with high lens-candidate density.
+5. Select and filter PCA components.
+6. Visualize the selected cluster with UMAP.
+7. Apply hierarchical subclustering inside promising clusters.
+8. Use `A/B/C` labels to guide semi-supervised UMAP within subclusters.
+9. Prioritize `Unknown` objects near lens-rich labelled regions.
+
+This workflow supports scientific triage: it narrows large Euclid catalogues to smaller, enriched regions where follow-up inspection is more efficient.
+
 ## Features
 
-- Loads the PCA catalogue `representations_pca_40.parquet`.
+- Loads PCA catalogues such as `representations_pca_40.parquet`.
 - Automatically detects `feat_pca_*` columns.
 - Derives `object_id` from `id_str` when required.
-- Loads a lens-candidate catalogue and joins it with the PCA catalogue through `object_id`.
-- Allows the user to select lens grades used in the join (`A`, `B`, `C`).
-- Runs BIRCH clustering with all available PCA components.
-- Runs BIRCH clustering only when the user clicks `Run clustering`.
-- Allows the user to select a cluster, PCA components, and UMAP parameters.
-- Supports multiple PCA threshold filters before computing UMAP.
-- Scales selected features with `StandardScaler`.
-- Computes a 2D UMAP embedding.
-- Visualizes the embedding with Plotly.
-- Distinguishes non-lenses, lens grades, canonical objects, and anomalous objects.
-- Provides a visual cluster summary with canonical, anomalous, random, and lens examples.
-- Computes compact lens vs non-lens PCA histograms for clusters containing lenses, limited to six selected UMAP components on screen.
-- Supports point selection from the UMAP plot.
-- Shows selected-object metadata, lens status, UMAP coordinates, selected PCA values, and available images.
-- Uses a client-side processing overlay for long-running actions such as BIRCH, UMAP, hierarchical subclustering, semi-supervised UMAP, histogram computation, and object search.
-- Loads morphology cutouts and lens images on demand from `CUTOUT_BASE` and `LENS_IMG_BASE`.
+- Loads and joins a lens-candidate catalogue through `object_id`.
+- Lets the user select lens grades included in the analysis.
+- Runs BIRCH clustering using all available PCA components.
+- Computes cluster-level lens-candidate density.
+- Selects by default a cluster enriched in lens candidates.
+- Provides visual cluster summaries with:
+  - canonical object;
+  - anomalous object;
+  - random cluster examples;
+  - labelled lens candidates.
+- Computes PCA histograms comparing `Lens candidate` vs `Unknown`.
+- Estimates PCA threshold recommendations that enrich lens candidates in a cluster.
+- Applies recommended PCA filters interactively.
+- Computes UMAP embeddings for selected clusters.
+- Computes hierarchical subclusters inside the selected cluster.
+- Computes semi-supervised UMAP for selected subclusters using labels `A=2`, `B=1`, `C=0`, and unknown objects as `-1`.
+- Supports object search by `object_id`.
+- Shows object metadata, selected PCA values, morphology-catalogue features, and available cutouts.
+- Links selected/search objects to Aladin for external sky inspection.
+- Provides a classical computer-vision button to highlight arc-like structures in cutouts.
+- Supports CSV export of clustering summaries and selected UMAP objects.
 
 ## Screenshots
 
-### Cluster Summary
+### Clustering Summary
 
 ![Cluster summary with visual examples and PCA histograms](docs/images/clustering.png)
 
 ### UMAP Explorer
 
 ![UMAP view with selected object details](docs/images/umap.png)
+
+## Visual Analytics
+
+The app provides several complementary visualizations:
+
+- Cluster summary table with object counts, lens-candidate counts, and lens-candidate density.
+- Visual cluster rows with canonical, anomalous, random, and labelled lens-candidate examples.
+- PCA histograms comparing labelled lens candidates against unknown objects.
+- Recommended PCA thresholds shown as vertical dashed lines on the histograms.
+- Interactive Plotly UMAP of the selected cluster.
+- UMAP overlays for lens candidates, canonical objects, anomalous objects, and hierarchical subclusters.
+- Semi-supervised UMAP for subclusters guided by `A/B/C` candidate labels.
+- Dendrogram preview to guide the number of hierarchical subclusters.
+- Cutout inspection for selected or searched objects.
+- Optional arc-like-structure highlighting using classical computer vision.
+
+## PCA Threshold Recommendations
+
+For each displayed PCA component, the app evaluates candidate thresholds of the form:
+
+```text
+feat_pca_X >= threshold
+feat_pca_X <= threshold
+```
+
+For each threshold, it reports:
+
+- retained objects;
+- retained lens candidates;
+- `lens_rate_%`;
+- `enrichment_x`;
+- `recall_%`.
+
+`lens_rate_%` is the fraction of retained objects that are labelled lens candidates.
+
+`enrichment_x` measures how much the lens-candidate density improves after applying the filter compared with the full cluster. For example, if a cluster has `0.5%` lens candidates and a PCA filter returns a subset with `5.0%` lens candidates, the enrichment is `10x`.
+
+`recall_%` measures what fraction of the cluster's labelled lens candidates are retained by the filter.
+
+These thresholds are exploratory prioritization tools. They should not be interpreted as definitive classification rules.
+
+## Arc-Like Structure Detection
+
+The cutout viewer includes a `Detect arc-like structures` toggle.
+
+This feature uses classical computer-vision techniques, not deep learning:
+
+- robust grayscale normalization;
+- Gaussian smoothing;
+- local-background subtraction;
+- Sobel gradient magnitude;
+- percentile thresholding;
+- connected components;
+- geometric filtering by area, elongation, eccentricity, and fill fraction;
+- red overlay masks on candidate regions.
+
+The result is intended as a visual aid for identifying elongated or curved structures. It can produce false positives from spiral arms, edge-on galaxies, diffraction artifacts, interacting systems, or noise.
+
+## Scientific Use
+
+Strong gravitational lenses are rare. Searching for them in large imaging surveys requires efficient prioritization strategies. Euclid UMAP Explorer helps by combining morphology-space clustering, labelled-candidate density, PCA filtering, and visual inspection.
+
+The app can help answer questions such as:
+
+- Do known lens candidates cluster in specific regions of Euclid morphology/PCA space?
+- Which clusters are enriched in `A`, `B`, or `C` lens candidates?
+- Which PCA components separate labelled candidates from unknown objects?
+- Which unknown objects are close to known candidates in UMAP space?
+- Do enriched clusters contain smaller substructures with even higher candidate density?
+- Are `Grade C` candidates distributed as ambiguous bridge populations between confident candidates and the wider galaxy population?
+- Which unlabelled objects should be prioritized for visual inspection or follow-up modelling?
+
+## Guiding Unsupervised Lens Discovery
+
+The outputs of the app can be used to guide unsupervised or weakly supervised gravitational-lens discovery workflows.
+
+A practical strategy is:
+
+1. Run BIRCH clustering over the full PCA catalogue.
+2. Rank clusters by lens-candidate density.
+3. Inspect enriched clusters visually.
+4. Compute PCA histograms and threshold recommendations.
+5. Apply PCA filters to isolate enriched regions.
+6. Compute UMAP for the filtered cluster.
+7. Run hierarchical subclustering to identify compact subregions.
+8. Use semi-supervised UMAP to assess how labelled candidates shape the local projection.
+9. Export unknown objects close to lens-rich regions.
+10. Review those objects visually and in Aladin.
+11. Feed prioritized candidates into visual inspection, active learning, anomaly detection, or downstream lens-modelling workflows.
+
+This makes the app useful as a bridge between labelled strong-lens catalogues and unsupervised discovery. Labelled candidates act as anchors, while the unknown population is searched for objects that occupy similar morphology-space regions.
 
 ## Configuration
 
@@ -72,9 +206,9 @@ export MORPH_PATH="gs://<bucket>/catalogues/morphology_catalogue/morphology_cata
 export EUCLID_CACHE_DIR="$HOME/.cache/euclid-umap-explorer"
 ```
 
-`MORPH_PATH` is used to display the full morphology-catalogue row for the selected object when available.
+`MORPH_PATH` is used to display the full morphology-catalogue row for selected or searched objects when available.
 
-`EUCLID_USE_LOCAL_CACHE=0` disables copying catalogue files into the local cache. Algorithm and catalogue results are computed from the current session state rather than Streamlit `st.cache_data`.
+`EUCLID_USE_LOCAL_CACHE=0` disables copying catalogue files into the local cache.
 
 ## Local Setup
 
@@ -92,20 +226,6 @@ Configure the environment variables and start Streamlit:
 ```bash
 streamlit run app.py
 ```
-
-## Cluster Summary
-
-After BIRCH clustering, the cluster summary combines numerical metrics and visual examples for each cluster:
-
-- clusters are ordered by the number of lenses found in each cluster, from highest to lowest,
-- canonical object, closest to the cluster centroid in the selected PCA feature space,
-- anomalous object, farthest from the cluster centroid,
-- three deterministic random examples from the cluster,
-- up to five lens examples, ordered by grade `A`, then `B`, then `C`.
-
-Lens examples use the lens image when available and fall back to the morphology cutout otherwise.
-
-For clusters containing lenses, the summary row includes an on-demand PCA histogram comparison between lens and non-lens objects.
 
 ## Cloud Run Deployment
 
@@ -132,6 +252,9 @@ The `Dockerfile` runs Streamlit on the Cloud Run `$PORT`.
 ├── requirements.txt
 ├── Dockerfile
 ├── README.md
+├── assets/
+├── docs/
+├── euclid_umap_explorer/
 └── data/
     ├── morphology/
     ├── strong_lenses/
