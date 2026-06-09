@@ -872,15 +872,18 @@ This analysis uses Euclid Q1 catalogue products available at:
         cluster_fourth,
         cluster_fifth,
     ) = st.columns(6)
-    cluster_left.metric("Cluster objects", f"{len(cluster_df):,}")
-    cluster_filtered.metric("After filters", f"{len(filtered_cluster_df):,}")
-    cluster_middle.metric("Objects in UMAP", f"{len(embedding_df):,}")
-    cluster_right.metric("Lenses in UMAP", f"{int(embedding_df['is_lens'].sum()):,}")
+    cluster_left.metric("Cluster objects", format_thousands_dot(len(cluster_df)))
+    cluster_filtered.metric("After filters", format_thousands_dot(len(filtered_cluster_df)))
+    cluster_middle.metric("Objects in UMAP", format_thousands_dot(len(embedding_df)))
+    cluster_right.metric(
+        "Lenses in UMAP",
+        format_thousands_dot(int(embedding_df["is_lens"].sum())),
+    )
     cluster_fourth.metric("Extremes", "2")
     if subclustered_df is not None and not subclustered_df.empty:
         cluster_fifth.metric(
             "Subclusters",
-            f"{subclustered_df['hierarchical_subcluster'].nunique():,}",
+            format_thousands_dot(subclustered_df["hierarchical_subcluster"].nunique()),
         )
     else:
         cluster_fifth.metric("Subclusters", "-")
@@ -1154,16 +1157,26 @@ This analysis uses Euclid Q1 catalogue products available at:
             if semi_df is not None and not semi_df.empty:
                 render_execution_time(semi_df.attrs.get("processing_seconds"))
                 semi_metric_cols = st.columns(4)
-                semi_metric_cols[0].metric("Subcluster objects", f"{len(semi_df):,}")
+                semi_metric_cols[0].metric(
+                    "Subcluster objects",
+                    format_thousands_dot(len(semi_df)),
+                )
                 semi_metric_cols[1].metric(
                     "Labelled candidates",
-                    f"{int((semi_df['semi_supervised_target'] >= 0).sum()):,}",
+                    format_thousands_dot(
+                        int((semi_df["semi_supervised_target"] >= 0).sum())
+                    ),
                 )
                 semi_metric_cols[2].metric(
                     "Unknown",
-                    f"{int((semi_df['semi_supervised_target'] < 0).sum()):,}",
+                    format_thousands_dot(
+                        int((semi_df["semi_supervised_target"] < 0).sum())
+                    ),
                 )
-                semi_metric_cols[3].metric("PCA components", f"{len(selected_features):,}")
+                semi_metric_cols[3].metric(
+                    "PCA components",
+                    format_thousands_dot(len(selected_features)),
+                )
 
                 semi_display_df = semi_df.reset_index(drop=True).copy()
                 semi_display_df["point_index"] = semi_display_df.index

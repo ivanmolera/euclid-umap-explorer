@@ -99,7 +99,7 @@ def format_duration(seconds: float | int | None) -> str:
     if seconds < 1:
         return f"{seconds * 1000:.0f} ms"
     if seconds < 60:
-        return f"{seconds:.1f} s"
+        return f"{seconds:.1f}".replace(".", ",") + " s"
 
     minutes, remaining_seconds = divmod(seconds, 60)
     if minutes < 60:
