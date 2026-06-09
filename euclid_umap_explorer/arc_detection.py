@@ -12,14 +12,9 @@ from .config import ARC_DETECTION_CACHE_MAX_ITEMS
 
 PERCENTILE_THRESHOLD = 94.0
 MIN_CONTOUR_POINTS = 5
-AREA_RANGE = (25.0, 90.0)
-LENGTH_RANGE = (20.0, 45.0)
-ASPECT_RATIO_RANGE = (1.3, 2.2)
-FILL_RATIO_RANGE = (0.25, 0.55)
-BBOX_WIDTH_RANGE = (8, 22)
-BBOX_HEIGHT_RANGE = (5, 16)
 BACKGROUND_KERNEL_SIZE = (31, 31)
 MORPH_KERNEL_SIZE = (3, 3)
+CONTOUR_MASK_THICKNESS = 2
 
 
 def _cv2():
@@ -65,28 +60,13 @@ def _candidate_binary_mask(residual: np.ndarray) -> np.ndarray:
     return cv2.dilate(binary_clean, kernel, iterations=1)
 
 
-def _is_arc_like_contour(contour: np.ndarray) -> bool:
+def _is_drawable_contour(contour: np.ndarray) -> bool:
     cv2 = _cv2()
     if len(contour) < MIN_CONTOUR_POINTS:
         return False
 
-    area = float(cv2.contourArea(contour))
-    length = float(cv2.arcLength(contour, closed=False))
-    x, y, width, height = cv2.boundingRect(contour)
-    bbox_area = width * height
-    if bbox_area == 0:
-        return False
-
-    aspect_ratio = max(width, height) / max(1, min(width, height))
-    fill_ratio = area / bbox_area
-    return (
-        AREA_RANGE[0] <= area <= AREA_RANGE[1]
-        and LENGTH_RANGE[0] <= length <= LENGTH_RANGE[1]
-        and ASPECT_RATIO_RANGE[0] <= aspect_ratio <= ASPECT_RATIO_RANGE[1]
-        and FILL_RATIO_RANGE[0] <= fill_ratio <= FILL_RATIO_RANGE[1]
-        and BBOX_WIDTH_RANGE[0] <= width <= BBOX_WIDTH_RANGE[1]
-        and BBOX_HEIGHT_RANGE[0] <= height <= BBOX_HEIGHT_RANGE[1]
-    )
+    _x, _y, width, height = cv2.boundingRect(contour)
+    return width * height > 0
 
 
 def detect_arc_mask(image: Image.Image) -> np.ndarray:
@@ -99,8 +79,8 @@ def detect_arc_mask(image: Image.Image) -> np.ndarray:
 
     mask = np.zeros(gray.shape, dtype=np.uint8)
     for contour in contours:
-        if _is_arc_like_contour(contour):
-            cv2.drawContours(mask, [contour], -1, 255, thickness=cv2.FILLED)
+        if _is_drawable_contour(contour):
+            cv2.drawContours(mask, [contour], -1, 255, thickness=CONTOUR_MASK_THICKNESS)
 
     if np.any(mask):
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, MORPH_KERNEL_SIZE)
@@ -117,7 +97,7 @@ def arc_overlay_image(image: Image.Image, mask: np.ndarray) -> Image.Image:
 
 
 def detect_arc_overlay_src(path: str, max_size: int = 900) -> str:
-    cache_key = f"{path}|{max_size}|arc_detection_opencv_v1"
+    cache_key = f"{path}|{max_size}|arc_detection_opencv_all_contours_v1"
     digest = hashlib.sha1(cache_key.encode("utf-8")).hexdigest()
 
     from streamlit import session_state
