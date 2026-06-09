@@ -9,7 +9,6 @@ umap-learn>=0.5.6,<0.6
 plotly>=5.22,<6
 pyarrow>=15,<18
 Pillow>=10,<12
-opencv-python-headless>=4.9,<5
 gcsfs>=2024.6,<2026
 astropy>=6,<8
 astroquery>=0.4.11,<0.5
