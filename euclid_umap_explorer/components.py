@@ -1293,6 +1293,19 @@ def show_detectable_image(
         st.rerun()
 
 
+def selected_umap_cutout_path(row: pd.Series) -> str | None:
+    object_id = str(row.get("object_id", "")).strip()
+    if object_id:
+        morphology_df = load_morphology_object(MORPH_PATH, object_id)
+        if not morphology_df.empty:
+            morphology_id_str = morphology_df.iloc[0].get("id_str")
+            cutout_path = morphology_cutout_path(morphology_id_str, object_id)
+            if cutout_path is not None:
+                return cutout_path
+
+    return morphology_cutout_path(row.get("id_str"), row.get("object_id"))
+
+
 def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
     st.subheader("Selected object")
     show_lens_status(row)
@@ -1311,7 +1324,7 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
     }
     st.dataframe(pd.DataFrame([details]), use_container_width=True, hide_index=True)
 
-    cutout_path = morphology_cutout_path(row.get("id_str"), row.get("object_id"))
+    cutout_path = selected_umap_cutout_path(row)
     lens_path = lens_image_path(row.get("lens_id_str"))
     if lens_path is None and bool(row.get("is_lens", False)):
         lens_path = lens_image_path(row.get("id_str"))
