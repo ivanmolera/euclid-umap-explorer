@@ -107,6 +107,9 @@ def inject_plot_cursor_css() -> None:
     st.markdown(
         """
         <style>
+        .block-container {
+            padding-top: 2rem;
+        }
         .js-plotly-plot .plotly .draglayer .drag,
         .js-plotly-plot .plotly .draglayer .nsewdrag,
         .js-plotly-plot .plotly .cursor-crosshair,
