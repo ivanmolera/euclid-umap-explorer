@@ -317,6 +317,19 @@ def main() -> None:
     loading_placeholder.empty()
 
     with st.sidebar:
+        st.markdown(
+            """
+            <div style="
+                font-size: 1.45rem;
+                font-weight: 800;
+                letter-spacing: 0;
+                line-height: 1.1;
+                margin: 0.1rem 0 0.6rem;
+                text-align: center;
+            ">ESCOPE</div>
+            """,
+            unsafe_allow_html=True,
+        )
         logo_left, logo_center, logo_right = st.columns([1, 2, 1])
         with logo_center:
             st.image(str(EUCLID_LOGO_PATH), use_container_width=True)
