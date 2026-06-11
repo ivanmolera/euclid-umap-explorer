@@ -44,6 +44,8 @@ from .components import (
 )
 from .config import (
     APP_TITLE,
+    APP_TITLE_LINE_1,
+    APP_TITLE_LINE_2,
     APP_VERSION,
     DENDROGRAM_MAX_OBJECTS,
     DENDROGRAM_TRUNCATE_CLUSTERS,
@@ -298,7 +300,22 @@ def main() -> None:
     inject_plot_cursor_css()
     install_click_processing_overlay()
     render_back_to_top_control()
-    st.title(APP_TITLE)
+    st.markdown(
+        f"""
+        <h1 style="
+            color: inherit;
+            font-size: 2.25rem;
+            font-weight: 700;
+            letter-spacing: 0;
+            line-height: 1.15;
+            margin: 0 0 1rem;
+        ">
+            {APP_TITLE_LINE_1}<br>
+            {APP_TITLE_LINE_2}
+        </h1>
+        """,
+        unsafe_allow_html=True,
+    )
     loading_placeholder = st.empty()
     loading_placeholder.info("Loading application...")
 
