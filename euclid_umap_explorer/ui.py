@@ -44,8 +44,6 @@ from .components import (
 )
 from .config import (
     APP_TITLE,
-    APP_TITLE_LINE_1,
-    APP_TITLE_LINE_2,
     APP_VERSION,
     DENDROGRAM_MAX_OBJECTS,
     DENDROGRAM_TRUNCATE_CLUSTERS,
@@ -301,17 +299,27 @@ def main() -> None:
     install_click_processing_overlay()
     render_back_to_top_control()
     st.markdown(
-        f"""
-        <h1 style="
-            color: inherit;
-            font-size: 2.25rem;
-            font-weight: 700;
-            letter-spacing: 0;
-            line-height: 1.15;
-            margin: 0 0 1rem;
-        ">
-            {APP_TITLE_LINE_1}<br>
-            {APP_TITLE_LINE_2}
+        """
+        <style>
+            .app-title {
+                color: inherit;
+                font-size: 2.25rem;
+                font-weight: 400;
+                letter-spacing: 0;
+                line-height: 1.15;
+                margin: 0 0 1rem;
+            }
+            .app-title__initial {
+                font-weight: 850;
+            }
+        </style>
+        <h1 class="app-title">
+            <span class="app-title__initial">E</span>uclid
+            <span class="app-title__initial">S</span>trong-lensing
+            <span class="app-title__initial">C</span>andidate
+            <span class="app-title__initial">O</span>bservation<br>
+            and <span class="app-title__initial">P</span>rojection
+            <span class="app-title__initial">E</span>xplorer
         </h1>
         """,
         unsafe_allow_html=True,
