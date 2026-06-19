@@ -304,13 +304,10 @@ def main() -> None:
             .app-title {
                 color: inherit;
                 font-size: 2.25rem;
-                font-weight: 300 !important;
+                font-weight: 500 !important;
                 letter-spacing: 0;
                 line-height: 1.15;
                 margin: 0 0 1rem;
-            }
-            .app-title span {
-                font-weight: inherit !important;
             }
             .app-title__initial {
                 font-weight: 900 !important;
