@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APP_TITLE_LINE_1 = "Euclid Strong-lensing Candidate Observation"
 APP_TITLE_LINE_2 = "and Projection Explorer"
 APP_TITLE = f"{APP_TITLE_LINE_1} {APP_TITLE_LINE_2}"
-APP_VERSION = "v0.1.13"
+APP_VERSION = "v0.1.14"
 EUCLID_LOGO_PATH = PROJECT_ROOT / "assets" / "euclid_logo.png"
 EUCLID_FAVICON_PATH = PROJECT_ROOT / "assets" / "favicon.png"
 

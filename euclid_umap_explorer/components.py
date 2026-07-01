@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as st_components
 
-from .arc_detection import detect_arc_overlay_src
+from .arc_detection_cv import detect_arc_overlay_src
 from .analysis import (
     add_cluster_extreme_roles,
     format_pca_filter,
