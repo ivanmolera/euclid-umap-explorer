@@ -1527,7 +1527,6 @@ def render_euclid_object_search(object_id: str) -> None:
     mosaic_summary = result["mosaic_summary"]
 
     with st.container(border=True):
-        st.subheader("Object search")
         ra_degrees = float(object_summary["right_ascension"])
         dec_degrees = float(object_summary["declination"])
         metric_cols = st.columns([2.4, 1, 1, 1])

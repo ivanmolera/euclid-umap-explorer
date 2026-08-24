@@ -343,6 +343,25 @@ def main() -> None:
         st.stop()
     loading_placeholder.empty()
 
+    st.subheader("Object search")
+    search_input_col, search_button_col = st.columns([5, 1])
+    with search_input_col:
+        object_id_search_value = st.text_input(
+            "object_id",
+            placeholder="object_id",
+            label_visibility="collapsed",
+            key="object_id_search_value",
+        )
+    search_object_id = object_id_search_value.strip()
+    search_submitted = search_button_col.button(
+        "Search",
+        type="primary",
+        disabled=not is_valid_search_object_id(search_object_id),
+        use_container_width=True,
+    )
+    if search_submitted:
+        st.session_state["euclid_search_object_id"] = search_object_id
+
     with st.sidebar:
         st.markdown(
             """
@@ -375,39 +394,24 @@ This analysis uses Euclid Q1 catalogue products available at:
 - [First visual morphology catalogue](https://zenodo.org/records/15106473)
             """
         )
-        render_help_label(
-            "Straight line artifacts filter",
-            STRAIGHT_LINE_ARTIFACT_FILTER_HELP,
-        )
-        straight_line_filter_enabled = st.toggle(
-            "Straight line artifacts filter",
-            value=True,
-            key="straight_line_artifacts_filter_enabled",
-            label_visibility="collapsed",
-        )
+        artifact_filter_label_col, artifact_filter_toggle_col = st.columns([5, 1])
+        with artifact_filter_label_col:
+            render_help_label(
+                "Straight line artifacts filter",
+                STRAIGHT_LINE_ARTIFACT_FILTER_HELP,
+            )
+        with artifact_filter_toggle_col:
+            straight_line_filter_enabled = st.toggle(
+                "Straight line artifacts filter",
+                value=True,
+                key="straight_line_artifacts_filter_enabled",
+                label_visibility="collapsed",
+            )
         selected_parquet_path = (
             STRAIGHT_LINE_FILTERED_PARQUET_PATH
             if straight_line_filter_enabled
             else PARQUET_PATH
         )
-
-        st.header("Search object")
-        search_input_col, search_button_col = st.columns([3, 1])
-        with search_input_col:
-            object_id_search_value = st.text_input(
-                "object_id",
-                placeholder="object_id",
-                label_visibility="collapsed",
-                key="object_id_search_value",
-            )
-        search_object_id = object_id_search_value.strip()
-        search_submitted = search_button_col.button(
-            "Search",
-            type="primary",
-            disabled=not is_valid_search_object_id(search_object_id),
-        )
-        if search_submitted:
-            st.session_state["euclid_search_object_id"] = search_object_id
 
         st.header("Lens candidates")
         render_help_label("Lens grades", LENS_GRADE_HELP)
