@@ -394,7 +394,10 @@ This analysis uses Euclid Q1 catalogue products available at:
 - [First visual morphology catalogue](https://zenodo.org/records/15106473)
             """
         )
-        artifact_filter_label_col, artifact_filter_toggle_col = st.columns([5, 1])
+        artifact_filter_label_col, artifact_filter_toggle_col = st.columns(
+            [5, 1],
+            vertical_alignment="center",
+        )
         with artifact_filter_label_col:
             render_help_label(
                 "Straight line artifacts filter",
