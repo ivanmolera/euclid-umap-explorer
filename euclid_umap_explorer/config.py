@@ -24,6 +24,11 @@ PARQUET_PATH = os.getenv(
     "PARQUET_PATH",
     "/content/drive/MyDrive/catalogues/morphology_catalogue/representations_pca_40.parquet",
 )
+STRAIGHT_LINE_FILTERED_PARQUET_PATH = os.getenv(
+    "STRAIGHT_LINE_FILTERED_PARQUET_PATH",
+    "gs://euclid-umap-ivan-0424-data/catalogues/morphology_catalogue/"
+    "representations_pca_40_artifacts_filtered_v1_supported_border_lines.parquet",
+)
 LENS_PATH = os.getenv(
     "LENS_PATH",
     "/content/drive/MyDrive/catalogues/strong_lensing_catalogue/q1_discovery_engine_lens_catalog.csv",
@@ -78,6 +83,13 @@ LENS_GRADE_HELP = (
     "(expert score > 1.5).\n\n"
     "Grade C: possible lens candidates with lens-like morphology that may still "
     "be explained by other physical structures (expert score > 1.0)."
+)
+STRAIGHT_LINE_ARTIFACT_FILTER_HELP = (
+    "Straight-line artifacts are identified with Canny edge detection and a "
+    "probabilistic Hough transform. Candidate lines must be long, contain "
+    "continuous high-response pixels, contrast with their immediate surroundings, "
+    "and reach the image borders. When enabled, BIRCH uses the PCA catalogue from "
+    "which images containing these high-confidence artifacts were removed."
 )
 PARAMETER_HELP = {
     "threshold": (

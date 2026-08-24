@@ -42,6 +42,7 @@ def cluster_summary_download_df(
                 "n_objects": int(summary_row["n_objects"]),
                 "n_lenses": int(summary_row["n_lenses"]),
                 "lens_rate": float(summary_row["lens_rate"]),
+                "enrichment": float(summary_row["enrichment"]),
                 "canonical": canonical,
                 "anomalous": anomalous,
             }

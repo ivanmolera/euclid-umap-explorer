@@ -72,6 +72,10 @@ PCA_PRESET_FEATURES = {
 
 
 def build_cluster_summary(clustered_df: pd.DataFrame) -> pd.DataFrame:
+    total_objects = len(clustered_df)
+    total_lenses = int(clustered_df["is_lens"].sum())
+    global_lens_rate = total_lenses / total_objects if total_objects else 0.0
+
     summary_df = (
         clustered_df.groupby("cluster")
         .agg(
@@ -81,6 +85,9 @@ def build_cluster_summary(clustered_df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
     summary_df["lens_rate"] = summary_df["n_lenses"] / summary_df["n_objects"]
+    summary_df["enrichment"] = (
+        summary_df["lens_rate"] / global_lens_rate if global_lens_rate else 0.0
+    )
     summary_df = summary_df.sort_values(
         ["n_lenses", "lens_rate", "n_objects", "cluster"],
         ascending=[False, False, False, True],
@@ -93,7 +100,8 @@ def format_cluster_option(row: pd.Series) -> str:
         f"Cluster {int(row['cluster'])} | "
         f"{int(row['n_objects']):,} objects | "
         f"{int(row['n_lenses']):,} lenses | "
-        f"{row['lens_rate'] * 100:.3f}%"
+        f"{row['lens_rate'] * 100:.3f}% | "
+        f"{row.get('enrichment', 0.0):.2f}x enrichment"
     )
 
 

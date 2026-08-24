@@ -11,6 +11,7 @@ from .config import ARC_DETECTION_CACHE_MAX_ITEMS
 
 
 LOW_PERCENTILE_THRESHOLD = 88.0
+HIGH_PERCENTILE_THRESHOLD = 95.0
 MIN_COMPONENT_AREA = 8
 MIN_CONTOUR_POINTS = 5
 MIN_AREA = 3.0
@@ -21,6 +22,7 @@ MAX_CENTER_DISTANCE_FRAC = 0.50
 BACKGROUND_KERNEL_SIZE = (31, 31)
 MORPH_CONNECTIVITY = 4
 CONTOUR_MASK_THICKNESS = 2
+CONTOUR_COLOR_RGB = (255, 0, 0)
 
 
 def _cv2():
@@ -59,7 +61,25 @@ def _background_subtracted_residual(gray: np.ndarray) -> np.ndarray:
 def _clean_binary_mask(residual: np.ndarray) -> np.ndarray:
     cv2 = _cv2()
     low_threshold = np.percentile(residual, LOW_PERCENTILE_THRESHOLD)
+    high_threshold = np.percentile(residual, HIGH_PERCENTILE_THRESHOLD)
     binary_low = (residual >= low_threshold).astype(np.uint8) * 255
+    binary_high = (residual >= high_threshold).astype(np.uint8) * 255
+
+    # Keep the notebook's low/high hysteresis step explicit so the production
+    # detector follows the same preprocessing path, even though the permissive
+    # low-threshold mask below is the one used for final contours.
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        binary_low,
+        connectivity=8,
+    )
+    binary_hysteresis = np.zeros_like(binary_low)
+    for label in range(1, num_labels):
+        component_mask = labels == label
+        if not np.any(binary_high[component_mask]):
+            continue
+        if stats[label, cv2.CC_STAT_AREA] < MIN_COMPONENT_AREA:
+            continue
+        binary_hysteresis[component_mask] = 255
 
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
         binary_low,
@@ -120,31 +140,44 @@ def _candidate_contours(binary_clean: np.ndarray) -> list[np.ndarray]:
     ]
 
 
-def detect_arc_mask(image: Image.Image) -> np.ndarray:
+def _candidate_contours_for_image(image: Image.Image) -> tuple[np.ndarray, list[np.ndarray]]:
     cv2 = _cv2()
     rgb = _pil_to_rgb_array(image)
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     residual = _background_subtracted_residual(gray)
     binary_clean = _clean_binary_mask(residual)
-    contours = _candidate_contours(binary_clean)
+    return rgb, _candidate_contours(binary_clean)
 
-    mask = np.zeros(gray.shape, dtype=np.uint8)
+
+def detect_arc_mask(image: Image.Image) -> np.ndarray:
+    cv2 = _cv2()
+    rgb, contours = _candidate_contours_for_image(image)
+    height, width = rgb.shape[:2]
+
+    mask = np.zeros((height, width), dtype=np.uint8)
     for contour in contours:
         cv2.drawContours(mask, [contour], -1, 255, thickness=CONTOUR_MASK_THICKNESS)
 
     return mask.astype(bool)
 
 
-def arc_overlay_image(image: Image.Image, mask: np.ndarray) -> Image.Image:
-    base = image.convert("RGBA")
-    overlay = Image.new("RGBA", base.size, (255, 0, 0, 0))
-    alpha = mask.astype(np.uint8) * 150
-    overlay.putalpha(Image.fromarray(alpha, mode="L"))
-    return Image.alpha_composite(base, overlay).convert("RGB")
+def arc_overlay_image(image: Image.Image) -> Image.Image:
+    cv2 = _cv2()
+    rgb, contours = _candidate_contours_for_image(image)
+    output_rgb = rgb.copy()
+    for contour in contours:
+        cv2.drawContours(
+            output_rgb,
+            [contour],
+            -1,
+            CONTOUR_COLOR_RGB,
+            thickness=CONTOUR_MASK_THICKNESS,
+        )
+    return Image.fromarray(output_rgb, mode="RGB")
 
 
 def detect_arc_overlay_src(path: str, max_size: int = 900) -> str:
-    cache_key = f"{path}|{max_size}|arc_detection_cv_low_high_v1"
+    cache_key = f"{path}|{max_size}|arc_detection_cv_contours_v1"
     digest = hashlib.sha1(cache_key.encode("utf-8")).hexdigest()
 
     from streamlit import session_state
@@ -158,9 +191,8 @@ def detect_arc_overlay_src(path: str, max_size: int = 900) -> str:
     image_bytes = load_image_bytes(path)
     with Image.open(BytesIO(image_bytes)) as image:
         image = image.convert("RGB")
-        image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-        mask = detect_arc_mask(image)
-        overlay_image = arc_overlay_image(image, mask)
+        overlay_image = arc_overlay_image(image)
+        overlay_image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
         output = BytesIO()
         overlay_image.save(output, format="JPEG", quality=90, optimize=True)
 

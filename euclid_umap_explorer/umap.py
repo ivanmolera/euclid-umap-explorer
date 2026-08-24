@@ -178,7 +178,8 @@ def build_umap_signature(
     cluster_params: dict,
 ) -> tuple:
     return (
-        PARQUET_PATH,
+        cluster_params.get("parquet_path", PARQUET_PATH),
+        bool(cluster_params.get("straight_line_artifacts_filter", False)),
         LENS_PATH,
         cluster_lens_grades(cluster_params),
         float(cluster_params["threshold"]),

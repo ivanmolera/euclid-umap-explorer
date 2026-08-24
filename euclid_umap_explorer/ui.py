@@ -61,6 +61,8 @@ from .config import (
     MAX_ALGORITHM_SECONDS,
     PARAMETER_HELP,
     PARQUET_PATH,
+    STRAIGHT_LINE_ARTIFACT_FILTER_HELP,
+    STRAIGHT_LINE_FILTERED_PARQUET_PATH,
 )
 from .downloads import (
     dataframe_to_csv_bytes,
@@ -327,7 +329,7 @@ def main() -> None:
     loading_placeholder = st.empty()
     loading_placeholder.info("Loading application...")
 
-    required = [PARQUET_PATH, LENS_PATH]
+    required = [LENS_PATH]
     with st.spinner("Loading application..."):
         missing = [path for path in required if not path_exists(path)]
     if missing:
@@ -373,6 +375,23 @@ This analysis uses Euclid Q1 catalogue products available at:
 - [First visual morphology catalogue](https://zenodo.org/records/15106473)
             """
         )
+        render_help_label(
+            "Straight line artifacts filter",
+            STRAIGHT_LINE_ARTIFACT_FILTER_HELP,
+        )
+        straight_line_filter_enabled = st.toggle(
+            "Straight line artifacts filter",
+            value=True,
+            key="straight_line_artifacts_filter_enabled",
+            label_visibility="collapsed",
+        )
+        selected_parquet_path = (
+            STRAIGHT_LINE_FILTERED_PARQUET_PATH
+            if straight_line_filter_enabled
+            else PARQUET_PATH
+        )
+
+        st.header("Search object")
         search_input_col, search_button_col = st.columns([3, 1])
         with search_input_col:
             object_id_search_value = st.text_input(
@@ -468,6 +487,8 @@ This analysis uses Euclid Q1 catalogue products available at:
             "threshold": threshold,
             "branching_factor": int(branching_factor),
             "batch_size": int(batch_size),
+            "parquet_path": selected_parquet_path,
+            "straight_line_artifacts_filter": straight_line_filter_enabled,
         }
         st.session_state["cluster_summary_expanded"] = False
         log_app_event(
@@ -476,6 +497,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             threshold=float(threshold),
             branching_factor=int(branching_factor),
             batch_size=int(batch_size),
+            straight_line_artifacts_filter=straight_line_filter_enabled,
         )
 
     if not st.session_state.get("cluster_ready"):
@@ -485,6 +507,7 @@ This analysis uses Euclid Q1 catalogue products available at:
 
     params = st.session_state["cluster_params"]
     lens_grades = cluster_lens_grades(params)
+    clustering_parquet_path = params.get("parquet_path", PARQUET_PATH)
     cached_cluster = st.session_state.get("cluster_result")
     should_run_clustering = birch_requested or cached_cluster is None
 
@@ -492,10 +515,14 @@ This analysis uses Euclid Q1 catalogue products available at:
         overlay = ProcessingOverlay()
         try:
             overlay.open("Running BIRCH clustering...")
+            if not path_exists(clustering_parquet_path):
+                raise FileNotFoundError(
+                    f"PCA catalogue not found: {clustering_parquet_path}"
+                )
             # Only individual catalogues are cached. Image folders are read on demand.
-            prepare_catalog_cache([PARQUET_PATH, LENS_PATH])
+            prepare_catalog_cache([clustering_parquet_path, LENS_PATH])
             clustered_df, pca_columns = run_birch_clustering(
-                PARQUET_PATH,
+                clustering_parquet_path,
                 LENS_PATH,
                 lens_grades,
                 float(params["threshold"]),
@@ -519,6 +546,9 @@ This analysis uses Euclid Q1 catalogue products available at:
                 "If you are using a synchronized drive, make the files available offline or copy them to local cache first."
             )
             st.exception(exc)
+            st.stop()
+        except FileNotFoundError as exc:
+            st.error(str(exc))
             st.stop()
         except OSError as exc:
             st.error(
@@ -550,6 +580,11 @@ This analysis uses Euclid Q1 catalogue products available at:
         format_thousands_dot(int(clustered_df["is_lens"].sum())),
     )
     st.caption(f"Lens grades used: {', '.join(lens_grades)}")
+    artifact_filter_used = bool(params.get("straight_line_artifacts_filter", False))
+    st.caption(
+        "Straight line artifacts filter used: "
+        + ("On" if artifact_filter_used else "Off")
+    )
 
     with st.sidebar:
         st.header("PCA components")
@@ -621,6 +656,9 @@ This analysis uses Euclid Q1 catalogue products available at:
         summary_display["lens_rate_%"] = summary_display["lens_rate"].map(
             lambda value: format_decimal_comma(float(value) * 100, 2)
         )
+        summary_display["enrichment_x"] = summary_display["enrichment"].map(
+            lambda value: format_decimal_comma(float(value), 2)
+        )
         st.dataframe(
             summary_display[
                 [
@@ -628,6 +666,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                     "n_objects",
                     "n_lenses",
                     "lens_rate_%",
+                    "enrichment_x",
                     "canonical",
                     "anomalous",
                 ]

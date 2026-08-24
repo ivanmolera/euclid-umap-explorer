@@ -1093,7 +1093,7 @@ def cluster_summary_signature(
     cluster_values = tuple(
         tuple(row)
         for row in cluster_summary_df[
-            ["cluster", "n_objects", "n_lenses", "lens_rate"]
+            ["cluster", "n_objects", "n_lenses", "lens_rate", "enrichment"]
         ].itertuples(index=False, name=None)
     )
     return (
@@ -1144,6 +1144,7 @@ def build_cluster_summary_view_model(
                 "n_objects": int(summary_row["n_objects"]),
                 "n_lenses": int(summary_row["n_lenses"]),
                 "lens_rate": float(summary_row["lens_rate"]),
+                "enrichment": float(summary_row["enrichment"]),
                 "canonical": canonical,
                 "anomalous": anomalous,
             }
@@ -1163,6 +1164,7 @@ def build_cluster_summary_view_model(
                 "n_objects": int(summary_row["n_objects"]),
                 "n_lenses": int(summary_row["n_lenses"]),
                 "lens_rate": float(summary_row["lens_rate"]),
+                "enrichment": float(summary_row["enrichment"]),
                 "canonical_row": canonical_row,
                 "anomaly_row": anomaly_row,
                 "random_rows": random_rows,
@@ -1185,7 +1187,7 @@ def render_cluster_visual_summary_view_model(
         cluster_id = int(cluster_model["cluster_id"])
 
         with st.container(border=True):
-            stats_cols = st.columns([1, 1, 1, 1])
+            stats_cols = st.columns([1, 1, 1, 1, 1])
             stats_cols[0].metric("Cluster", cluster_id)
             stats_cols[1].metric(
                 "Objects",
@@ -1198,6 +1200,10 @@ def render_cluster_visual_summary_view_model(
             stats_cols[3].metric(
                 "Density",
                 f"{format_decimal_comma(cluster_model['lens_rate'] * 100, 2)}%",
+            )
+            stats_cols[4].metric(
+                "Enrichment",
+                f"{format_decimal_comma(cluster_model['enrichment'], 2)}x",
             )
 
             image_cols = st.columns([2, 3, 5])

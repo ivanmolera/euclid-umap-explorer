@@ -26,6 +26,7 @@ Objects are joined through `object_id`. Objects present in the strong-lensing ca
 Runtime data is expected to be available through configurable paths:
 
 - PCA representations: `PARQUET_PATH`
+- Straight-line-artifact-filtered PCA representations: `STRAIGHT_LINE_FILTERED_PARQUET_PATH`
 - Lens-candidate catalogue: `LENS_PATH`
 - Morphology cutouts: `CUTOUT_BASE`
 - Lens-candidate images: `LENS_IMG_BASE`
@@ -62,6 +63,7 @@ This workflow supports scientific triage: it narrows large Euclid catalogues to 
 ## Features
 
 - Loads PCA catalogues such as `representations_pca_40.parquet`.
+- Optionally runs BIRCH on a PCA catalogue from which high-confidence straight-line image artifacts were removed.
 - Automatically detects `feat_pca_*` columns.
 - Derives `object_id` from `id_str` when required.
 - Loads and joins a lens-candidate catalogue through `object_id`.
@@ -193,6 +195,7 @@ Set the required catalogue and image paths through environment variables:
 
 ```bash
 export PARQUET_PATH="gs://<bucket>/catalogues/morphology_catalogue/representations_pca_40.parquet"
+export STRAIGHT_LINE_FILTERED_PARQUET_PATH="gs://<bucket>/catalogues/morphology_catalogue/representations_pca_40_artifacts_filtered_v1_supported_border_lines.parquet"
 export LENS_PATH="gs://<bucket>/catalogues/strong_lensing_catalogue/q1_discovery_engine_lens_catalog.csv"
 export CUTOUT_BASE="gs://<bucket>/catalogues/morphology_catalogue/cutouts_jpg_gz_arcsinh_vis_only"
 export LENS_IMG_BASE="gs://<bucket>/catalogues/strong_lensing_catalogue/lens"
