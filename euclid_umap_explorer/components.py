@@ -123,6 +123,10 @@ def inject_plot_cursor_css() -> None:
             color: #ffffff !important;
             opacity: 1 !important;
         }
+        section[data-testid="stSidebar"]
+        .st-key-straight_line_artifacts_filter_enabled {
+            transform: translateY(0.5rem);
+        }
         .lens-status {
             border-radius: 8px;
             font-weight: 700;
