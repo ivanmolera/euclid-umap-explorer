@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 import hashlib
 import html
 from pathlib import Path
@@ -232,6 +232,33 @@ def inject_plot_cursor_css() -> None:
             display: block;
             object-fit: contain;
             width: 100%;
+        }
+        .concept-popover--lens-grades {
+            min-width: min(300px, calc(100vw - 2rem));
+        }
+        .lens-grade-help__section + .lens-grade-help__section {
+            margin-top: 0.7rem;
+        }
+        .lens-grade-help__description {
+            font-weight: 500;
+        }
+        .lens-grade-help__description strong {
+            font-weight: 800;
+        }
+        .lens-grade-help__thumbnail-grid {
+            display: grid;
+            gap: 0.35rem;
+            grid-template-columns: repeat(3, 70px);
+            margin-top: 0.4rem;
+        }
+        .lens-grade-help__thumbnail-grid img {
+            background: #05080d;
+            border: 1px solid rgba(148, 163, 184, 0.38);
+            border-radius: 4px;
+            display: block;
+            height: 70px;
+            object-fit: contain;
+            width: 70px;
         }
         .concept-help:hover .concept-popover,
         .concept-help:focus .concept-popover {
@@ -1054,7 +1081,12 @@ def render_thumbnail_group_title(title: str) -> None:
         unsafe_allow_html=True,
     )
 
-def _tooltip_thumbnail_grid(thumbnail_paths: Sequence[str | Path]) -> str:
+def _tooltip_thumbnail_grid(
+    thumbnail_paths: Sequence[str | Path],
+    *,
+    css_class: str = "concept-popover__thumbnail-grid",
+    alt_text: str = "Tooltip example",
+) -> str:
     thumbnails = []
     for thumbnail_path in thumbnail_paths:
         path = Path(thumbnail_path)
@@ -1063,14 +1095,34 @@ def _tooltip_thumbnail_grid(thumbnail_paths: Sequence[str | Path]) -> str:
         encoded_image = base64.b64encode(path.read_bytes()).decode("ascii")
         thumbnails.append(
             '<img src="data:image/jpeg;base64,'
-            f'{encoded_image}" alt="Excluded straight-line artifact example">'
+            f'{encoded_image}" alt="{html.escape(alt_text, quote=True)}">'
         )
     if not thumbnails:
         return ""
     return (
-        '<div class="concept-popover__thumbnail-grid">'
+        f'<div class="{html.escape(css_class, quote=True)}">'
         + "".join(thumbnails)
         + "</div>"
+    )
+
+
+def _render_help_label_html(
+    label: str,
+    popover_html: str,
+    popover_classes: Sequence[str] = (),
+) -> None:
+    escaped_label = html.escape(label)
+    class_names = " ".join(("concept-popover", *popover_classes))
+    st.markdown(
+        f"""
+        <div style="font-size: 0.88rem; font-weight: 600; margin-bottom: 0.2rem;">
+            <span class="concept-help" tabindex="0">
+                {escaped_label}
+                <span class="{class_names}">{popover_html}</span>
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
 
@@ -1079,24 +1131,44 @@ def render_help_label(
     help_text: str,
     thumbnail_paths: Sequence[str | Path] = (),
 ) -> None:
-    escaped_label = html.escape(label)
     escaped_help = html.escape(help_text).replace("\n", "<br>")
-    thumbnail_grid = _tooltip_thumbnail_grid(thumbnail_paths)
-    popover_class = (
-        "concept-popover concept-popover--with-thumbnails"
-        if thumbnail_grid
-        else "concept-popover"
+    thumbnail_grid = _tooltip_thumbnail_grid(
+        thumbnail_paths,
+        alt_text="Excluded straight-line artifact example",
     )
-    st.markdown(
-        f"""
-        <div style="font-size: 0.88rem; font-weight: 600; margin-bottom: 0.2rem;">
-            <span class="concept-help" tabindex="0">
-                {escaped_label}
-                <span class="{popover_class}">{escaped_help}{thumbnail_grid}</span>
-            </span>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    popover_classes = ("concept-popover--with-thumbnails",) if thumbnail_grid else ()
+    _render_help_label_html(
+        label,
+        escaped_help + thumbnail_grid,
+        popover_classes,
+    )
+
+
+def render_lens_grade_help_label(
+    label: str,
+    grade_descriptions: Mapping[str, str],
+    grade_example_paths: Mapping[str, Sequence[str | Path]],
+) -> None:
+    sections = []
+    for grade, description in grade_descriptions.items():
+        thumbnail_grid = _tooltip_thumbnail_grid(
+            grade_example_paths.get(grade, ()),
+            css_class="lens-grade-help__thumbnail-grid",
+            alt_text=f"Grade {grade} lens candidate example",
+        )
+        sections.append(
+            '<div class="lens-grade-help__section">'
+            '<div class="lens-grade-help__description">'
+            f"<strong>Grade {html.escape(grade)}:</strong> "
+            f"{html.escape(description)}"
+            "</div>"
+            f"{thumbnail_grid}"
+            "</div>"
+        )
+    _render_help_label_html(
+        label,
+        "".join(sections),
+        ("concept-popover--lens-grades",),
     )
 
 def render_app_flow_help() -> None:

@@ -11,6 +11,16 @@ APP_TITLE = f"{APP_TITLE_LINE_1} {APP_TITLE_LINE_2}"
 APP_VERSION = "v0.1.14"
 EUCLID_LOGO_PATH = PROJECT_ROOT / "assets" / "euclid_logo.png"
 EUCLID_FAVICON_PATH = PROJECT_ROOT / "assets" / "favicon.png"
+LENS_GRADE_EXAMPLE_PATHS = {
+    grade: tuple(
+        PROJECT_ROOT
+        / "assets"
+        / "lens_grades"
+        / f"grade_{grade.lower()}_{index}.jpg"
+        for index in range(1, 4)
+    )
+    for grade in ("A", "B", "C")
+}
 
 MORPH_PATH = os.getenv(
     "MORPH_PATH",
@@ -80,14 +90,20 @@ DISPLAY_IMAGE_RENDER_SIZE_PX = 420
 ARC_DETECTION_CACHE_MAX_ITEMS = 64
 THUMBNAIL_CACHE_MAX_ITEMS = 512
 PCA_FILTER_OPERATORS = [">", ">=", "<", "<=", "between"]
-LENS_GRADE_HELP = (
-    "Grade A: secure or almost secure lens candidates with clear lensing features "
-    "(expert score > 2.0).\n\n"
-    "Grade B: probable lens candidates requiring additional confirmation "
-    "(expert score > 1.5).\n\n"
-    "Grade C: possible lens candidates with lens-like morphology that may still "
-    "be explained by other physical structures (expert score > 1.0)."
-)
+LENS_GRADE_HELP = {
+    "A": (
+        "Secure or almost secure lens candidates with clear lensing features "
+        "(expert score > 2.0)."
+    ),
+    "B": (
+        "Probable lens candidates requiring additional confirmation "
+        "(expert score > 1.5)."
+    ),
+    "C": (
+        "Possible lens candidates with lens-like morphology that may still be "
+        "explained by other physical structures (expert score > 1.0)."
+    ),
+}
 STRAIGHT_LINE_ARTIFACT_FILTER_HELP = (
     "Straight-line artifacts are identified with Canny edge detection and a "
     "probabilistic Hough transform. Candidate lines must be long, contain "

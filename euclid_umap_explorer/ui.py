@@ -36,6 +36,7 @@ from .components import (
     render_cluster_visual_summary_view_model,
     render_euclid_object_search,
     render_help_label,
+    render_lens_grade_help_label,
     render_pca_filter_controls,
     request_clustering,
     show_morphology_catalogue_row,
@@ -55,6 +56,7 @@ from .config import (
     DOWNLOAD_MAX_UMAP_ROWS,
     EUCLID_FAVICON_PATH,
     EUCLID_LOGO_PATH,
+    LENS_GRADE_EXAMPLE_PATHS,
     LENS_GRADE_HELP,
     LENS_GRADE_OPTIONS,
     LENS_PATH,
@@ -419,7 +421,11 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
 
         st.header("Lens candidates")
-        render_help_label("Lens grades", LENS_GRADE_HELP)
+        render_lens_grade_help_label(
+            "Lens grades",
+            LENS_GRADE_HELP,
+            LENS_GRADE_EXAMPLE_PATHS,
+        )
         selected_lens_grades = st.multiselect(
             "Lens grades",
             LENS_GRADE_OPTIONS,
