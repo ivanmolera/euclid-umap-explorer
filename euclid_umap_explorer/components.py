@@ -234,7 +234,7 @@ def inject_plot_cursor_css() -> None:
             width: 100%;
         }
         .concept-popover--lens-grades {
-            min-width: min(300px, calc(100vw - 2rem));
+            min-width: min(330px, calc(100vw - 2rem));
         }
         .lens-grade-help__section + .lens-grade-help__section {
             margin-top: 0.7rem;
@@ -248,17 +248,17 @@ def inject_plot_cursor_css() -> None:
         .lens-grade-help__thumbnail-grid {
             display: grid;
             gap: 0.35rem;
-            grid-template-columns: repeat(3, 70px);
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             margin-top: 0.4rem;
         }
         .lens-grade-help__thumbnail-grid img {
+            aspect-ratio: 1;
             background: #05080d;
             border: 1px solid rgba(148, 163, 184, 0.38);
             border-radius: 4px;
             display: block;
-            height: 70px;
             object-fit: contain;
-            width: 70px;
+            width: 100%;
         }
         .concept-help:hover .concept-popover,
         .concept-help:focus .concept-popover {
