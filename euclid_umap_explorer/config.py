@@ -27,7 +27,11 @@ PARQUET_PATH = os.getenv(
 STRAIGHT_LINE_FILTERED_PARQUET_PATH = os.getenv(
     "STRAIGHT_LINE_FILTERED_PARQUET_PATH",
     "gs://euclid-umap-ivan-0424-data/catalogues/morphology_catalogue/"
-    "representations_pca_40_artifacts_filtered_v1_supported_border_lines.parquet",
+    "representations_pca_40_artifacts_filtered_v2_global_hough_lines.parquet",
+)
+STRAIGHT_LINE_ARTIFACT_EXAMPLE_PATHS = tuple(
+    PROJECT_ROOT / "assets" / "straight_line_artifacts" / f"artifact_{index:02d}.jpg"
+    for index in range(1, 7)
 )
 LENS_PATH = os.getenv(
     "LENS_PATH",

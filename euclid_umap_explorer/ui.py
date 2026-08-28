@@ -61,6 +61,7 @@ from .config import (
     MAX_ALGORITHM_SECONDS,
     PARAMETER_HELP,
     PARQUET_PATH,
+    STRAIGHT_LINE_ARTIFACT_EXAMPLE_PATHS,
     STRAIGHT_LINE_ARTIFACT_FILTER_HELP,
     STRAIGHT_LINE_FILTERED_PARQUET_PATH,
 )
@@ -402,6 +403,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             render_help_label(
                 "Straight line artifacts filter",
                 STRAIGHT_LINE_ARTIFACT_FILTER_HELP,
+                thumbnail_paths=STRAIGHT_LINE_ARTIFACT_EXAMPLE_PATHS,
             )
         with artifact_filter_toggle_col:
             straight_line_filter_enabled = st.toggle(

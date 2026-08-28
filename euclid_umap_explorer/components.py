@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+from collections.abc import Sequence
 import hashlib
 import html
+from pathlib import Path
 import time
 from urllib.parse import quote
 
@@ -212,6 +214,24 @@ def inject_plot_cursor_css() -> None:
             left: 1.8rem;
             position: absolute;
             transform: translateX(-50%);
+        }
+        .concept-popover--with-thumbnails {
+            min-width: min(330px, calc(100vw - 2rem));
+        }
+        .concept-popover__thumbnail-grid {
+            display: grid;
+            gap: 0.35rem;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin-top: 0.65rem;
+        }
+        .concept-popover__thumbnail-grid img {
+            aspect-ratio: 1;
+            background: #05080d;
+            border: 1px solid rgba(148, 163, 184, 0.38);
+            border-radius: 4px;
+            display: block;
+            object-fit: contain;
+            width: 100%;
         }
         .concept-help:hover .concept-popover,
         .concept-help:focus .concept-popover {
@@ -1034,15 +1054,45 @@ def render_thumbnail_group_title(title: str) -> None:
         unsafe_allow_html=True,
     )
 
-def render_help_label(label: str, help_text: str) -> None:
+def _tooltip_thumbnail_grid(thumbnail_paths: Sequence[str | Path]) -> str:
+    thumbnails = []
+    for thumbnail_path in thumbnail_paths:
+        path = Path(thumbnail_path)
+        if not path.is_file():
+            continue
+        encoded_image = base64.b64encode(path.read_bytes()).decode("ascii")
+        thumbnails.append(
+            '<img src="data:image/jpeg;base64,'
+            f'{encoded_image}" alt="Excluded straight-line artifact example">'
+        )
+    if not thumbnails:
+        return ""
+    return (
+        '<div class="concept-popover__thumbnail-grid">'
+        + "".join(thumbnails)
+        + "</div>"
+    )
+
+
+def render_help_label(
+    label: str,
+    help_text: str,
+    thumbnail_paths: Sequence[str | Path] = (),
+) -> None:
     escaped_label = html.escape(label)
     escaped_help = html.escape(help_text).replace("\n", "<br>")
+    thumbnail_grid = _tooltip_thumbnail_grid(thumbnail_paths)
+    popover_class = (
+        "concept-popover concept-popover--with-thumbnails"
+        if thumbnail_grid
+        else "concept-popover"
+    )
     st.markdown(
         f"""
         <div style="font-size: 0.88rem; font-weight: 600; margin-bottom: 0.2rem;">
             <span class="concept-help" tabindex="0">
                 {escaped_label}
-                <span class="concept-popover">{escaped_help}</span>
+                <span class="{popover_class}">{escaped_help}{thumbnail_grid}</span>
             </span>
         </div>
         """,
