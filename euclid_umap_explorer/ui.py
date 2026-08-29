@@ -440,7 +440,10 @@ This analysis uses Euclid Q1 catalogue products available at:
             "cluster_requested"
         )
         with st.expander("BIRCH parameters", expanded=birch_expanded):
-            st.caption("All available PCA components are used for the initial clustering")
+            st.caption(
+                "All 40 available PCA components are used for the initial "
+                "unsupervised clustering"
+            )
             render_help_label("threshold", PARAMETER_HELP["threshold"])
             threshold = st.number_input(
                 "threshold",
