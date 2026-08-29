@@ -6,6 +6,7 @@ import pandas as pd
 from .catalogs import normalize_lens_grades
 from .config import LENS_GRADE_OPTIONS, PCA_FILTER_OPERATORS
 
+DEFAULT_PCA_SELECTION_PRESET = "Lens-displaced PCA components"
 PCA_SELECTION_PRESETS = [
     "Manual selection",
     "Top 10 PCA by explained variance",

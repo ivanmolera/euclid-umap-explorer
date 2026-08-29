@@ -6,6 +6,8 @@ import streamlit as st
 from PIL import Image
 
 from .analysis import (
+    DEFAULT_PCA_SELECTION_PRESET,
+    PCA_SELECTION_PRESETS,
     add_cluster_extreme_roles,
     apply_pca_filters,
     build_cluster_summary,
@@ -14,7 +16,6 @@ from .analysis import (
     format_cluster_option,
     format_pca_filter,
     normalize_pca_filters,
-    PCA_SELECTION_PRESETS,
     pca_filter_signature,
     pca_features_for_preset,
     sample_for_display,
@@ -609,7 +610,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         selected_pca_preset = st.selectbox(
             "PCA selection preset",
             PCA_SELECTION_PRESETS,
-            index=0,
+            index=PCA_SELECTION_PRESETS.index(DEFAULT_PCA_SELECTION_PRESET),
         )
         if selected_pca_preset != st.session_state.get("last_pca_selection_preset"):
             st.session_state["last_pca_selection_preset"] = selected_pca_preset
