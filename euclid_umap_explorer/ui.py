@@ -435,7 +435,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
         selected_lens_grades = normalize_lens_grades(selected_lens_grades)
 
-        st.header("BIRCH clustering")
+        st.header("Unsupervised clustering")
         birch_expanded = not st.session_state.get("cluster_ready") and not st.session_state.get(
             "cluster_requested"
         )
