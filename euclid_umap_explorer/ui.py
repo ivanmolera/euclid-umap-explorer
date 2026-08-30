@@ -598,11 +598,11 @@ This analysis uses Euclid Q1 catalogue products available at:
         "Lenses",
         format_thousands_dot(int(clustered_df["is_lens"].sum())),
     )
-    st.caption(f"Lens grades used: {', '.join(lens_grades)}")
     artifact_filter_used = bool(params.get("straight_line_artifacts_filter", False))
     st.caption(
-        "Straight line artifacts filter used: "
-        + ("On" if artifact_filter_used else "Off")
+        "Straight line artifacts filter: "
+        f"{'On' if artifact_filter_used else 'Off'}. "
+        f"Lens grades used: {', '.join(lens_grades)}"
     )
 
     with st.sidebar:

@@ -85,7 +85,7 @@ This workflow supports scientific triage: it narrows large Euclid catalogues to 
 - Supports object search by `object_id`.
 - Shows object metadata, selected PCA values, morphology-catalogue features, and available cutouts.
 - Links selected/search objects to Aladin for external sky inspection.
-- Provides a classical computer-vision button to highlight arc-like structures in cutouts.
+- Includes an offline notebook for experimental arc-like-structure detection.
 - Supports CSV export of clustering summaries and selected UMAP objects.
 
 ## Screenshots
@@ -111,7 +111,7 @@ The app provides several complementary visualizations:
 - Semi-supervised UMAP for subclusters guided by `A/B/C` candidate labels.
 - Dendrogram preview to guide the number of hierarchical subclusters.
 - Cutout inspection for selected or searched objects.
-- Optional arc-like-structure highlighting using classical computer vision.
+- Offline evaluation workflow for curve-aware arc-like-structure detection.
 
 ## PCA Threshold Recommendations
 
@@ -138,22 +138,11 @@ For each threshold, it reports:
 
 These thresholds are exploratory prioritization tools. They should not be interpreted as definitive classification rules.
 
-## Arc-Like Structure Detection
+## Experimental Arc-Like Structure Detection
 
-The cutout viewer includes a `Detect arc-like structures` toggle.
+Arc-like structure detection is being evaluated offline with representative Euclid cutouts. The controls are currently hidden in the application while a curve-aware algorithm is calibrated and validated. The [experimental Colab notebook](notebooks/euclid_arc_like_structure_detection_v2_colab.ipynb) combines multiscale background subtraction with polar geometry, tangential alignment, angular-span measurements, and straight-feature rejection.
 
-This feature uses classical computer-vision techniques, not deep learning:
-
-- robust grayscale normalization;
-- Gaussian smoothing;
-- local-background subtraction;
-- Sobel gradient magnitude;
-- percentile thresholding;
-- connected components;
-- geometric filtering by area, elongation, eccentricity, and fill fraction;
-- red overlay masks on candidate regions.
-
-The result is intended as a visual aid for identifying elongated or curved structures. It can produce false positives from spiral arms, edge-on galaxies, diffraction artifacts, interacting systems, or noise.
+This experimental output is a visual prioritization aid, not a lens classifier. Spiral arms, edge-on galaxies, diffraction artifacts, interacting systems, and noise can still produce false positives.
 
 ## Scientific Use
 
@@ -195,7 +184,7 @@ Set the required catalogue and image paths through environment variables:
 
 ```bash
 export PARQUET_PATH="gs://<bucket>/catalogues/morphology_catalogue/representations_pca_40.parquet"
-export STRAIGHT_LINE_FILTERED_PARQUET_PATH="gs://<bucket>/catalogues/morphology_catalogue/representations_pca_40_artifacts_filtered_v2_global_hough_lines.parquet"
+export STRAIGHT_LINE_FILTERED_PARQUET_PATH="gs://<bucket>/catalogues/morphology_catalogue/representations_pca_40_artifacts_filtered_v3_1_optimized_multiscale_hough_lines.parquet"
 export LENS_PATH="gs://<bucket>/catalogues/strong_lensing_catalogue/q1_discovery_engine_lens_catalog.csv"
 export CUTOUT_BASE="gs://<bucket>/catalogues/morphology_catalogue/cutouts_jpg_gz_arcsinh_vis_only"
 export LENS_IMG_BASE="gs://<bucket>/catalogues/strong_lensing_catalogue/lens"

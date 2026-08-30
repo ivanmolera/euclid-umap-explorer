@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APP_TITLE_LINE_1 = "Euclid Strong-lensing Candidate Observation"
 APP_TITLE_LINE_2 = "and Projection Explorer"
 APP_TITLE = f"{APP_TITLE_LINE_1} {APP_TITLE_LINE_2}"
-APP_VERSION = "v0.1.14"
+APP_VERSION = "v0.1.15"
 EUCLID_LOGO_PATH = PROJECT_ROOT / "assets" / "euclid_logo.png"
 EUCLID_FAVICON_PATH = PROJECT_ROOT / "assets" / "favicon.png"
 LENS_GRADE_EXAMPLE_PATHS = {
@@ -37,7 +37,7 @@ PARQUET_PATH = os.getenv(
 STRAIGHT_LINE_FILTERED_PARQUET_PATH = os.getenv(
     "STRAIGHT_LINE_FILTERED_PARQUET_PATH",
     "gs://euclid-umap-ivan-0424-data/catalogues/morphology_catalogue/"
-    "representations_pca_40_artifacts_filtered_v2_global_hough_lines.parquet",
+    "representations_pca_40_artifacts_filtered_v3_1_optimized_multiscale_hough_lines.parquet",
 )
 STRAIGHT_LINE_ARTIFACT_EXAMPLE_PATHS = tuple(
     PROJECT_ROOT / "assets" / "straight_line_artifacts" / f"artifact_{index:02d}.jpg"
@@ -56,8 +56,8 @@ CACHE_DIR = Path(
 )
 USE_LOCAL_CACHE = os.getenv("EUCLID_USE_LOCAL_CACHE", "1") != "0"
 MAX_ALGORITHM_SECONDS = int(os.getenv("EUCLID_MAX_ALGORITHM_SECONDS", "600"))
-DEFAULT_BIRCH_THRESHOLD = 8.0
-DEFAULT_BIRCH_BRANCHING_FACTOR = 2
+DEFAULT_BIRCH_THRESHOLD = 5.0
+DEFAULT_BIRCH_BRANCHING_FACTOR = 50
 DEFAULT_BIRCH_BATCH_SIZE = 25_000
 
 DEFAULT_CLUSTER_FEATURES = [
@@ -72,6 +72,7 @@ DEFAULT_LENS_GRADES = ["A", "B", "C"]
 LENS_GRADE_OPTIONS = ["A", "B", "C"]
 SUMMARY_RANDOM_OBJECTS = 3
 SUMMARY_LENS_OBJECTS = 5
+SUMMARY_VISUAL_CLUSTER_LIMIT = 20
 SUMMARY_THUMBNAIL_WIDTH = 90
 SUMMARY_THUMBNAIL_PIXEL_SIZE = 180
 SUMMARY_HISTOGRAM_BINS = 24
@@ -88,6 +89,9 @@ DISPLAY_IMAGE_CACHE_MAX_ITEMS = 128
 DISPLAY_IMAGE_MAX_PIXEL_SIZE = 900
 DISPLAY_IMAGE_RENDER_SIZE_PX = 420
 ARC_DETECTION_CACHE_MAX_ITEMS = 64
+ENABLE_ARC_LIKE_STRUCTURE_DETECTION = (
+    os.getenv("EUCLID_ENABLE_ARC_DETECTION", "0") == "1"
+)
 THUMBNAIL_CACHE_MAX_ITEMS = 512
 PCA_FILTER_OPERATORS = [">", ">=", "<", "<=", "between"]
 LENS_GRADE_HELP = {

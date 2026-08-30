@@ -13,7 +13,6 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as st_components
 
-from .arc_detection_cv import detect_arc_overlay_src
 from .analysis import (
     add_cluster_extreme_roles,
     format_pca_filter,
@@ -23,6 +22,7 @@ from .catalogs import load_lens_catalog, load_morphology_object, normalize_objec
 from .config import (
     CUTOUT_BASE,
     DEFAULT_CLUSTER_FEATURES,
+    ENABLE_ARC_LIKE_STRUCTURE_DETECTION,
     LENS_GRADE_OPTIONS,
     LENS_IMG_BASE,
     LENS_PATH,
@@ -38,6 +38,7 @@ from .config import (
     SUMMARY_LENS_OBJECTS,
     SUMMARY_RANDOM_OBJECTS,
     SUMMARY_THUMBNAIL_WIDTH,
+    SUMMARY_VISUAL_CLUSTER_LIMIT,
 )
 from .downloads import dataframe_to_csv_bytes, object_search_download_df
 from .euclid_search import fetch_euclid_object_summary
@@ -665,28 +666,35 @@ def show_thumbnail_group(
         with column:
             show_thumbnail(row, caption, prefer_lens_image=prefer_lens_image)
 
+def cluster_extreme_rows(
+    cluster_df: pd.DataFrame,
+    summary_features: list[str],
+) -> tuple[pd.Series | None, pd.Series | None]:
+    marked = add_cluster_extreme_roles(cluster_df, summary_features)
+    canonical_rows = marked[marked["is_canonical"]]
+    anomaly_rows = marked[marked["is_anomaly"]]
+    canonical_row = canonical_rows.iloc[0] if not canonical_rows.empty else None
+    anomaly_row = anomaly_rows.iloc[0] if not anomaly_rows.empty else None
+    return canonical_row, anomaly_row
+
 def cluster_visual_rows(
     cluster_df: pd.DataFrame,
     summary_features: list[str],
     cluster_id: int,
 ) -> tuple[pd.Series | None, pd.Series | None, list[pd.Series], list[pd.Series]]:
-    marked = add_cluster_extreme_roles(cluster_df, summary_features)
-
-    canonical_rows = marked[marked["is_canonical"]]
-    anomaly_rows = marked[marked["is_anomaly"]]
-    canonical_row = canonical_rows.iloc[0] if not canonical_rows.empty else None
-    anomaly_row = anomaly_rows.iloc[0] if not anomaly_rows.empty else None
+    canonical_row, anomaly_row = cluster_extreme_rows(cluster_df, summary_features)
 
     used_object_ids = {
         str(row.get("object_id"))
         for row in (canonical_row, anomaly_row)
         if row is not None and not pd.isna(row.get("object_id"))
     }
-    random_pool = cluster_df[
-        ~cluster_df["object_id"].astype("string").isin(used_object_ids)
+    unknown_pool = cluster_df[~cluster_df["is_lens"].fillna(False).astype(bool)]
+    random_pool = unknown_pool[
+        ~unknown_pool["object_id"].astype("string").isin(used_object_ids)
     ]
     if random_pool.empty:
-        random_pool = cluster_df
+        random_pool = unknown_pool
     random_rows = random_pool.sample(
         n=min(SUMMARY_RANDOM_OBJECTS, len(random_pool)),
         random_state=int(cluster_id) + 17,
@@ -1227,6 +1235,7 @@ def cluster_summary_signature(
         cluster_values,
         tuple(pca_columns),
         tuple(selected_features),
+        SUMMARY_VISUAL_CLUSTER_LIMIT,
     )
 
 def summary_features_for_visuals(
@@ -1248,15 +1257,24 @@ def build_cluster_summary_view_model(
     histogram_features = summary_features[:SUMMARY_HISTOGRAM_FEATURE_LIMIT]
     cluster_download_rows = []
     visual_clusters = []
+    cluster_groups = clustered_df.groupby("cluster", sort=False)
 
-    for _, summary_row in cluster_summary_df.iterrows():
+    for position, (_, summary_row) in enumerate(cluster_summary_df.iterrows()):
         cluster_id = int(summary_row["cluster"])
-        cluster_df = clustered_df[clustered_df["cluster"] == cluster_id].copy()
-        canonical_row, anomaly_row, random_rows, lens_rows = cluster_visual_rows(
-            cluster_df,
-            summary_features,
-            cluster_id,
-        )
+        cluster_df = cluster_groups.get_group(cluster_id).copy()
+        include_visual_preview = position < SUMMARY_VISUAL_CLUSTER_LIMIT
+        if include_visual_preview:
+            canonical_row, anomaly_row, random_rows, lens_rows = cluster_visual_rows(
+                cluster_df,
+                summary_features,
+                cluster_id,
+            )
+        else:
+            canonical_row, anomaly_row = cluster_extreme_rows(
+                cluster_df,
+                summary_features,
+            )
+            random_rows, lens_rows = [], []
         canonical = ""
         anomalous = ""
         if canonical_row is not None:
@@ -1275,6 +1293,9 @@ def build_cluster_summary_view_model(
                 "anomalous": anomalous,
             }
         )
+
+        if not include_visual_preview:
+            continue
 
         lens_captions = []
         for row in lens_rows:
@@ -1303,12 +1324,20 @@ def build_cluster_summary_view_model(
         "cluster_download_df": pd.DataFrame(cluster_download_rows),
         "histogram_features": histogram_features,
         "clusters": visual_clusters,
+        "total_clusters": len(cluster_download_rows),
     }
 
 def render_cluster_visual_summary_view_model(
     view_model: dict,
     clustered_df: pd.DataFrame,
 ) -> None:
+    total_clusters = int(view_model.get("total_clusters", len(view_model["clusters"])))
+    visible_clusters = len(view_model["clusters"])
+    if total_clusters > visible_clusters:
+        st.caption(
+            "Showing visual previews for the first "
+            f"{visible_clusters} of {format_thousands_dot(total_clusters)} clusters."
+        )
     for cluster_model in view_model["clusters"]:
         cluster_id = int(cluster_model["cluster_id"])
 
@@ -1396,6 +1425,16 @@ def show_detectable_image(
     label: str,
     caption_markdown: str | None = None,
 ) -> None:
+    if not ENABLE_ARC_LIKE_STRUCTURE_DETECTION:
+        try:
+            image_src = display_image_src(path)
+        except Exception as exc:
+            st.warning(f"Could not open the image: {exc}")
+            return
+        render_image_src(image_src, caption)
+        render_image_caption(caption, caption_markdown)
+        return
+
     key_digest = hashlib.sha1(str(path).encode("utf-8")).hexdigest()[:12]
     button_key = f"detect_arc_like_structures_{label}_{key_digest}"
     active_key = f"{button_key}_active"
@@ -1403,6 +1442,8 @@ def show_detectable_image(
 
     if active:
         try:
+            from .arc_detection_cv import detect_arc_overlay_src
+
             image_src = detect_arc_overlay_src(path)
         except Exception as exc:
             st.warning(f"Could not run arc-like structure detection: {exc}")
@@ -1688,7 +1729,18 @@ def render_euclid_object_search(object_id: str) -> None:
             )
             st.dataframe(mosaic_display, use_container_width=True, hide_index=True)
         with summary_col:
-            st.markdown("**Object summary**")
+            object_summary_title = "**Object summary**"
+            lens_candidate_grade = str(
+                lens_candidate_summary.get("lens_candidate_grade", "")
+            ).strip()
+            if (
+                lens_candidate_summary.get("is_lens_candidate") == "Yes"
+                and lens_candidate_grade
+            ):
+                object_summary_title += (
+                    f" (Lens candidate grade {lens_candidate_grade})"
+                )
+            st.markdown(object_summary_title)
             object_display = pd.DataFrame(
                 object_summary_display_rows(object_summary)
             )
