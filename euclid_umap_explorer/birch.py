@@ -17,22 +17,41 @@ def _run_birch_clustering_impl(
     threshold: float,
     branching_factor: int,
     batch_size: int,
+    selected_features: tuple[str, ...],
+    scaling: str,
 ) -> tuple[pd.DataFrame, list[str]]:
     from sklearn.cluster import Birch
-    from sklearn.preprocessing import StandardScaler
 
     started_at = time.perf_counter()
     work_df, feature_cols = load_pca_catalog(parquet_path)
     lens_df = load_lens_catalog(lens_path, selected_grades)
 
-    scaler = StandardScaler()
-    for start in range(0, len(work_df), batch_size):
-        end = min(start + batch_size, len(work_df))
-        x_batch = work_df.iloc[start:end][feature_cols].to_numpy(
-            dtype=np.float32,
-            copy=True,
+    missing_features = [
+        feature for feature in selected_features if feature not in feature_cols
+    ]
+    if missing_features:
+        raise ValueError(
+            "BIRCH features are missing from the PCA catalogue: "
+            + ", ".join(missing_features)
         )
-        scaler.partial_fit(x_batch)
+    if not selected_features:
+        raise ValueError("Select at least one PCA feature for BIRCH clustering.")
+    if scaling not in {"none", "standard"}:
+        raise ValueError(f"Unsupported BIRCH feature scaling: {scaling}")
+
+    birch_feature_cols = list(selected_features)
+    scaler = None
+    if scaling == "standard":
+        from sklearn.preprocessing import StandardScaler
+
+        scaler = StandardScaler()
+        for start in range(0, len(work_df), batch_size):
+            end = min(start + batch_size, len(work_df))
+            x_batch = work_df.iloc[start:end][birch_feature_cols].to_numpy(
+                dtype=np.float32,
+                copy=True,
+            )
+            scaler.partial_fit(x_batch)
 
     cluster_model = Birch(
         threshold=threshold,
@@ -42,11 +61,12 @@ def _run_birch_clustering_impl(
     )
     for start in range(0, len(work_df), batch_size):
         end = min(start + batch_size, len(work_df))
-        x_batch = work_df.iloc[start:end][feature_cols].to_numpy(
+        x_batch = work_df.iloc[start:end][birch_feature_cols].to_numpy(
             dtype=np.float32,
             copy=True,
         )
-        x_batch = scaler.transform(x_batch, copy=False)
+        if scaler is not None:
+            x_batch = scaler.transform(x_batch).astype(np.float32, copy=False)
         cluster_model.partial_fit(x_batch)
 
     cluster_model.partial_fit()
@@ -54,11 +74,12 @@ def _run_birch_clustering_impl(
     labels = np.empty(len(work_df), dtype=np.int32)
     for start in range(0, len(work_df), batch_size):
         end = min(start + batch_size, len(work_df))
-        x_batch = work_df.iloc[start:end][feature_cols].to_numpy(
+        x_batch = work_df.iloc[start:end][birch_feature_cols].to_numpy(
             dtype=np.float32,
             copy=True,
         )
-        x_batch = scaler.transform(x_batch, copy=False)
+        if scaler is not None:
+            x_batch = scaler.transform(x_batch).astype(np.float32, copy=False)
         labels[start:end] = cluster_model.predict(x_batch)
 
     clustered_df = work_df.copy()
@@ -71,7 +92,9 @@ def _run_birch_clustering_impl(
         "birch_clustering_computed",
         duration_seconds=round(duration_seconds, 3),
         n_objects=int(len(clustered_df)),
-        n_features=int(len(feature_cols)),
+        n_features=int(len(birch_feature_cols)),
+        features=birch_feature_cols,
+        scaling=scaling,
         n_clusters=int(clustered_df["cluster"].nunique()),
         n_lenses=int(clustered_df["is_lens"].sum()),
         selected_grades=list(selected_grades),
@@ -89,6 +112,8 @@ def run_birch_clustering(
     threshold: float,
     branching_factor: int,
     batch_size: int,
+    selected_features: tuple[str, ...],
+    scaling: str,
 ) -> tuple[pd.DataFrame, list[str]]:
     return run_with_timeout(
         _run_birch_clustering_impl,
@@ -98,5 +123,7 @@ def run_birch_clustering(
         threshold,
         branching_factor,
         batch_size,
+        selected_features,
+        scaling,
         timeout_seconds=MAX_ALGORITHM_SECONDS,
     )

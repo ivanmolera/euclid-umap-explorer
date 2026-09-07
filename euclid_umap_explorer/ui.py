@@ -51,9 +51,16 @@ from .config import (
     DENDROGRAM_TRUNCATE_CLUSTERS,
     DEFAULT_BIRCH_BATCH_SIZE,
     DEFAULT_BIRCH_BRANCHING_FACTOR,
+    DEFAULT_BIRCH_FEATURES,
+    DEFAULT_BIRCH_SCALING,
     DEFAULT_BIRCH_THRESHOLD,
     DEFAULT_CLUSTER_FEATURES,
     DEFAULT_LENS_GRADES,
+    DEFAULT_SEMISUPERVISED_UMAP_MIN_DIST,
+    DEFAULT_SEMISUPERVISED_UMAP_N_NEIGHBORS,
+    DEFAULT_SEMISUPERVISED_UMAP_TARGET_WEIGHT,
+    DEFAULT_UMAP_MIN_DIST,
+    DEFAULT_UMAP_N_NEIGHBORS,
     DOWNLOAD_MAX_UMAP_ROWS,
     EUCLID_FAVICON_PATH,
     EUCLID_LOGO_PATH,
@@ -441,8 +448,9 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
         with st.expander("BIRCH parameters", expanded=birch_expanded):
             st.caption(
-                "All 40 available PCA components are used for the initial "
-                "unsupervised clustering"
+                "The benchmark-informed preset uses 8 lens-displaced PCA "
+                "components without feature scaling. BIRCH itself does not "
+                "receive lens-candidate labels."
             )
             render_help_label("threshold", PARAMETER_HELP["threshold"])
             threshold = st.number_input(
@@ -508,6 +516,8 @@ This analysis uses Euclid Q1 catalogue products available at:
             "batch_size": int(batch_size),
             "parquet_path": selected_parquet_path,
             "straight_line_artifacts_filter": straight_line_filter_enabled,
+            "birch_features": DEFAULT_BIRCH_FEATURES,
+            "birch_scaling": DEFAULT_BIRCH_SCALING,
         }
         st.session_state["cluster_summary_expanded"] = False
         log_app_event(
@@ -516,6 +526,8 @@ This analysis uses Euclid Q1 catalogue products available at:
             threshold=float(threshold),
             branching_factor=int(branching_factor),
             batch_size=int(batch_size),
+            features=list(DEFAULT_BIRCH_FEATURES),
+            scaling=DEFAULT_BIRCH_SCALING,
             straight_line_artifacts_filter=straight_line_filter_enabled,
         )
 
@@ -547,6 +559,8 @@ This analysis uses Euclid Q1 catalogue products available at:
                 float(params["threshold"]),
                 int(params["branching_factor"]),
                 int(params["batch_size"]),
+                tuple(params.get("birch_features", DEFAULT_BIRCH_FEATURES)),
+                str(params.get("birch_scaling", DEFAULT_BIRCH_SCALING)),
             )
             st.session_state["cluster_result"] = (clustered_df, pca_columns)
             st.session_state["cluster_summary_df"] = build_cluster_summary(clustered_df)
@@ -731,7 +745,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                     "n_neighbors",
                     2,
                     50,
-                    10,
+                    DEFAULT_UMAP_N_NEIGHBORS,
                     label_visibility="collapsed",
                 )
             with umap_param_cols[1]:
@@ -740,7 +754,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                     "min_dist",
                     0.0,
                     1.0,
-                    0.15,
+                    DEFAULT_UMAP_MIN_DIST,
                     step=0.01,
                     label_visibility="collapsed",
                 )
@@ -1171,7 +1185,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                         "n_neighbors",
                         2,
                         50,
-                        10,
+                        DEFAULT_SEMISUPERVISED_UMAP_N_NEIGHBORS,
                         key="semisupervised_n_neighbors",
                         label_visibility="collapsed",
                     )
@@ -1184,7 +1198,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                         "min_dist",
                         0.0,
                         1.0,
-                        0.15,
+                        DEFAULT_SEMISUPERVISED_UMAP_MIN_DIST,
                         step=0.01,
                         key="semisupervised_min_dist",
                         label_visibility="collapsed",
@@ -1203,6 +1217,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 tuple(selected_features),
                 int(semi_n_neighbors),
                 round(float(semi_min_dist), 4),
+                DEFAULT_SEMISUPERVISED_UMAP_TARGET_WEIGHT,
             )
             semi_df = st.session_state.get("semisupervised_umap_df")
             if st.session_state.get("semisupervised_umap_signature") != semi_signature:
@@ -1227,6 +1242,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                         selected_features,
                         semi_n_neighbors,
                         semi_min_dist,
+                        DEFAULT_SEMISUPERVISED_UMAP_TARGET_WEIGHT,
                     )
                 except AlgorithmTimeoutError as exc:
                     log_app_event(

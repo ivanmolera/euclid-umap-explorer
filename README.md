@@ -1,6 +1,6 @@
-# Euclid UMAP Explorer
+# ESCOPE
 
-Euclid UMAP Explorer is a Streamlit web application for exploratory analysis of Euclid astronomical objects, morphology-based PCA representations, and labelled strong-lensing candidates.
+ESCOPE (Euclid Strong-lensing Candidate Observation and Projection Explorer) is a Streamlit web application for exploratory analysis of Euclid astronomical objects, morphology-based PCA representations, and labelled strong-lensing candidates.
 
 The application is designed to help identify regions of morphology/PCA space that are enriched in strong-lens candidates, inspect those regions visually, and prioritize unlabelled objects that may be scientifically interesting for follow-up.
 
@@ -48,7 +48,7 @@ The user can select which grades are included in the analysis. By default, grade
 
 The intended workflow is:
 
-1. Run BIRCH clustering over all available PCA components.
+1. Run BIRCH clustering with the benchmark-informed PCA preset.
 2. Compute lens-candidate density per cluster.
 3. Inspect the clustering summary and visual examples.
 4. Select clusters with high lens-candidate density.
@@ -60,6 +60,16 @@ The intended workflow is:
 
 This workflow supports scientific triage: it narrows large Euclid catalogues to smaller, enriched regions where follow-up inspection is more efficient.
 
+## Benchmark-Informed Defaults
+
+The default parameters were selected from the ESCOPE stability benchmark to balance hidden-label recovery, candidate enrichment, and reproducibility:
+
+- **BIRCH**: straight-line-artifact-filtered catalogue, lens-displaced PCA components `6, 0, 12, 1, 27, 10, 8, 13`, no feature scaling, `threshold=5.0`, `branching_factor=25`, and `batch_size=25000`.
+- **Unsupervised UMAP**: the selected PCA components with standard scaling, `n_neighbors=10`, `min_dist=0.0`, Euclidean distance, and `random_state=42`.
+- **Semi-supervised UMAP**: the selected PCA components with standard scaling, `n_neighbors=10`, `min_dist=0.15`, `target_weight=0.5`, Euclidean input distance, categorical target distance, and `random_state=42`.
+
+The BIRCH estimator remains unsupervised: candidate labels are not passed to `fit`. However, the default eight-component feature set was selected using prior label-displacement analysis, so this preset should be described as label-informed candidate prioritization rather than a strictly label-independent baseline.
+
 ## Features
 
 - Loads PCA catalogues such as `representations_pca_40.parquet`.
@@ -68,7 +78,7 @@ This workflow supports scientific triage: it narrows large Euclid catalogues to 
 - Derives `object_id` from `id_str` when required.
 - Loads and joins a lens-candidate catalogue through `object_id`.
 - Lets the user select lens grades included in the analysis.
-- Runs BIRCH clustering using all available PCA components.
+- Runs BIRCH clustering with a benchmark-informed lens-displaced PCA preset.
 - Computes cluster-level lens-candidate density.
 - Selects by default a cluster enriched in lens candidates.
 - Provides visual cluster summaries with:
@@ -146,7 +156,7 @@ This experimental output is a visual prioritization aid, not a lens classifier. 
 
 ## Scientific Use
 
-Strong gravitational lenses are rare. Searching for them in large imaging surveys requires efficient prioritization strategies. Euclid UMAP Explorer helps by combining morphology-space clustering, labelled-candidate density, PCA filtering, and visual inspection.
+Strong gravitational lenses are rare. Searching for them in large imaging surveys requires efficient prioritization strategies. ESCOPE helps by combining morphology-space clustering, labelled-candidate density, PCA filtering, and visual inspection.
 
 The app can help answer questions such as:
 
@@ -164,7 +174,7 @@ The outputs of the app can be used to guide unsupervised or weakly supervised gr
 
 A practical strategy is:
 
-1. Run BIRCH clustering over the full PCA catalogue.
+1. Run BIRCH clustering over the catalogue with the benchmark-informed PCA preset.
 2. Rank clusters by lens-candidate density.
 3. Inspect enriched clusters visually.
 4. Compute PCA histograms and threshold recommendations.

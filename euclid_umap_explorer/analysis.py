@@ -4,7 +4,11 @@ import numpy as np
 import pandas as pd
 
 from .catalogs import normalize_lens_grades
-from .config import LENS_GRADE_OPTIONS, PCA_FILTER_OPERATORS
+from .config import (
+    LENS_DISPLACED_PCA_FEATURES,
+    LENS_GRADE_OPTIONS,
+    PCA_FILTER_OPERATORS,
+)
 
 DEFAULT_PCA_SELECTION_PRESET = "Lens-displaced PCA components"
 PCA_SELECTION_PRESETS = [
@@ -52,16 +56,7 @@ PCA_TOP_10_BY_MUTUAL_INFORMATION = [
     "feat_pca_13",
     "feat_pca_22",
 ]
-PCA_LENS_DISPLACED_COMPONENTS = [
-    "feat_pca_6",
-    "feat_pca_0",
-    "feat_pca_12",
-    "feat_pca_1",
-    "feat_pca_27",
-    "feat_pca_10",
-    "feat_pca_8",
-    "feat_pca_13",
-]
+PCA_LENS_DISPLACED_COMPONENTS = list(LENS_DISPLACED_PCA_FEATURES)
 PCA_PRESET_FEATURES = {
     "Top 10 PCA by explained variance": PCA_TOP_10_BY_EXPLAINED_VARIANCE,
     "Top 10 PCA by Random Forest importance": PCA_TOP_10_BY_RANDOM_FOREST_IMPORTANCE,

@@ -5,7 +5,14 @@ import time
 import pandas as pd
 
 from .analysis import cluster_lens_grades, pca_filter_signature
-from .config import LENS_PATH, MAX_ALGORITHM_SECONDS, PARQUET_PATH
+from .config import (
+    DEFAULT_BIRCH_FEATURES,
+    DEFAULT_BIRCH_SCALING,
+    DEFAULT_SEMISUPERVISED_UMAP_TARGET_WEIGHT,
+    LENS_PATH,
+    MAX_ALGORITHM_SECONDS,
+    PARQUET_PATH,
+)
 from .runtime import log_app_event, run_with_timeout
 
 
@@ -95,6 +102,7 @@ def _compute_semisupervised_umap_embedding_impl(
     selected_features: list[str],
     n_neighbors: int,
     min_dist: float,
+    target_weight: float,
 ) -> pd.DataFrame:
     import umap
     from sklearn.preprocessing import StandardScaler
@@ -111,6 +119,7 @@ def _compute_semisupervised_umap_embedding_impl(
             n_features=int(len(selected_features)),
             n_neighbors=int(n_neighbors),
             min_dist=float(min_dist),
+            target_weight=float(target_weight),
         )
         return clean
 
@@ -123,6 +132,7 @@ def _compute_semisupervised_umap_embedding_impl(
         min_dist=min_dist,
         metric="euclidean",
         target_metric="categorical",
+        target_weight=target_weight,
         random_state=42,
     )
     embedding = reducer.fit_transform(scaled, y=targets.to_numpy())
@@ -147,6 +157,7 @@ def _compute_semisupervised_umap_embedding_impl(
         n_features=int(len(selected_features)),
         n_neighbors=int(n_neighbors),
         min_dist=float(min_dist),
+        target_weight=float(target_weight),
         labelled_objects=int((targets >= 0).sum()),
     )
     return clean
@@ -157,6 +168,7 @@ def compute_semisupervised_umap_embedding(
     selected_features: list[str],
     n_neighbors: int,
     min_dist: float,
+    target_weight: float = DEFAULT_SEMISUPERVISED_UMAP_TARGET_WEIGHT,
 ) -> pd.DataFrame:
     return run_with_timeout(
         _compute_semisupervised_umap_embedding_impl,
@@ -164,6 +176,7 @@ def compute_semisupervised_umap_embedding(
         selected_features,
         n_neighbors,
         min_dist,
+        target_weight,
         timeout_seconds=MAX_ALGORITHM_SECONDS,
     )
 
@@ -185,6 +198,8 @@ def build_umap_signature(
         float(cluster_params["threshold"]),
         int(cluster_params["branching_factor"]),
         int(cluster_params["batch_size"]),
+        tuple(cluster_params.get("birch_features", DEFAULT_BIRCH_FEATURES)),
+        str(cluster_params.get("birch_scaling", DEFAULT_BIRCH_SCALING)),
         int(selected_cluster),
         tuple(selected_features),
         pca_filter_signature(pca_filters),
