@@ -48,7 +48,7 @@ The user can select which grades are included in the analysis. By default, grade
 
 The intended workflow is:
 
-1. Run BIRCH clustering with the benchmark-informed PCA preset.
+1. Run BIRCH clustering over all 40 standardized PCA components.
 2. Compute lens-candidate density per cluster.
 3. Inspect the clustering summary and visual examples.
 4. Select clusters with high lens-candidate density.
@@ -64,11 +64,11 @@ This workflow supports scientific triage: it narrows large Euclid catalogues to 
 
 The default parameters were selected from the ESCOPE stability benchmark to balance hidden-label recovery, candidate enrichment, and reproducibility:
 
-- **BIRCH**: straight-line-artifact-filtered catalogue, lens-displaced PCA components `6, 0, 12, 1, 27, 10, 8, 13`, no feature scaling, `threshold=5.0`, `branching_factor=25`, and `batch_size=25000`.
+- **BIRCH**: straight-line-artifact-filtered catalogue, all 40 PCA components, standard feature scaling, `threshold=6.2`, `branching_factor=50`, and `batch_size=25000`.
 - **Unsupervised UMAP**: the selected PCA components with standard scaling, `n_neighbors=10`, `min_dist=0.0`, Euclidean distance, and `random_state=42`.
 - **Semi-supervised UMAP**: the selected PCA components with standard scaling, `n_neighbors=10`, `min_dist=0.15`, `target_weight=0.5`, Euclidean input distance, categorical target distance, and `random_state=42`.
 
-The BIRCH estimator remains unsupervised: candidate labels are not passed to `fit`. However, the default eight-component feature set was selected using prior label-displacement analysis, so this preset should be described as label-informed candidate prioritization rather than a strictly label-independent baseline.
+The initial BIRCH stage is strictly unsupervised: candidate labels are neither used to select its features nor passed to `fit`. Lens labels are used only after clustering to measure candidate density and enrichment. The lens-displaced components `6, 0, 12, 1, 27, 10, 8, 13` remain the default selection for downstream PCA filtering and UMAP exploration.
 
 ## Features
 
@@ -78,7 +78,7 @@ The BIRCH estimator remains unsupervised: candidate labels are not passed to `fi
 - Derives `object_id` from `id_str` when required.
 - Loads and joins a lens-candidate catalogue through `object_id`.
 - Lets the user select lens grades included in the analysis.
-- Runs BIRCH clustering with a benchmark-informed lens-displaced PCA preset.
+- Runs BIRCH clustering using all 40 standardized PCA components.
 - Computes cluster-level lens-candidate density.
 - Selects by default a cluster enriched in lens candidates.
 - Provides visual cluster summaries with:
@@ -174,7 +174,7 @@ The outputs of the app can be used to guide unsupervised or weakly supervised gr
 
 A practical strategy is:
 
-1. Run BIRCH clustering over the catalogue with the benchmark-informed PCA preset.
+1. Run BIRCH clustering over the catalogue using all 40 standardized PCA components.
 2. Rank clusters by lens-candidate density.
 3. Inspect enriched clusters visually.
 4. Compute PCA histograms and threshold recommendations.

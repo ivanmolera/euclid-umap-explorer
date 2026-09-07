@@ -448,9 +448,9 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
         with st.expander("BIRCH parameters", expanded=birch_expanded):
             st.caption(
-                "The benchmark-informed preset uses 8 lens-displaced PCA "
-                "components without feature scaling. BIRCH itself does not "
-                "receive lens-candidate labels."
+                "All 40 available PCA components are standardized and used for "
+                "the initial unsupervised clustering. Lens-candidate labels are "
+                "not used to select features or fit BIRCH."
             )
             render_help_label("threshold", PARAMETER_HELP["threshold"])
             threshold = st.number_input(
