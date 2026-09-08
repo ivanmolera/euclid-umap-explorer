@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APP_TITLE_LINE_1 = "Euclid Strong-lensing Candidate Observation"
 APP_TITLE_LINE_2 = "and Projection Explorer"
 APP_TITLE = f"{APP_TITLE_LINE_1} {APP_TITLE_LINE_2}"
-APP_VERSION = "v0.1.15"
+APP_VERSION = "v0.1.16"
 EUCLID_LOGO_PATH = PROJECT_ROOT / "assets" / "euclid_logo.png"
 EUCLID_FAVICON_PATH = PROJECT_ROOT / "assets" / "favicon.png"
 LENS_GRADE_EXAMPLE_PATHS = {
@@ -81,6 +81,32 @@ DEFAULT_SEMISUPERVISED_UMAP_TARGET_WEIGHT = 0.5
 DEFAULT_CLUSTER_FEATURES = list(LENS_DISPLACED_PCA_FEATURES)
 DEFAULT_LENS_GRADES = ["A", "B", "C"]
 LENS_GRADE_OPTIONS = ["A", "B", "C"]
+UMAP_POINT_COLORS = {
+    "Grade A": "#d62728",
+    "Grade B": "#ff7f0e",
+    "Grade C": "#f2c94c",
+    "Lens candidate": "#d62728",
+    "Unknown": "#4c78a8",
+    "Canonical": "#2ca02c",
+    "Anomaly": "#111111",
+}
+UMAP_POINT_SYMBOLS = {
+    "Grade A": "circle",
+    "Grade B": "circle",
+    "Grade C": "circle",
+    "Lens candidate": "circle",
+    "Unknown": "circle",
+    "Canonical": "diamond",
+    "Anomaly": "x",
+}
+UMAP_POINT_ORDER = [
+    "Grade A",
+    "Grade B",
+    "Grade C",
+    "Unknown",
+    "Canonical",
+    "Anomaly",
+]
 SUMMARY_RANDOM_OBJECTS = 3
 SUMMARY_LENS_OBJECTS = 5
 SUMMARY_VISUAL_CLUSTER_LIMIT = 20
@@ -146,6 +172,10 @@ PARAMETER_HELP = {
     "min_dist": (
         "Minimum distance between nearby points in the UMAP layout. Lower values "
         "form tighter groups; higher values spread points out."
+    ),
+    "target_weight": (
+        "Relative influence of the A/B/C labels on the semi-supervised UMAP. "
+        "A value of 0 uses only morphology; larger values give labels more influence."
     ),
     "Maximum objects": (
         "Upper limit for objects drawn in the UMAP view, used to keep interaction "

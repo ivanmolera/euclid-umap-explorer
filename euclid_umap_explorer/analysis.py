@@ -202,6 +202,24 @@ def add_cluster_extreme_roles(
     return marked
 
 
+def umap_point_labels(data: pd.DataFrame) -> pd.Series:
+    """Return the shared A/B/C/Unknown labels used by both UMAP views."""
+    labels = pd.Series("Unknown", index=data.index, dtype="string")
+    if "lens_grade" in data.columns:
+        grades = data["lens_grade"].astype("string").str.strip().str.upper()
+        grade_labels = grades.map({"A": "Grade A", "B": "Grade B", "C": "Grade C"})
+        lens_mask = data.get("is_lens", grades.isin(("A", "B", "C"))).astype(bool)
+        labels.loc[lens_mask] = grade_labels.loc[lens_mask].fillna("Lens candidate")
+
+    if "point_role" in data.columns:
+        unknown_extremes = labels.eq("Unknown") & data["point_role"].isin(
+            ("Canonical", "Anomaly")
+        )
+        labels.loc[unknown_extremes] = data.loc[unknown_extremes, "point_role"]
+
+    return labels
+
+
 def normalize_pca_filters(raw_filters: list[dict], pca_columns: list[str]) -> tuple[dict, ...]:
     valid_columns = set(pca_columns)
     normalized = []

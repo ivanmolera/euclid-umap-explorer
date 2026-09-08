@@ -19,6 +19,7 @@ from .analysis import (
     pca_filter_signature,
     pca_features_for_preset,
     sample_for_display,
+    umap_point_labels,
 )
 from .birch import run_birch_clustering
 from .catalogs import normalize_lens_grades
@@ -74,6 +75,9 @@ from .config import (
     STRAIGHT_LINE_ARTIFACT_EXAMPLE_PATHS,
     STRAIGHT_LINE_ARTIFACT_FILTER_HELP,
     STRAIGHT_LINE_FILTERED_PARQUET_PATH,
+    UMAP_POINT_COLORS,
+    UMAP_POINT_ORDER,
+    UMAP_POINT_SYMBOLS,
 )
 from .downloads import (
     dataframe_to_csv_bytes,
@@ -999,25 +1003,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         cluster_fifth.metric("Subclusters", "-")
 
     embedding_df = embedding_df.copy()
-    if "lens_grade" in embedding_df.columns:
-        lens_grade_marker = (
-            embedding_df["lens_grade"]
-            .astype("string")
-            .str.strip()
-            .str.upper()
-            .str[:1]
-        )
-        lens_grade_marker = lens_grade_marker.where(
-            lens_grade_marker.isin(LENS_GRADE_OPTIONS),
-            "?",
-        )
-    else:
-        lens_grade_marker = pd.Series("?", index=embedding_df.index)
-    embedding_df["lens_grade_marker"] = np.where(
-        embedding_df["is_lens"],
-        lens_grade_marker.fillna("?"),
-        "",
-    )
+    embedding_df["umap_point_label"] = umap_point_labels(embedding_df)
 
     hover_columns = [
         column
@@ -1043,12 +1029,14 @@ This analysis uses Euclid Q1 catalogue products available at:
     color_map = (
         None
         if color_column == "hierarchical_subcluster_label"
-        else {
-            "Unknown": "#4c78a8",
-            "Lens candidate": "#d62728",
-            "Canonical": "#2ca02c",
-            "Anomaly": "#111111",
-        }
+        else UMAP_POINT_COLORS
+    )
+    if color_column == "point_role":
+        color_column = "umap_point_label"
+    symbol_column = (
+        "point_role"
+        if color_column == "hierarchical_subcluster_label"
+        else "umap_point_label"
     )
 
     fig = px.scatter(
@@ -1056,23 +1044,20 @@ This analysis uses Euclid Q1 catalogue products available at:
         x="umap_1",
         y="umap_2",
         color=color_column,
-        symbol="point_role",
+        symbol=symbol_column,
         custom_data=["point_index"],
         hover_data=hover_columns,
         color_discrete_map=color_map,
-        symbol_map={
-            "Unknown": "circle",
-            "Lens candidate": "circle",
-            "Canonical": "diamond",
-            "Anomaly": "x",
-        },
+        symbol_map=UMAP_POINT_SYMBOLS,
         category_orders={
+            "umap_point_label": UMAP_POINT_ORDER,
             "point_role": ["Unknown", "Lens candidate", "Canonical", "Anomaly"],
         },
         labels={
             "umap_1": "UMAP 1",
             "umap_2": "UMAP 2",
             "point_role": "Type",
+            "umap_point_label": "Label",
             "hierarchical_subcluster_label": "Hierarchical subcluster",
         },
         height=680,
@@ -1080,7 +1065,7 @@ This analysis uses Euclid Q1 catalogue products available at:
     fig.update_traces(marker={"size": 7, "opacity": 0.72})
     fig.update_traces(
         marker={"size": 17, "opacity": 0.98, "line": {"width": 1.5, "color": "white"}},
-        selector={"name": "Lens candidate"},
+        selector=lambda trace: trace.name in {"Grade A", "Grade B", "Grade C"},
     )
     fig.update_traces(
         marker={"size": 14, "opacity": 1.0, "line": {"width": 2, "color": "white"}},
@@ -1095,24 +1080,12 @@ This analysis uses Euclid Q1 catalogue products available at:
         trace.selected = {"marker": {"opacity": opacity}}
         trace.unselected = {"marker": {"opacity": opacity}}
 
-    for lens_row in embedding_df[embedding_df["lens_grade_marker"] != ""].itertuples():
-        fig.add_annotation(
-            x=lens_row.umap_1,
-            y=lens_row.umap_2,
-            text=lens_row.lens_grade_marker,
-            showarrow=False,
-            font={"size": 10, "color": "white", "family": "Arial Black"},
-            xanchor="center",
-            yanchor="middle",
-            captureevents=False,
-        )
-
     fig.update_layout(
         title=f"Cluster {selected_cluster} | UMAP",
         legend_title_text=(
             "Hierarchical subcluster"
             if color_column == "hierarchical_subcluster_label"
-            else "Object"
+            else "Label"
         ),
         margin={"l": 10, "r": 10, "t": 50, "b": 10},
         clickmode="event+select",
@@ -1204,12 +1177,25 @@ This analysis uses Euclid Q1 catalogue products available at:
                         label_visibility="collapsed",
                     )
                 with semi_control_cols[3]:
-                    semi_submitted = st.form_submit_button(
-                        "Compute semi-supervised UMAP",
-                        type="primary",
+                    render_help_label(
+                        "target_weight",
+                        PARAMETER_HELP["target_weight"],
                     )
-                    if semi_submitted:
-                        request_semisupervised_umap()
+                    semi_target_weight = st.slider(
+                        "target_weight",
+                        0.0,
+                        1.0,
+                        DEFAULT_SEMISUPERVISED_UMAP_TARGET_WEIGHT,
+                        step=0.05,
+                        key="semisupervised_target_weight",
+                        label_visibility="collapsed",
+                    )
+                semi_submitted = st.form_submit_button(
+                    "Compute semi-supervised UMAP",
+                    type="primary",
+                )
+                if semi_submitted:
+                    request_semisupervised_umap()
 
             semi_signature = (
                 subclustering_signature,
@@ -1217,7 +1203,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 tuple(selected_features),
                 int(semi_n_neighbors),
                 round(float(semi_min_dist), 4),
-                DEFAULT_SEMISUPERVISED_UMAP_TARGET_WEIGHT,
+                round(float(semi_target_weight), 4),
             )
             semi_df = st.session_state.get("semisupervised_umap_df")
             if st.session_state.get("semisupervised_umap_signature") != semi_signature:
@@ -1242,7 +1228,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                         selected_features,
                         semi_n_neighbors,
                         semi_min_dist,
-                        DEFAULT_SEMISUPERVISED_UMAP_TARGET_WEIGHT,
+                        semi_target_weight,
                     )
                 except AlgorithmTimeoutError as exc:
                     log_app_event(
@@ -1313,11 +1299,10 @@ This analysis uses Euclid Q1 catalogue products available at:
                     symbol="semi_supervised_label",
                     custom_data=["point_index"],
                     hover_data=semi_hover_columns,
-                    color_discrete_map={
-                        "Grade A": "#d62728",
-                        "Grade B": "#ff7f0e",
-                        "Grade C": "#f2c94c",
-                        "Unknown": "#4c78a8",
+                    color_discrete_map=UMAP_POINT_COLORS,
+                    symbol_map=UMAP_POINT_SYMBOLS,
+                    category_orders={
+                        "semi_supervised_label": UMAP_POINT_ORDER[:4],
                     },
                     labels={
                         "semi_umap_1": "Semi-supervised UMAP 1",
@@ -1327,6 +1312,15 @@ This analysis uses Euclid Q1 catalogue products available at:
                     height=520,
                 )
                 semi_fig.update_traces(marker={"size": 7, "opacity": 0.78})
+                semi_fig.update_traces(
+                    marker={
+                        "size": 17,
+                        "opacity": 0.98,
+                        "line": {"width": 1.5, "color": "white"},
+                    },
+                    selector=lambda trace: trace.name
+                    in {"Grade A", "Grade B", "Grade C"},
+                )
                 for trace in semi_fig.data:
                     opacity = getattr(trace.marker, "opacity", None) or 1.0
                     trace.selected = {"marker": {"opacity": opacity}}
@@ -1336,7 +1330,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                         f"Subcluster {selected_semi_subcluster} | "
                         "Semi-supervised UMAP"
                     ),
-                    legend_title_text="Semi-supervised label",
+                    legend_title_text="Label",
                     margin={"l": 10, "r": 10, "t": 50, "b": 10},
                     dragmode="zoom",
                     clickmode="event+select",

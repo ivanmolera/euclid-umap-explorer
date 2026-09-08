@@ -66,7 +66,7 @@ The default parameters were selected from the ESCOPE stability benchmark to bala
 
 - **BIRCH**: straight-line-artifact-filtered catalogue, all 40 PCA components, standard feature scaling, `threshold=6.2`, `branching_factor=50`, and `batch_size=25000`.
 - **Unsupervised UMAP**: the selected PCA components with standard scaling, `n_neighbors=10`, `min_dist=0.0`, Euclidean distance, and `random_state=42`.
-- **Semi-supervised UMAP**: the selected PCA components with standard scaling, `n_neighbors=10`, `min_dist=0.15`, `target_weight=0.5`, Euclidean input distance, categorical target distance, and `random_state=42`.
+- **Semi-supervised UMAP**: the selected PCA components with standard scaling, `n_neighbors=10`, `min_dist=0.15`, and UI-adjustable `target_weight` (`0.5` by default), using Euclidean input distance, categorical target distance, and `random_state=42`.
 
 The initial BIRCH stage is strictly unsupervised: candidate labels are neither used to select its features nor passed to `fit`. Lens labels are used only after clustering to measure candidate density and enrichment. The lens-displaced components `6, 0, 12, 1, 27, 10, 8, 13` remain the default selection for downstream PCA filtering and UMAP exploration.
 
@@ -90,6 +90,8 @@ The initial BIRCH stage is strictly unsupervised: candidate labels are neither u
 - Estimates PCA threshold recommendations that enrich lens candidates in a cluster.
 - Applies recommended PCA filters interactively.
 - Computes UMAP embeddings for selected clusters.
+- Uses a shared UMAP legend for Grade A (red), Grade B (orange), Grade C
+  (yellow), and Unknown (blue) objects.
 - Computes hierarchical subclusters inside the selected cluster.
 - Computes semi-supervised UMAP for selected subclusters using labels `A=2`, `B=1`, `C=0`, and unknown objects as `-1`.
 - Supports object search by `object_id`.
