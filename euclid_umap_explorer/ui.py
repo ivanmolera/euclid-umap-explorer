@@ -1064,10 +1064,6 @@ This analysis uses Euclid Q1 catalogue products available at:
     )
     fig.update_traces(marker={"size": 7, "opacity": 0.72})
     fig.update_traces(
-        marker={"size": 17, "opacity": 0.98, "line": {"width": 1.5, "color": "white"}},
-        selector=lambda trace: trace.name in {"Grade A", "Grade B", "Grade C"},
-    )
-    fig.update_traces(
         marker={"size": 14, "opacity": 1.0, "line": {"width": 2, "color": "white"}},
         selector={"name": "Canonical"},
     )
@@ -1190,12 +1186,11 @@ This analysis uses Euclid Q1 catalogue products available at:
                         key="semisupervised_target_weight",
                         label_visibility="collapsed",
                     )
-                semi_submitted = st.form_submit_button(
+                st.form_submit_button(
                     "Compute semi-supervised UMAP",
                     type="primary",
+                    on_click=request_semisupervised_umap,
                 )
-                if semi_submitted:
-                    request_semisupervised_umap()
 
             semi_signature = (
                 subclustering_signature,
@@ -1312,15 +1307,6 @@ This analysis uses Euclid Q1 catalogue products available at:
                     height=520,
                 )
                 semi_fig.update_traces(marker={"size": 7, "opacity": 0.78})
-                semi_fig.update_traces(
-                    marker={
-                        "size": 17,
-                        "opacity": 0.98,
-                        "line": {"width": 1.5, "color": "white"},
-                    },
-                    selector=lambda trace: trace.name
-                    in {"Grade A", "Grade B", "Grade C"},
-                )
                 for trace in semi_fig.data:
                     opacity = getattr(trace.marker, "opacity", None) or 1.0
                     trace.selected = {"marker": {"opacity": opacity}}

@@ -5,6 +5,7 @@ import pandas as pd
 
 from .catalogs import normalize_lens_grades
 from .config import (
+    DEFAULT_UMAP_CLUSTER_MIN_OBJECTS,
     LENS_DISPLACED_PCA_FEATURES,
     LENS_GRADE_OPTIONS,
     PCA_FILTER_OPERATORS,
@@ -102,7 +103,12 @@ def format_cluster_option(row: pd.Series) -> str:
 
 
 def default_cluster_option_index(cluster_summary_df: pd.DataFrame) -> int:
-    eligible = cluster_summary_df[cluster_summary_df["n_lenses"] > 1].copy()
+    eligible = cluster_summary_df[
+        (cluster_summary_df["n_objects"] >= DEFAULT_UMAP_CLUSTER_MIN_OBJECTS)
+        & (cluster_summary_df["n_lenses"] > 1)
+    ].copy()
+    if eligible.empty:
+        eligible = cluster_summary_df[cluster_summary_df["n_lenses"] > 1].copy()
     if eligible.empty:
         return 0
 

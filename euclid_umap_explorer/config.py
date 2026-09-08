@@ -59,6 +59,7 @@ MAX_ALGORITHM_SECONDS = int(os.getenv("EUCLID_MAX_ALGORITHM_SECONDS", "600"))
 DEFAULT_BIRCH_THRESHOLD = 6.2
 DEFAULT_BIRCH_BRANCHING_FACTOR = 50
 DEFAULT_BIRCH_BATCH_SIZE = 25_000
+DEFAULT_UMAP_CLUSTER_MIN_OBJECTS = 100
 ALL_PCA_FEATURES = tuple(f"feat_pca_{index}" for index in range(40))
 LENS_DISPLACED_PCA_FEATURES = (
     "feat_pca_6",
@@ -92,8 +93,8 @@ UMAP_POINT_COLORS = {
 }
 UMAP_POINT_SYMBOLS = {
     "Grade A": "circle",
-    "Grade B": "circle",
-    "Grade C": "circle",
+    "Grade B": "square",
+    "Grade C": "cross",
     "Lens candidate": "circle",
     "Unknown": "circle",
     "Canonical": "diamond",

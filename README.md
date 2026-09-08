@@ -70,6 +70,8 @@ The default parameters were selected from the ESCOPE stability benchmark to bala
 
 The initial BIRCH stage is strictly unsupervised: candidate labels are neither used to select its features nor passed to `fit`. Lens labels are used only after clustering to measure candidate density and enrichment. The lens-displaced components `6, 0, 12, 1, 27, 10, 8, 13` remain the default selection for downstream PCA filtering and UMAP exploration.
 
+The cluster selected by default for downstream UMAP must contain at least 100 objects and more than one labelled candidate. Among eligible clusters, ESCOPE prioritises candidate density, then labelled-candidate count and cluster size. Smaller clusters remain available for manual selection. If no cluster reaches the minimum size, ESCOPE falls back to the same ranking without the size constraint.
+
 ## Features
 
 - Loads PCA catalogues such as `representations_pca_40.parquet`.
@@ -90,8 +92,8 @@ The initial BIRCH stage is strictly unsupervised: candidate labels are neither u
 - Estimates PCA threshold recommendations that enrich lens candidates in a cluster.
 - Applies recommended PCA filters interactively.
 - Computes UMAP embeddings for selected clusters.
-- Uses a shared UMAP legend for Grade A (red), Grade B (orange), Grade C
-  (yellow), and Unknown (blue) objects.
+- Uses a shared UMAP legend for Grade A (small red circles), Grade B (small
+  orange squares), Grade C (small yellow crosses), and Unknown (blue) objects.
 - Computes hierarchical subclusters inside the selected cluster.
 - Computes semi-supervised UMAP for selected subclusters using labels `A=2`, `B=1`, `C=0`, and unknown objects as `-1`.
 - Supports object search by `object_id`.
