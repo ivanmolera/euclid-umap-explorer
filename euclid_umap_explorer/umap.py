@@ -14,6 +14,7 @@ from .config import (
     PARQUET_PATH,
 )
 from .runtime import log_app_event, run_with_timeout
+from .physical import physical_filter_signature
 
 
 def _compute_umap_embedding_impl(
@@ -189,6 +190,7 @@ def build_umap_signature(
     min_dist: float,
     max_objects: int,
     cluster_params: dict,
+    physical_filters: tuple[dict, ...] = (),
 ) -> tuple:
     return (
         cluster_params.get("parquet_path", PARQUET_PATH),
@@ -203,6 +205,7 @@ def build_umap_signature(
         int(selected_cluster),
         tuple(selected_features),
         pca_filter_signature(pca_filters),
+        physical_filter_signature(physical_filters),
         int(n_neighbors),
         round(float(min_dist), 4),
         int(max_objects),

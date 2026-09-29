@@ -21,8 +21,8 @@ from .analysis import (
     sample_for_display,
     umap_point_labels,
 )
-from .birch import run_birch_clustering
-from .catalogs import normalize_lens_grades
+from .birch import BirchProjection, assign_excluded_artifacts, run_birch_clustering
+from .catalogs import load_physical_measurements, normalize_lens_grades
 from .components import (
     ProcessingOverlay,
     apply_pending_recommended_pca_filter,
@@ -40,10 +40,13 @@ from .components import (
     render_help_label,
     render_lens_grade_help_label,
     render_pca_filter_controls,
+    render_physical_filter_controls,
     request_clustering,
     show_morphology_catalogue_row,
     show_object_details,
+    show_physical_measurements_row,
     show_selected_pca_components,
+    show_thumbnail_group,
 )
 from .config import (
     APP_TITLE,
@@ -63,6 +66,7 @@ from .config import (
     DEFAULT_UMAP_MIN_DIST,
     DEFAULT_UMAP_N_NEIGHBORS,
     DOWNLOAD_MAX_UMAP_ROWS,
+    ENABLE_EXCLUDED_ARTIFACT_ASSIGNMENT_UI,
     EUCLID_FAVICON_PATH,
     EUCLID_LOGO_PATH,
     LENS_GRADE_EXAMPLE_PATHS,
@@ -72,6 +76,7 @@ from .config import (
     MAX_ALGORITHM_SECONDS,
     PARAMETER_HELP,
     PARQUET_PATH,
+    PHYSICAL_MEASUREMENTS_PATH,
     STRAIGHT_LINE_ARTIFACT_EXAMPLE_PATHS,
     STRAIGHT_LINE_ARTIFACT_FILTER_HELP,
     STRAIGHT_LINE_FILTERED_PARQUET_PATH,
@@ -87,6 +92,17 @@ from .downloads import (
 from .euclid_search import is_valid_search_object_id, selected_point_index
 from .runtime import AlgorithmTimeoutError, format_duration, log_app_event
 from .storage import path_exists, prepare_catalog_cache
+from .physical import (
+    PHYSICAL_ANALYSIS_FIELDS,
+    analysis_ready_physical_measurements,
+    apply_physical_filters,
+    available_physical_analysis_fields,
+    build_grouped_physical_summary,
+    build_physical_summary,
+    format_physical_filter,
+    normalize_physical_filters,
+    physical_filter_signature,
+)
 from .subclustering import (
     build_subcluster_summary,
     build_subclustering_signature,
@@ -114,6 +130,67 @@ def request_semisupervised_umap() -> None:
     st.session_state["semisupervised_umap_expanded"] = True
 
 
+def style_umap_point_markers(
+    figure: object,
+    *,
+    opacity: float,
+    show_cluster_extremes: bool = False,
+) -> None:
+    def point_label(trace: object) -> str:
+        trace_labels = {part.strip() for part in str(trace.name).split(",")}
+        for label in (*UMAP_POINT_ORDER, "Lens candidate"):
+            if label in trace_labels:
+                return label
+        return ""
+
+    def has_label(trace: object, labels: set[str]) -> bool:
+        return point_label(trace) in labels
+
+    labelled_grades = {"Grade A", "Grade B", "Grade C", "Lens candidate"}
+    figure.update_traces(marker={"size": 6, "opacity": opacity})
+    figure.update_traces(
+        marker={"size": 7, "opacity": opacity},
+        selector=lambda trace: has_label(trace, labelled_grades),
+    )
+
+    if show_cluster_extremes:
+        figure.update_traces(
+            marker={
+                "size": 14,
+                "opacity": 1.0,
+                "line": {"width": 2, "color": "white"},
+            },
+            selector=lambda trace: has_label(trace, {"Canonical"}),
+        )
+        figure.update_traces(
+            marker={
+                "size": 14,
+                "opacity": 1.0,
+                "line": {"width": 2, "color": "#ffcc00"},
+            },
+            selector=lambda trace: has_label(trace, {"Anomaly"}),
+        )
+
+    draw_rank = {
+        "Unknown": 0,
+        "Grade C": 1,
+        "Grade B": 2,
+        "Grade A": 3,
+        "Lens candidate": 3,
+        "Canonical": 4,
+        "Anomaly": 5,
+    }
+    legend_rank = {label: rank for rank, label in enumerate(UMAP_POINT_ORDER)}
+    for trace in figure.data:
+        trace.legendrank = legend_rank.get(point_label(trace), len(legend_rank))
+    figure.data = tuple(
+        sorted(
+            figure.data,
+            key=lambda trace: draw_rank.get(point_label(trace), 0),
+        )
+    )
+
+
 def render_execution_time(seconds: object) -> None:
     st.markdown(
         f"""
@@ -130,17 +207,195 @@ def render_execution_time(seconds: object) -> None:
     )
 
 
+def selected_cluster_physical_measurements(
+    clustered_df: pd.DataFrame,
+    selected_cluster: int,
+) -> pd.DataFrame:
+    signature = (id(clustered_df), int(selected_cluster), PHYSICAL_MEASUREMENTS_PATH)
+    if st.session_state.get("physical_cluster_signature") == signature:
+        return st.session_state.get("physical_cluster_df", pd.DataFrame())
+
+    cluster_ids = clustered_df.loc[
+        clustered_df["cluster"] == int(selected_cluster),
+        "object_id",
+    ]
+    started_at = pd.Timestamp.now()
+    physical_df = load_physical_measurements(
+        PHYSICAL_MEASUREMENTS_PATH,
+        cluster_ids,
+    )
+    st.session_state["physical_cluster_signature"] = signature
+    st.session_state["physical_cluster_df"] = physical_df
+    log_app_event(
+        "physical_measurements_loaded",
+        duration_seconds=round(
+            (pd.Timestamp.now() - started_at).total_seconds(),
+            3,
+        ),
+        cluster=int(selected_cluster),
+        requested_objects=int(len(cluster_ids)),
+        matched_objects=int(len(physical_df)),
+    )
+    return physical_df
+
+
+def build_physical_histogram_figure(
+    physical_df: pd.DataFrame,
+    fields: list[str],
+) -> object:
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    clean = analysis_ready_physical_measurements(physical_df)
+    columns = 2
+    rows = max(1, (len(fields) + columns - 1) // columns)
+    figure = make_subplots(
+        rows=rows,
+        cols=columns,
+        subplot_titles=[PHYSICAL_ANALYSIS_FIELDS[field] for field in fields],
+    )
+    for index, field in enumerate(fields):
+        values = pd.to_numeric(clean[field], errors="coerce").dropna()
+        figure.add_trace(
+            go.Histogram(
+                x=values,
+                nbinsx=35,
+                marker_color="#5b8db8",
+                opacity=0.82,
+                showlegend=False,
+                hovertemplate="Value: %{x}<br>Objects: %{y}<extra></extra>",
+            ),
+            row=index // columns + 1,
+            col=index % columns + 1,
+        )
+    figure.update_layout(
+        height=max(320, rows * 280),
+        margin={"l": 20, "r": 20, "t": 45, "b": 20},
+        bargap=0.04,
+    )
+    return figure
+
+
+def render_cluster_physical_characterization(
+    cluster_df: pd.DataFrame,
+    physical_df: pd.DataFrame,
+    selected_cluster: int,
+) -> None:
+    with st.expander("Physical characterization", expanded=False):
+        matched = len(physical_df)
+        metric_cols = st.columns(3)
+        metric_cols[0].metric("Cluster", int(selected_cluster))
+        metric_cols[1].metric("Cluster objects", format_thousands_dot(len(cluster_df)))
+        metric_cols[2].metric("Physical matches", format_thousands_dot(matched))
+        st.caption(
+            "Redshift, physical-parameter and Sersic measurements with non-zero "
+            "quality flags are excluded from summaries and filters."
+        )
+        summary = build_physical_summary(physical_df, total_objects=len(cluster_df))
+        if summary.empty:
+            st.info("No usable physical measurements were found for this cluster.")
+            return
+
+        display = summary[
+            ["measurement", "valid_objects", "coverage_%", "q25", "median", "q75"]
+        ].copy()
+        display[["coverage_%", "q25", "median", "q75"]] = display[
+            ["coverage_%", "q25", "median", "q75"]
+        ].round(4)
+        st.dataframe(display, use_container_width=True, hide_index=True)
+        fields = summary["field"].tolist()
+        st.plotly_chart(
+            build_physical_histogram_figure(physical_df, fields),
+            use_container_width=True,
+            config={"displaylogo": False},
+        )
+
+
+def render_subcluster_physical_characterization(
+    subclustered_df: pd.DataFrame,
+    physical_df: pd.DataFrame,
+    selected_cluster: int,
+) -> None:
+    grouped = build_grouped_physical_summary(
+        physical_df,
+        subclustered_df[["object_id", "hierarchical_subcluster"]],
+        "hierarchical_subcluster",
+    )
+    if grouped.empty:
+        return
+
+    st.markdown("**Subcluster physical characterization**")
+    st.caption(
+        "Statistics refer to the objects sampled for hierarchical clustering."
+    )
+    display = grouped[
+        [
+            "hierarchical_subcluster",
+            "measurement",
+            "valid_objects",
+            "coverage_%",
+            "q25",
+            "median",
+            "q75",
+        ]
+    ].copy()
+    display[["coverage_%", "q25", "median", "q75"]] = display[
+        ["coverage_%", "q25", "median", "q75"]
+    ].round(4)
+    st.dataframe(display, use_container_width=True, hide_index=True, height=320)
+
+    fields = list(dict.fromkeys(grouped["field"].tolist()))
+    selected_field = st.selectbox(
+        "Subcluster histogram measurement",
+        fields,
+        format_func=lambda field: PHYSICAL_ANALYSIS_FIELDS.get(field, field),
+        key=f"subcluster_physical_field_{selected_cluster}",
+    )
+    membership = subclustered_df[
+        ["object_id", "hierarchical_subcluster"]
+    ].drop_duplicates("object_id")
+    clean = analysis_ready_physical_measurements(physical_df)
+    histogram_df = membership.merge(
+        clean[["object_id", selected_field]],
+        on="object_id",
+        how="left",
+    )
+    histogram_df["Subcluster"] = histogram_df["hierarchical_subcluster"].map(str)
+    import plotly.express as px
+
+    figure = px.histogram(
+        histogram_df.dropna(subset=[selected_field]),
+        x=selected_field,
+        color="Subcluster",
+        barmode="overlay",
+        histnorm="probability density",
+        nbins=35,
+        labels={
+            selected_field: PHYSICAL_ANALYSIS_FIELDS.get(selected_field, selected_field),
+        },
+        height=360,
+    )
+    figure.update_traces(opacity=0.55)
+    st.plotly_chart(
+        figure,
+        use_container_width=True,
+        config={"displaylogo": False},
+    )
+
+
 @st.fragment
 def render_dendrogram_preview_section(
     filtered_cluster_df: pd.DataFrame,
     selected_cluster: int,
     selected_features: list[str],
     pca_filters: tuple[dict, ...],
+    physical_filters: tuple[dict, ...],
 ) -> None:
     dendrogram_signature = (
         int(selected_cluster),
         tuple(selected_features),
         pca_filter_signature(pca_filters),
+        physical_filter_signature(physical_filters),
         int(DENDROGRAM_MAX_OBJECTS),
         int(DENDROGRAM_TRUNCATE_CLUSTERS),
     )
@@ -168,11 +423,127 @@ def render_dendrogram_preview_section(
 
 
 @st.fragment
+def render_excluded_artifact_assignments(
+    clustered_df: pd.DataFrame,
+    projection: BirchProjection,
+    selected_cluster: int,
+) -> None:
+    with st.expander("Excluded straight-line artifacts"):
+        st.caption(
+            "Assign excluded objects to the existing BIRCH clusters without "
+            "including them in clustering or lens-candidate statistics."
+        )
+        if st.button("Assign excluded artifacts", type="primary"):
+            overlay = ProcessingOverlay()
+            try:
+                overlay.open("Assigning excluded artifacts to BIRCH clusters...")
+                if not path_exists(PARQUET_PATH):
+                    raise FileNotFoundError(f"PCA catalogue not found: {PARQUET_PATH}")
+                prepare_catalog_cache([PARQUET_PATH])
+                assignments = assign_excluded_artifacts(
+                    PARQUET_PATH,
+                    set(clustered_df["id_str"].dropna().astype(str)),
+                    projection,
+                )
+                st.session_state["excluded_artifact_assignments"] = assignments
+                st.session_state["excluded_artifact_cluster_result_id"] = id(clustered_df)
+            except AlgorithmTimeoutError:
+                st.error(
+                    "Artifact assignment exceeded the execution time limit."
+                )
+            except (FileNotFoundError, ValueError, OSError) as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                log_app_event(
+                    "birch_excluded_artifacts_failed",
+                    error_type=type(exc).__name__,
+                )
+                st.error("Could not assign the excluded artifacts to BIRCH clusters.")
+                st.exception(exc)
+            finally:
+                overlay.close()
+
+        if st.session_state.get("excluded_artifact_cluster_result_id") != id(clustered_df):
+            return
+        assignments = st.session_state.get("excluded_artifact_assignments")
+        if assignments is None:
+            return
+        if assignments.empty:
+            st.info("No excluded objects were found in the full PCA catalogue.")
+            return
+
+        st.caption(
+            f"{format_thousands_dot(len(assignments))} excluded objects assigned."
+        )
+        by_cluster = assignments.groupby("cluster").agg(
+            assigned_artifacts=("object_id", "size"),
+        )
+        clean_counts = clustered_df.groupby("cluster").size().rename("cluster_objects")
+        by_cluster = clean_counts.to_frame().join(by_cluster, how="left").fillna(0)
+        by_cluster["assigned_artifacts"] = by_cluster["assigned_artifacts"].astype(int)
+        by_cluster["excluded_fraction_%"] = (
+            100 * by_cluster["assigned_artifacts"]
+            / (by_cluster["cluster_objects"] + by_cluster["assigned_artifacts"])
+        ).round(2)
+        by_cluster = by_cluster.reset_index()
+        by_cluster = by_cluster[
+            [
+                "cluster",
+                "cluster_objects",
+                "assigned_artifacts",
+                "excluded_fraction_%",
+            ]
+        ].sort_values(["assigned_artifacts", "cluster"], ascending=[False, True])
+        st.dataframe(by_cluster, use_container_width=True, hide_index=True, height=280)
+        downloadable_assignments = assignments.drop(columns=["is_far"], errors="ignore")
+        st.download_button(
+            "Download artifact assignments",
+            data=dataframe_to_csv_bytes(downloadable_assignments),
+            file_name="excluded_artifact_assignments.csv",
+            mime="text/csv",
+        )
+
+        selected = assignments[assignments["cluster"] == selected_cluster].sort_values(
+            "distance"
+        )
+        st.markdown(f"**Cluster {selected_cluster}**")
+        if selected.empty:
+            st.caption("No excluded artifacts were assigned to this cluster.")
+            return
+        st.caption(f"{format_thousands_dot(len(selected))} assigned.")
+        st.dataframe(
+            selected[["object_id", "id_str", "distance"]],
+            use_container_width=True,
+            hide_index=True,
+            height=220,
+        )
+        if len(selected) == 1:
+            samples = [(0, "Example")]
+        elif len(selected) == 2:
+            samples = [(0, "Nearest"), (1, "Farthest")]
+        else:
+            samples = [
+                (0, "Nearest"),
+                (len(selected) // 2, "Median"),
+                (len(selected) - 1, "Farthest"),
+            ]
+        show_thumbnail_group(
+            "Excluded artifact examples",
+            [selected.iloc[position] for position, _ in samples],
+            [
+                f"{label} ({format_decimal_comma(float(selected.iloc[position]['distance']), 2)})"
+                for position, label in samples
+            ],
+        )
+
+
+@st.fragment
 def render_cluster_umap_interaction(
     fig: object,
     embedding_df: pd.DataFrame,
     selected_features: list[str],
     selected_cluster: int,
+    physical_df: pd.DataFrame,
 ) -> None:
     plot_col, detail_col = st.columns([2, 1])
     with plot_col:
@@ -199,6 +570,7 @@ def render_cluster_umap_interaction(
             embedding_df,
             selected_features,
             selected_indices,
+            physical_df=physical_df,
         )
         download_col, help_col = st.columns([1, 2])
         with download_col:
@@ -233,6 +605,8 @@ def render_cluster_umap_interaction(
             show_morphology_catalogue_row(selected_row)
         with pca_col:
             show_selected_pca_components(selected_row, selected_features)
+        with st.expander("Selected object physical measurements", expanded=False):
+            show_physical_measurements_row(selected_row, physical_df)
 
 
 @st.fragment
@@ -242,6 +616,7 @@ def render_semisupervised_umap_interaction(
     selected_features: list[str],
     semi_signature: tuple,
     selected_semi_subcluster: int,
+    physical_df: pd.DataFrame,
 ) -> None:
     semi_plot_col, semi_detail_col = st.columns([2, 1])
     with semi_plot_col:
@@ -270,6 +645,7 @@ def render_semisupervised_umap_interaction(
             semi_display_df,
             selected_features,
             semi_selected_indices,
+            physical_df=physical_df,
         )
         semi_download_col, semi_help_col = st.columns([1, 2])
         with semi_download_col:
@@ -307,6 +683,8 @@ def render_semisupervised_umap_interaction(
             show_morphology_catalogue_row(semi_selected_row)
         with semi_pca_col:
             show_selected_pca_components(semi_selected_row, selected_features)
+        with st.expander("Selected object physical measurements", expanded=False):
+            show_physical_measurements_row(semi_selected_row, physical_df)
 
 
 def main() -> None:
@@ -344,14 +722,14 @@ def main() -> None:
     loading_placeholder = st.empty()
     loading_placeholder.info("Loading application...")
 
-    required = [LENS_PATH]
+    required = [LENS_PATH, PHYSICAL_MEASUREMENTS_PATH]
     with st.spinner("Loading application..."):
         missing = [path for path in required if not path_exists(path)]
     if missing:
         loading_placeholder.empty()
         st.error(
             "Required files were not found. Check the "
-            "MORPH_PATH, PARQUET_PATH, LENS_PATH, "
+            "MORPH_PATH, PHYSICAL_MEASUREMENTS_PATH, PARQUET_PATH, LENS_PATH, "
             "CUTOUT_BASE and LENS_IMG_BASE environment variables."
         )
         st.code("\n".join(missing), language="text")
@@ -556,7 +934,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 )
             # Only individual catalogues are cached. Image folders are read on demand.
             prepare_catalog_cache([clustering_parquet_path, LENS_PATH])
-            clustered_df, pca_columns = run_birch_clustering(
+            clustered_df, pca_columns, birch_projection = run_birch_clustering(
                 clustering_parquet_path,
                 LENS_PATH,
                 lens_grades,
@@ -566,8 +944,14 @@ This analysis uses Euclid Q1 catalogue products available at:
                 tuple(params.get("birch_features", DEFAULT_BIRCH_FEATURES)),
                 str(params.get("birch_scaling", DEFAULT_BIRCH_SCALING)),
             )
-            st.session_state["cluster_result"] = (clustered_df, pca_columns)
+            st.session_state["cluster_result"] = (
+                clustered_df,
+                pca_columns,
+                birch_projection,
+            )
             st.session_state["cluster_summary_df"] = build_cluster_summary(clustered_df)
+            st.session_state.pop("excluded_artifact_assignments", None)
+            st.session_state.pop("excluded_artifact_cluster_result_id", None)
         except AlgorithmTimeoutError as exc:
             log_app_event("birch_clustering_timeout", timeout_seconds=MAX_ALGORITHM_SECONDS)
             st.error(
@@ -597,7 +981,8 @@ This analysis uses Euclid Q1 catalogue products available at:
         finally:
             overlay.close()
     else:
-        clustered_df, pca_columns = cached_cluster
+        clustered_df, pca_columns = cached_cluster[:2]
+        birch_projection = cached_cluster[2] if len(cached_cluster) > 2 else None
 
     cluster_summary_df = st.session_state.get("cluster_summary_df")
     if cluster_summary_df is None:
@@ -734,8 +1119,51 @@ This analysis uses Euclid Q1 catalogue products available at:
         ].iloc[0]
     )
 
+    if (
+        ENABLE_EXCLUDED_ARTIFACT_ASSIGNMENT_UI
+        and artifact_filter_used
+        and birch_projection is not None
+    ):
+        render_excluded_artifact_assignments(
+            clustered_df,
+            birch_projection,
+            selected_cluster,
+        )
+
     cluster_df = clustered_df[clustered_df["cluster"] == selected_cluster].copy()
+    try:
+        physical_cluster_df = selected_cluster_physical_measurements(
+            clustered_df,
+            selected_cluster,
+        )
+    except Exception as exc:
+        log_app_event(
+            "physical_measurements_failed",
+            cluster=int(selected_cluster),
+            error_type=type(exc).__name__,
+        )
+        st.warning("Physical measurements could not be loaded for this cluster.")
+        physical_cluster_df = pd.DataFrame()
+
+    render_cluster_physical_characterization(
+        cluster_df,
+        physical_cluster_df,
+        selected_cluster,
+    )
+    raw_physical_filters = render_physical_filter_controls(
+        physical_cluster_df,
+        selected_cluster,
+    )
+    physical_filters = normalize_physical_filters(
+        raw_physical_filters,
+        available_physical_analysis_fields(physical_cluster_df),
+    )
     filtered_cluster_df = apply_pca_filters(cluster_df, pca_filters)
+    filtered_cluster_df = apply_physical_filters(
+        filtered_cluster_df,
+        physical_cluster_df,
+        physical_filters,
+    )
 
     with st.expander(
         "UMAP",
@@ -777,6 +1205,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 selected_cluster=selected_cluster,
                 selected_features=selected_features,
                 pca_filters=pca_filters,
+                physical_filters=physical_filters,
                 n_neighbors=n_neighbors,
                 min_dist=min_dist,
                 max_objects=int(max_objects),
@@ -805,6 +1234,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             selected_cluster,
             selected_features,
             pca_filters,
+            physical_filters,
         )
         with st.form("hierarchical_subclustering_form"):
             subclustering_cols = st.columns([1, 1, 1])
@@ -844,7 +1274,7 @@ This analysis uses Euclid Q1 catalogue products available at:
     if len(filtered_cluster_df) < 3:
         st.session_state["umap_running"] = False
         st.session_state["umap_requested"] = False
-        st.warning("At least 3 objects must remain after PCA filters to compute UMAP.")
+        st.warning("At least 3 objects must remain after the active filters to compute UMAP.")
         st.stop()
 
     if recalculate_umap:
@@ -861,6 +1291,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 display_objects=int(len(display_df)),
                 n_features=int(len(selected_features)),
                 n_pca_filters=int(len(pca_filters)),
+                n_physical_filters=int(len(physical_filters)),
                 n_neighbors=int(n_neighbors),
                 min_dist=float(min_dist),
                 max_objects=int(max_objects),
@@ -912,6 +1343,14 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.caption(
             "Active PCA filters: "
             + "; ".join(format_pca_filter(pca_filter) for pca_filter in pca_filters)
+        )
+    if physical_filters:
+        st.caption(
+            "Active physical filters: "
+            + "; ".join(
+                format_physical_filter(physical_filter)
+                for physical_filter in physical_filters
+            )
         )
 
     if needs_recalculation or "umap_embedding_df" not in st.session_state:
@@ -1062,15 +1501,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         },
         height=680,
     )
-    fig.update_traces(marker={"size": 7, "opacity": 0.72})
-    fig.update_traces(
-        marker={"size": 14, "opacity": 1.0, "line": {"width": 2, "color": "white"}},
-        selector={"name": "Canonical"},
-    )
-    fig.update_traces(
-        marker={"size": 14, "opacity": 1.0, "line": {"width": 2, "color": "#ffcc00"}},
-        selector={"name": "Anomaly"},
-    )
+    style_umap_point_markers(fig, opacity=0.72, show_cluster_extremes=True)
     for trace in fig.data:
         opacity = getattr(trace.marker, "opacity", None) or 1.0
         trace.selected = {"marker": {"opacity": opacity}}
@@ -1105,12 +1536,18 @@ This analysis uses Euclid Q1 catalogue products available at:
                     use_container_width=True,
                     hide_index=True,
                 )
+                render_subcluster_physical_characterization(
+                    subclustered_df,
+                    physical_cluster_df,
+                    selected_cluster,
+                )
 
         render_cluster_umap_interaction(
             fig,
             embedding_df,
             selected_features,
             selected_cluster,
+            physical_cluster_df,
         )
 
     if subclustered_df is not None and not subclustered_df.empty:
@@ -1306,7 +1743,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                     },
                     height=520,
                 )
-                semi_fig.update_traces(marker={"size": 7, "opacity": 0.78})
+                style_umap_point_markers(semi_fig, opacity=0.78)
                 for trace in semi_fig.data:
                     opacity = getattr(trace.marker, "opacity", None) or 1.0
                     trace.selected = {"marker": {"opacity": opacity}}
@@ -1327,6 +1764,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                     selected_features,
                     semi_signature,
                     selected_semi_subcluster,
+                    physical_cluster_df,
                 )
 
     close_processing_overlay()

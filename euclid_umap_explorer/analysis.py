@@ -209,7 +209,7 @@ def add_cluster_extreme_roles(
 
 
 def umap_point_labels(data: pd.DataFrame) -> pd.Series:
-    """Return the shared A/B/C/Unknown labels used by both UMAP views."""
+    """Return UMAP labels, preserving cluster extremes as explicit landmarks."""
     labels = pd.Series("Unknown", index=data.index, dtype="string")
     if "lens_grade" in data.columns:
         grades = data["lens_grade"].astype("string").str.strip().str.upper()
@@ -218,10 +218,8 @@ def umap_point_labels(data: pd.DataFrame) -> pd.Series:
         labels.loc[lens_mask] = grade_labels.loc[lens_mask].fillna("Lens candidate")
 
     if "point_role" in data.columns:
-        unknown_extremes = labels.eq("Unknown") & data["point_role"].isin(
-            ("Canonical", "Anomaly")
-        )
-        labels.loc[unknown_extremes] = data.loc[unknown_extremes, "point_role"]
+        extreme_mask = data["point_role"].isin(("Canonical", "Anomaly"))
+        labels.loc[extreme_mask] = data.loc[extreme_mask, "point_role"]
 
     return labels
 

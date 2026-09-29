@@ -6,8 +6,14 @@ from io import StringIO
 import pandas as pd
 
 from .analysis import add_cluster_extreme_roles
-from .catalogs import load_morphology_object, load_morphology_objects, normalize_object_ids
-from .config import DOWNLOAD_MAX_UMAP_ROWS, MORPH_PATH
+from .catalogs import (
+    load_morphology_object,
+    load_morphology_objects,
+    load_physical_measurements,
+    normalize_object_ids,
+)
+from .config import DOWNLOAD_MAX_UMAP_ROWS, MORPH_PATH, PHYSICAL_MEASUREMENTS_PATH
+from .physical import merge_physical_measurements, physical_measurement_display_rows
 
 
 def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
@@ -138,6 +144,7 @@ def umap_download_df(
     selected_features: list[str],
     selected_indices: list[int] | None = None,
     max_rows: int = DOWNLOAD_MAX_UMAP_ROWS,
+    physical_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     if selected_indices:
         base_df = embedding_df.loc[
@@ -159,6 +166,13 @@ def umap_download_df(
         )
     else:
         export_df = base_df
+
+    if physical_df is None:
+        physical_df = load_physical_measurements(
+            PHYSICAL_MEASUREMENTS_PATH,
+            base_df["object_id"],
+        )
+    export_df = merge_physical_measurements(export_df, physical_df)
 
     if "right_ascension" in export_df.columns:
         export_df["right_ascension_hms"] = export_df["right_ascension"].map(
@@ -202,6 +216,7 @@ def object_search_download_df(
     object_summary: dict[str, object],
     morphology_df: pd.DataFrame,
     mosaic_summary: dict[str, object],
+    physical_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     rows = []
     rows.extend(table_rows_with_coordinate_formats("Object summary", object_summary))
@@ -215,5 +230,17 @@ def object_search_download_df(
         {"section": "Mosaic summary", "field": field, "value": value}
         for field, value in mosaic_summary.items()
     )
+    if physical_df is not None and not physical_df.empty:
+        rows.extend(
+            {
+                "section": f"Physical measurements - {item['section']}",
+                "field": item["field"],
+                "value": item["value"],
+            }
+            for item in physical_measurement_display_rows(
+                physical_df.iloc[0],
+                excluded_fields=("object_id", "right_ascension", "declination"),
+            )
+        )
 
     return pd.DataFrame(rows)

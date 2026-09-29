@@ -17,6 +17,7 @@ The app combines:
 
 - Euclid visual morphology catalogue data.
 - PCA representations, currently `feat_pca_0` through `feat_pca_39`.
+- Catalogue morphology, photometric-redshift, stellar-population, flux, and shape measurements from `useful_physical_measurements.parquet`.
 - A strong-lensing candidate catalogue.
 - Morphology cutouts.
 - Lens-candidate images, when available.
@@ -27,6 +28,7 @@ Runtime data is expected to be available through configurable paths:
 
 - PCA representations: `PARQUET_PATH`
 - Straight-line-artifact-filtered PCA representations: `STRAIGHT_LINE_FILTERED_PARQUET_PATH`
+- Physical measurements: `PHYSICAL_MEASUREMENTS_PATH`
 - Lens-candidate catalogue: `LENS_PATH`
 - Morphology cutouts: `CUTOUT_BASE`
 - Lens-candidate images: `LENS_IMG_BASE`
@@ -52,7 +54,7 @@ The intended workflow is:
 2. Compute lens-candidate density per cluster.
 3. Inspect the clustering summary and visual examples.
 4. Select clusters with high lens-candidate density.
-5. Select and filter PCA components.
+5. Select and filter PCA components and, optionally, physical properties.
 6. Visualize the selected cluster with UMAP.
 7. Apply hierarchical subclustering inside promising clusters.
 8. Use `A/B/C` labels to guide semi-supervised UMAP within subclusters.
@@ -70,15 +72,19 @@ The default parameters were selected from the ESCOPE stability benchmark to bala
 
 The initial BIRCH stage is strictly unsupervised: candidate labels are neither used to select its features nor passed to `fit`. Lens labels are used only after clustering to measure candidate density and enrichment. The lens-displaced components `6, 0, 12, 1, 27, 10, 8, 13` remain the default selection for downstream PCA filtering and UMAP exploration.
 
+Physical measurements are joined by exact `object_id` only after BIRCH has been fitted. They can characterize clusters and subclusters, constrain the object set passed to UMAP, and enrich exported tables, but they do not alter the global morphology-based clustering.
+
 The cluster selected by default for downstream UMAP must contain at least 100 objects and more than one labelled candidate. Among eligible clusters, ESCOPE prioritises candidate density, then labelled-candidate count and cluster size. Smaller clusters remain available for manual selection. If no cluster reaches the minimum size, ESCOPE falls back to the same ranking without the size constraint.
 
 ## Features
 
 - Loads PCA catalogues such as `representations_pca_40.parquet`.
 - Optionally runs BIRCH on a PCA catalogue from which high-confidence straight-line image artifacts were removed.
+- Optionally assigns excluded artifacts to the fitted BIRCH clusters for inspection without changing the clustering or lens-candidate statistics. Reports the distance from each assigned center.
 - Automatically detects `feat_pca_*` columns.
 - Derives `object_id` from `id_str` when required.
 - Loads and joins a lens-candidate catalogue through `object_id`.
+- Loads physical measurements on demand and joins them through exact `object_id`.
 - Lets the user select lens grades included in the analysis.
 - Runs BIRCH clustering using all 40 standardized PCA components.
 - Computes cluster-level lens-candidate density.
@@ -91,16 +97,18 @@ The cluster selected by default for downstream UMAP must contain at least 100 ob
 - Computes PCA histograms comparing `Lens candidate` vs `Unknown`.
 - Estimates PCA threshold recommendations that enrich lens candidates in a cluster.
 - Applies recommended PCA filters interactively.
+- Summarizes cluster and hierarchical-subcluster physical properties with medians, interquartile ranges, coverage, and histograms.
+- Applies optional quality-aware physical-property filters before UMAP without refitting BIRCH.
 - Computes UMAP embeddings for selected clusters.
 - Uses a shared UMAP legend for Grade A (small red circles), Grade B (small
   orange squares), Grade C (small yellow crosses), and Unknown (blue) objects.
 - Computes hierarchical subclusters inside the selected cluster.
 - Computes semi-supervised UMAP for selected subclusters using labels `A=2`, `B=1`, `C=0`, and unknown objects as `-1`.
 - Supports object search by `object_id`.
-- Shows object metadata, selected PCA values, morphology-catalogue features, and available cutouts.
+- Shows object metadata, selected PCA values, morphology-catalogue features, physical measurements, and available cutouts.
 - Links selected/search objects to Aladin for external sky inspection.
 - Includes an offline notebook for experimental arc-like-structure detection.
-- Supports CSV export of clustering summaries and selected UMAP objects.
+- Supports CSV export of clustering summaries, searched objects, and selected UMAP objects, including matched physical measurements.
 
 ## Screenshots
 
@@ -124,6 +132,7 @@ The app provides several complementary visualizations:
 - UMAP overlays for lens candidates, canonical objects, anomalous objects, and hierarchical subclusters.
 - Semi-supervised UMAP for subclusters guided by `A/B/C` candidate labels.
 - Dendrogram preview to guide the number of hierarchical subclusters.
+- Cluster and subcluster physical-property summaries and distributions.
 - Cutout inspection for selected or searched objects.
 - Offline evaluation workflow for curve-aware arc-like-structure detection.
 
@@ -198,7 +207,8 @@ Set the required catalogue and image paths through environment variables:
 
 ```bash
 export PARQUET_PATH="gs://<bucket>/catalogues/morphology_catalogue/representations_pca_40.parquet"
-export STRAIGHT_LINE_FILTERED_PARQUET_PATH="gs://<bucket>/catalogues/morphology_catalogue/representations_pca_40_artifacts_filtered_v3_1_optimized_multiscale_hough_lines.parquet"
+export STRAIGHT_LINE_FILTERED_PARQUET_PATH="gs://<bucket>/catalogues/morphology_catalogue/representations_pca_40_artifacts_filtered_v3_2_continuous_multiscale_hough_lines.parquet"
+export PHYSICAL_MEASUREMENTS_PATH="gs://<bucket>/catalogues/morphology_catalogue/useful_physical_measurements.parquet"
 export LENS_PATH="gs://<bucket>/catalogues/strong_lensing_catalogue/q1_discovery_engine_lens_catalog.csv"
 export CUTOUT_BASE="gs://<bucket>/catalogues/morphology_catalogue/cutouts_jpg_gz_arcsinh_vis_only"
 export LENS_IMG_BASE="gs://<bucket>/catalogues/strong_lensing_catalogue/lens"
@@ -212,7 +222,7 @@ export MORPH_PATH="gs://<bucket>/catalogues/morphology_catalogue/morphology_cata
 export EUCLID_CACHE_DIR="$HOME/.cache/euclid-umap-explorer"
 ```
 
-`MORPH_PATH` is used to display the full morphology-catalogue row for selected or searched objects when available.
+`MORPH_PATH` is used to display the full morphology-catalogue row for selected or searched objects when available. `PHYSICAL_MEASUREMENTS_PATH` supplies the separately joined physical context, cluster summaries, UMAP filters, and export columns.
 
 `EUCLID_USE_LOCAL_CACHE=0` disables copying catalogue files into the local cache.
 
@@ -245,7 +255,7 @@ gcloud run deploy euclid-umap-app \
   --memory 4Gi \
   --cpu 2 \
   --timeout 900 \
-  --set-env-vars=PARQUET_PATH=gs://<bucket>/catalogues/morphology_catalogue/representations_pca_40.parquet,LENS_PATH=gs://<bucket>/catalogues/strong_lensing_catalogue/q1_discovery_engine_lens_catalog.csv,CUTOUT_BASE=gs://<bucket>/catalogues/morphology_catalogue/cutouts_jpg_gz_arcsinh_vis_only,LENS_IMG_BASE=gs://<bucket>/catalogues/strong_lensing_catalogue/lens,EUCLID_USE_LOCAL_CACHE=0
+  --set-env-vars=PARQUET_PATH=gs://<bucket>/catalogues/morphology_catalogue/representations_pca_40.parquet,PHYSICAL_MEASUREMENTS_PATH=gs://<bucket>/catalogues/morphology_catalogue/useful_physical_measurements.parquet,LENS_PATH=gs://<bucket>/catalogues/strong_lensing_catalogue/q1_discovery_engine_lens_catalog.csv,CUTOUT_BASE=gs://<bucket>/catalogues/morphology_catalogue/cutouts_jpg_gz_arcsinh_vis_only,LENS_IMG_BASE=gs://<bucket>/catalogues/strong_lensing_catalogue/lens,EUCLID_USE_LOCAL_CACHE=0
 ```
 
 The `Dockerfile` runs Streamlit on the Cloud Run `$PORT`.

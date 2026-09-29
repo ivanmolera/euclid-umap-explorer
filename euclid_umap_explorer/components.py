@@ -18,7 +18,12 @@ from .analysis import (
     format_pca_filter,
     lens_grade_sort_key,
 )
-from .catalogs import load_lens_catalog, load_morphology_object, normalize_object_ids
+from .catalogs import (
+    load_lens_catalog,
+    load_morphology_object,
+    load_physical_measurement_object,
+    normalize_object_ids,
+)
 from .config import (
     CUTOUT_BASE,
     DEFAULT_CLUSTER_FEATURES,
@@ -28,6 +33,7 @@ from .config import (
     LENS_PATH,
     MORPH_PATH,
     PARQUET_PATH,
+    PHYSICAL_MEASUREMENTS_PATH,
     PCA_FILTER_OPERATORS,
     PCA_FILTER_RECOMMENDATION_MIN_LENSES,
     PCA_FILTER_RECOMMENDATION_MIN_OBJECTS,
@@ -53,9 +59,17 @@ from .images import (
 )
 from .runtime import log_app_event
 from .storage import path_exists
+from .physical import (
+    PHYSICAL_ANALYSIS_FIELDS,
+    PHYSICAL_FILTER_OPERATORS,
+    analysis_ready_physical_measurements,
+    available_physical_analysis_fields,
+    physical_measurement_display_rows,
+)
 
 OVERLAY_BUTTON_MESSAGES = {
     "Run clustering": "Running BIRCH clustering...",
+    "Assign excluded artifacts": "Assigning excluded artifacts to BIRCH clusters...",
     "Compute UMAP": "Computing UMAP...",
     "Recompute UMAP": "Computing UMAP...",
     "Compute hierarchical clustering": "Computing hierarchical clustering...",
@@ -112,6 +126,17 @@ def inject_plot_cursor_css() -> None:
         <style>
         .block-container {
             padding-top: 2rem;
+        }
+        @media (min-width: 768px) {
+            section[data-testid="stSidebar"][aria-expanded="true"] {
+                max-width: 370px !important;
+                min-width: 370px !important;
+                width: 370px !important;
+            }
+            section[data-testid="stSidebar"][aria-expanded="true"]
+            > div:first-child {
+                width: 370px !important;
+            }
         }
         .js-plotly-plot .plotly .draglayer .drag,
         .js-plotly-plot .plotly .draglayer .nsewdrag,
@@ -551,6 +576,87 @@ def render_pca_filter_controls(pca_columns: list[str]) -> list[dict]:
                 )
 
     return raw_filters
+
+
+def render_physical_filter_controls(
+    physical_df: pd.DataFrame,
+    selected_cluster: int,
+) -> list[dict[str, object]]:
+    with st.expander("Physical property filters", expanded=False):
+        st.caption(
+            "Optional filters are combined with AND and applied only before UMAP. "
+            "Changing them does not run a calculation. Quality flags are respected."
+        )
+        clean = analysis_ready_physical_measurements(physical_df)
+        available_fields = available_physical_analysis_fields(clean)
+        if not available_fields:
+            st.info("No filterable physical measurements are available for this cluster.")
+            return []
+
+        selected_fields = st.multiselect(
+            "Properties",
+            available_fields,
+            format_func=lambda field: PHYSICAL_ANALYSIS_FIELDS.get(field, field),
+            key=f"physical_filter_fields_{selected_cluster}",
+        )
+        raw_filters: list[dict[str, object]] = []
+        for field in selected_fields:
+            values = pd.to_numeric(clean[field], errors="coerce").dropna()
+            if values.empty:
+                continue
+            minimum = float(values.min())
+            maximum = float(values.max())
+            st.markdown(f"**{PHYSICAL_ANALYSIS_FIELDS.get(field, field)}**")
+            operator = st.selectbox(
+                "Operator",
+                PHYSICAL_FILTER_OPERATORS,
+                key=f"physical_filter_{field}_operator",
+                label_visibility="collapsed",
+            )
+            if operator == "between":
+                lower_col, upper_col = st.columns(2)
+                with lower_col:
+                    lower = st.number_input(
+                        "Minimum",
+                        value=minimum,
+                        format="%.6f",
+                        key=f"physical_filter_{selected_cluster}_{field}_lower",
+                    )
+                with upper_col:
+                    upper = st.number_input(
+                        "Maximum",
+                        value=maximum,
+                        format="%.6f",
+                        key=f"physical_filter_{selected_cluster}_{field}_upper",
+                    )
+                raw_filters.append(
+                    {
+                        "field": field,
+                        "operator": operator,
+                        "lower": lower,
+                        "upper": upper,
+                        "enabled": True,
+                    }
+                )
+            else:
+                default_value = float(values.median())
+                value = st.number_input(
+                    "Value",
+                    value=default_value,
+                    format="%.6f",
+                    key=f"physical_filter_{selected_cluster}_{field}_value",
+                )
+                raw_filters.append(
+                    {
+                        "field": field,
+                        "operator": operator,
+                        "value": value,
+                        "enabled": True,
+                    }
+                )
+
+        return raw_filters
+
 
 def show_thumbnail(
     row: pd.Series | None,
@@ -1190,7 +1296,7 @@ def render_app_flow_help() -> None:
                     2. Rank clusters by lens-candidate density.<br>
                     3. Visually inspect enriched clusters.<br>
                     4. Compute PCA histograms and recommended thresholds.<br>
-                    5. Apply PCA filters to isolate enriched regions.<br>
+                    5. Apply PCA and physical-property filters to isolate enriched regions.<br>
                     6. Generate UMAP for the filtered subset.<br>
                     7. Apply hierarchical subclustering.<br>
                     8. Use A/B/C labels to guide semi-supervised UMAP in promising subclusters.<br>
@@ -1527,6 +1633,34 @@ def show_morphology_catalogue_row(row: pd.Series) -> None:
         )
         st.dataframe(morph_display, use_container_width=True, hide_index=True)
 
+
+def show_physical_measurements_row(
+    row: pd.Series,
+    physical_df: pd.DataFrame | None = None,
+) -> None:
+    object_id = normalize_object_ids(pd.Series([row.get("object_id", "")])).iloc[0]
+    if physical_df is None:
+        physical_df = load_physical_measurement_object(
+            PHYSICAL_MEASUREMENTS_PATH,
+            object_id,
+        )
+    elif not physical_df.empty:
+        normalized_ids = normalize_object_ids(physical_df["object_id"])
+        physical_df = physical_df.loc[normalized_ids == object_id].iloc[:1].copy()
+
+    st.markdown("**Physical measurements**")
+    if physical_df is None or physical_df.empty:
+        st.info("No physical measurements were found for this object_id.")
+        return
+
+    display = pd.DataFrame(
+        physical_measurement_display_rows(
+            physical_df.iloc[0],
+            excluded_fields=("object_id", "right_ascension", "declination"),
+        )
+    )
+    st.dataframe(display, use_container_width=True, hide_index=True)
+
 def show_selected_pca_components(row: pd.Series, selected_features: list[str]) -> None:
     st.markdown("**Selected PCA components**")
     st.dataframe(
@@ -1668,11 +1802,24 @@ def render_euclid_object_search(object_id: str) -> None:
     if cached_search and cached_search.get("requested_object_id") == str(object_id):
         result = cached_search["result"]
         morphology_df = cached_search["morphology_df"]
+        physical_df = cached_search.get("physical_df", pd.DataFrame())
         lens_candidate_summary = cached_search.get("lens_candidate_summary", {})
     else:
         started_at = time.perf_counter()
         result = fetch_euclid_object_summary(object_id)
         morphology_df = load_morphology_object(MORPH_PATH, str(result["object_id"]))
+        try:
+            physical_df = load_physical_measurement_object(
+                PHYSICAL_MEASUREMENTS_PATH,
+                result["object_id"],
+            )
+        except Exception as exc:
+            log_app_event(
+                "object_physical_measurements_failed",
+                object_id=str(result["object_id"]),
+                error_type=type(exc).__name__,
+            )
+            physical_df = pd.DataFrame()
         lens_candidate_summary = object_lens_candidate_summary(result["object_id"])
         mosaic_summary = result["mosaic_summary"]
         log_app_event(
@@ -1687,6 +1834,7 @@ def render_euclid_object_search(object_id: str) -> None:
             "requested_object_id": str(object_id),
             "result": result,
             "morphology_df": morphology_df,
+            "physical_df": physical_df,
             "lens_candidate_summary": lens_candidate_summary,
         }
 
@@ -1759,10 +1907,31 @@ def render_euclid_object_search(object_id: str) -> None:
                 )
                 st.dataframe(morphology_display, use_container_width=True, hide_index=True)
 
+            st.markdown("**Physical measurements**")
+            if physical_df.empty:
+                st.info("No physical measurements were found for this object_id.")
+            else:
+                physical_display = pd.DataFrame(
+                    physical_measurement_display_rows(
+                        physical_df.iloc[0],
+                        excluded_fields=(
+                            "object_id",
+                            "right_ascension",
+                            "declination",
+                        ),
+                    )
+                )
+                st.dataframe(
+                    physical_display,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
         object_download_df = object_search_download_df(
             object_summary,
             morphology_df,
             mosaic_summary,
+            physical_df,
         )
         st.download_button(
             "Download object search data",
@@ -1774,6 +1943,7 @@ def render_euclid_object_search(object_id: str) -> None:
 def validate_paths() -> pd.DataFrame:
     rows = [
         ("MORPH_PATH", MORPH_PATH),
+        ("PHYSICAL_MEASUREMENTS_PATH", PHYSICAL_MEASUREMENTS_PATH),
         ("PARQUET_PATH", PARQUET_PATH),
         ("CUTOUT_BASE", CUTOUT_BASE),
         ("LENS_PATH", LENS_PATH),

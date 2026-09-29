@@ -176,3 +176,68 @@ def load_morphology_objects(morph_path: str, object_ids: Iterable[object]) -> pd
     df = table.to_pandas()
     df["object_id"] = normalize_object_ids(df["object_id"])
     return df.drop_duplicates("object_id")
+
+
+def load_physical_measurements(
+    physical_path: str,
+    object_ids: Iterable[object],
+    columns: Iterable[str] | None = None,
+) -> pd.DataFrame:
+    """Read physical measurements for a set of catalogue object identifiers."""
+    import pyarrow as pa
+    import pyarrow.dataset as ds
+    import pyarrow.fs as pafs
+
+    normalized_ids = normalize_object_ids(pd.Series(list(object_ids))).dropna().unique()
+    if len(normalized_ids) == 0:
+        return pd.DataFrame()
+
+    if is_gcs_path(physical_path):
+        filesystem, path = pafs.FileSystem.from_uri(physical_path)
+        dataset = ds.dataset(path, format="parquet", filesystem=filesystem)
+    else:
+        path = cached_input_path(physical_path)
+        if not Path(path).exists():
+            return pd.DataFrame()
+        dataset = ds.dataset(path, format="parquet")
+
+    if "object_id" not in dataset.schema.names:
+        raise ValueError("The physical measurements parquet must contain object_id.")
+
+    requested_columns = list(columns) if columns is not None else list(dataset.schema.names)
+    requested_columns = [
+        column for column in dict.fromkeys(["object_id", *requested_columns])
+        if column in dataset.schema.names
+    ]
+    field_type = dataset.schema.field("object_id").type
+    if pa.types.is_integer(field_type):
+        filter_values = []
+        for value in normalized_ids:
+            try:
+                filter_values.append(int(value))
+            except ValueError:
+                continue
+        if not filter_values:
+            return pd.DataFrame(columns=requested_columns)
+        values = pa.array(filter_values, type=field_type)
+    else:
+        values = pa.array([str(value) for value in normalized_ids], type=field_type)
+
+    table = dataset.to_table(
+        columns=requested_columns,
+        filter=ds.field("object_id").isin(values),
+    )
+    if table.num_rows == 0:
+        return pd.DataFrame(columns=requested_columns)
+
+    result = table.to_pandas()
+    result["object_id"] = normalize_object_ids(result["object_id"])
+    return result.drop_duplicates("object_id")
+
+
+def load_physical_measurement_object(
+    physical_path: str,
+    object_id: object,
+) -> pd.DataFrame:
+    result = load_physical_measurements(physical_path, [object_id])
+    return result.iloc[:1].copy()

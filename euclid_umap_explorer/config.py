@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APP_TITLE_LINE_1 = "Euclid Strong-lensing Candidate Observation"
 APP_TITLE_LINE_2 = "and Projection Explorer"
 APP_TITLE = f"{APP_TITLE_LINE_1} {APP_TITLE_LINE_2}"
-APP_VERSION = "v0.1.16"
+APP_VERSION = "v0.1.17"
 EUCLID_LOGO_PATH = PROJECT_ROOT / "assets" / "euclid_logo.png"
 EUCLID_FAVICON_PATH = PROJECT_ROOT / "assets" / "favicon.png"
 LENS_GRADE_EXAMPLE_PATHS = {
@@ -26,6 +26,11 @@ MORPH_PATH = os.getenv(
     "MORPH_PATH",
     "/content/drive/MyDrive/catalogues/morphology_catalogue/morphology_catalogue.parquet",
 )
+PHYSICAL_MEASUREMENTS_PATH = os.getenv(
+    "PHYSICAL_MEASUREMENTS_PATH",
+    "gs://euclid-umap-ivan-0424-data/catalogues/morphology_catalogue/"
+    "useful_physical_measurements.parquet",
+)
 CUTOUT_BASE = os.getenv(
     "CUTOUT_BASE",
     "/content/drive/MyDrive/catalogues/morphology_catalogue/cutouts_jpg_gz_arcsinh_vis_only",
@@ -37,7 +42,7 @@ PARQUET_PATH = os.getenv(
 STRAIGHT_LINE_FILTERED_PARQUET_PATH = os.getenv(
     "STRAIGHT_LINE_FILTERED_PARQUET_PATH",
     "gs://euclid-umap-ivan-0424-data/catalogues/morphology_catalogue/"
-    "representations_pca_40_artifacts_filtered_v3_1_optimized_multiscale_hough_lines.parquet",
+    "representations_pca_40_artifacts_filtered_v3_2_continuous_multiscale_hough_lines.parquet",
 )
 STRAIGHT_LINE_ARTIFACT_EXAMPLE_PATHS = tuple(
     PROJECT_ROOT / "assets" / "straight_line_artifacts" / f"artifact_{index:02d}.jpg"
@@ -87,7 +92,7 @@ UMAP_POINT_COLORS = {
     "Grade B": "#ff7f0e",
     "Grade C": "#f2c94c",
     "Lens candidate": "#d62728",
-    "Unknown": "#4c78a8",
+    "Unknown": "#6f9fc5",
     "Canonical": "#2ca02c",
     "Anomaly": "#111111",
 }
@@ -130,6 +135,9 @@ ARC_DETECTION_CACHE_MAX_ITEMS = 64
 ENABLE_ARC_LIKE_STRUCTURE_DETECTION = (
     os.getenv("EUCLID_ENABLE_ARC_DETECTION", "0") == "1"
 )
+ENABLE_EXCLUDED_ARTIFACT_ASSIGNMENT_UI = (
+    os.getenv("EUCLID_ENABLE_EXCLUDED_ARTIFACT_UI", "0") == "1"
+)
 THUMBNAIL_CACHE_MAX_ITEMS = 512
 PCA_FILTER_OPERATORS = [">", ">=", "<", "<=", "between"]
 LENS_GRADE_HELP = {
@@ -147,11 +155,11 @@ LENS_GRADE_HELP = {
     ),
 }
 STRAIGHT_LINE_ARTIFACT_FILTER_HELP = (
-    "Straight-line artifacts are identified with Canny edge detection and a "
-    "probabilistic Hough transform. Candidate lines must be long, contain "
-    "continuous high-response pixels, contrast with their immediate surroundings, "
-    "and reach the image borders. When enabled, BIRCH uses the PCA catalogue from "
-    "which images containing these high-confidence artifacts were removed."
+    "Straight-line artifacts are identified with Canny edges and probabilistic "
+    "and global Hough transforms. Automatic exclusions require long, bright, "
+    "continuous lines with strong contrast and edge support; ambiguous detections "
+    "are kept for review. When enabled, BIRCH uses the PCA catalogue from which "
+    "images containing these high-confidence artifacts were removed."
 )
 PARAMETER_HELP = {
     "threshold": (
