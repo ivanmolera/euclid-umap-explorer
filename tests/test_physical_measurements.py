@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from euclid_umap_explorer import storage
+from euclid_umap_explorer.analysis import recommended_numeric_filter
 from euclid_umap_explorer.catalogs import (
     load_physical_measurement_object,
     load_physical_measurements,
@@ -143,6 +144,40 @@ class PhysicalMeasurementsTests(unittest.TestCase):
         self.assertIn("phz_median", export.columns)
         self.assertNotIn("flux_detection_total", export.columns)
         self.assertNotIn("phys_param_flags", export.columns)
+
+    def test_recommended_numeric_filter_requires_support_and_finds_enrichment(self):
+        supported = pd.DataFrame(
+            {
+                "measurement": np.linspace(0.0, 1.0, 40),
+                "is_lens": [False] * 34 + [True] * 6,
+            }
+        )
+        recommendation = recommended_numeric_filter(
+            supported,
+            "measurement",
+            min_valid_objects=25,
+            min_selected_objects=5,
+            min_lenses=2,
+            min_unknowns=2,
+            min_recall=0.05,
+        )
+        self.assertIsNotNone(recommendation)
+        self.assertEqual(recommendation["operator"], ">=")
+        self.assertGreater(float(recommendation["enrichment"]), 1.0)
+
+        unsupported = supported.copy()
+        unsupported["is_lens"] = [False] * 39 + [True]
+        self.assertIsNone(
+            recommended_numeric_filter(
+                unsupported,
+                "measurement",
+                min_valid_objects=25,
+                min_selected_objects=5,
+                min_lenses=2,
+                min_unknowns=2,
+                min_recall=0.05,
+            )
+        )
 
 
 if __name__ == "__main__":

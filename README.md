@@ -52,13 +52,14 @@ The intended workflow is:
 
 1. Run BIRCH clustering over all 40 standardized PCA components.
 2. Compute lens-candidate density per cluster.
-3. Inspect the clustering summary and visual examples.
-4. Select clusters with high lens-candidate density.
-5. Select and filter PCA components and, optionally, physical properties.
-6. Visualize the selected cluster with UMAP.
-7. Apply hierarchical subclustering inside promising clusters.
-8. Use `A/B/C` labels to guide semi-supervised UMAP within subclusters.
-9. Prioritize `Unknown` objects near lens-rich labelled regions.
+3. Inspect the clustering summary and its visual examples.
+4. Select any cluster from the summary table or from a visual preview.
+5. Review the selected cluster preview and its automatically generated PCA and physical-property characterizations.
+6. Optionally apply recommended PCA and physical-property filters from the sidebar.
+7. Visualize the filtered selected cluster with UMAP.
+8. Apply hierarchical subclustering inside promising clusters.
+9. Use `A/B/C` labels to guide semi-supervised UMAP within subclusters.
+10. Prioritize `Unknown` objects near lens-rich labelled regions.
 
 This workflow supports scientific triage: it narrows large Euclid catalogues to smaller, enriched regions where follow-up inspection is more efficient.
 
@@ -74,7 +75,7 @@ The initial BIRCH stage is strictly unsupervised: candidate labels are neither u
 
 Physical measurements are joined by exact `object_id` only after BIRCH has been fitted. They can characterize clusters and subclusters, constrain the object set passed to UMAP, and enrich exported tables, but they do not alter the global morphology-based clustering.
 
-The cluster selected by default for downstream UMAP must contain at least 100 objects and more than one labelled candidate. Among eligible clusters, ESCOPE prioritises candidate density, then labelled-candidate count and cluster size. Smaller clusters remain available for manual selection. If no cluster reaches the minimum size, ESCOPE falls back to the same ranking without the size constraint.
+No downstream cluster is selected automatically. The clustering summary is ranked by labelled-candidate count, then candidate density and cluster size; the first 20 entries receive visual previews, while every cluster remains selectable from the complete summary table.
 
 ## Features
 
@@ -88,18 +89,20 @@ The cluster selected by default for downstream UMAP must contain at least 100 ob
 - Lets the user select lens grades included in the analysis.
 - Runs BIRCH clustering using all 40 standardized PCA components.
 - Computes cluster-level lens-candidate density.
-- Selects by default a cluster enriched in lens candidates.
-- Provides visual cluster summaries with:
+- Lets the user select any cluster directly from the clustering table, including clusters beyond the visual-preview limit.
+- Provides visual previews for the first 20 ranked clusters with:
   - canonical object;
   - anomalous object;
   - random cluster examples;
   - labelled lens candidates.
-- Computes PCA histograms comparing `Lens candidate` vs `Unknown`.
+- Collapses the clustering summary after selection and displays only the selected cluster preview in the main analysis flow.
+- Automatically computes PCA histograms comparing `Lens candidate` vs `Unknown` for the selected cluster.
 - Estimates PCA threshold recommendations that enrich lens candidates in a cluster.
 - Applies recommended PCA filters interactively.
-- Adds on-demand compact physical characterization to each visual cluster preview, with medians, interquartile ranges, coverage, and eight histograms arranged four per row.
+- Automatically displays compact physical characterization for the selected cluster, with medians, interquartile ranges, coverage, and eight histograms arranged four per row.
 - Restricts physical characterization to photometric redshift, stellar mass, concentration, asymmetry, smoothness, Gini, M20, and Sersic index.
-- Applies optional quality-aware physical-property filters before UMAP without refitting BIRCH.
+- Recommends one-sided physical-property thresholds when enough valid lens and unknown measurements are available.
+- Applies optional quality-aware physical-property filters from the sidebar before UMAP without refitting BIRCH.
 - Computes UMAP embeddings for selected clusters.
 - Uses a shared UMAP legend for Grade A (small red circles), Grade B (small
   orange squares), Grade C (small yellow crosses), and Unknown (blue) objects.

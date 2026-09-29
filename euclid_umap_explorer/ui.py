@@ -12,8 +12,6 @@ from .analysis import (
     apply_pca_filters,
     build_cluster_summary,
     cluster_lens_grades,
-    default_cluster_option_index,
-    format_cluster_option,
     format_pca_filter,
     normalize_pca_filters,
     pca_filter_signature,
@@ -26,7 +24,9 @@ from .catalogs import load_physical_measurements, normalize_lens_grades
 from .components import (
     ProcessingOverlay,
     apply_pending_recommended_pca_filter,
+    apply_pending_recommended_physical_filter,
     build_cluster_summary_view_model,
+    build_selected_cluster_view_model,
     close_processing_overlay,
     cluster_summary_signature,
     format_decimal_comma,
@@ -36,11 +36,14 @@ from .components import (
     render_back_to_top_control,
     render_app_flow_help,
     render_cluster_visual_summary_view_model,
+    render_cluster_preview_card,
     render_euclid_object_search,
     render_help_label,
     render_lens_grade_help_label,
     render_pca_filter_controls,
     render_physical_filter_controls,
+    render_selected_cluster_pca_characterization,
+    render_selected_cluster_physical_characterization,
     request_clustering,
     show_morphology_catalogue_row,
     show_object_details,
@@ -128,6 +131,59 @@ def request_subclustering() -> None:
 def request_semisupervised_umap() -> None:
     st.session_state["semisupervised_umap_requested"] = True
     st.session_state["semisupervised_umap_expanded"] = True
+
+
+CLUSTER_DERIVED_STATE_KEYS = (
+    "umap_requested",
+    "umap_running",
+    "umap_embedding_df",
+    "umap_signature",
+    "subclustering_requested",
+    "hierarchical_dendrogram_fig",
+    "hierarchical_dendrogram_signature",
+    "hierarchical_subcluster_df",
+    "hierarchical_subcluster_signature",
+    "color_by_subcluster",
+    "semisupervised_umap_requested",
+    "semisupervised_umap_df",
+    "semisupervised_umap_signature",
+    "semisupervised_umap_expanded",
+    "physical_cluster_df",
+    "physical_cluster_signature",
+    "pending_recommended_pca_filter",
+    "pending_recommended_physical_filter",
+    "umap_chart",
+    "semisupervised_umap_chart",
+)
+
+
+def clear_selected_cluster_analysis(*, clear_selection: bool) -> None:
+    for key in CLUSTER_DERIVED_STATE_KEYS:
+        st.session_state.pop(key, None)
+    for key in list(st.session_state):
+        if key.startswith("pca_filter_") or key.startswith("physical_filter_"):
+            st.session_state.pop(key, None)
+    st.session_state["pca_filter_count"] = 0
+    if clear_selection:
+        st.session_state.pop("analysis_cluster_id", None)
+
+
+def process_pending_cluster_selection() -> None:
+    pending_cluster = st.session_state.pop("pending_analysis_cluster_id", None)
+    if pending_cluster is None:
+        return
+    pending_cluster = int(pending_cluster)
+    current_cluster = st.session_state.get("analysis_cluster_id")
+    if current_cluster is None or int(current_cluster) != pending_cluster:
+        clear_selected_cluster_analysis(clear_selection=False)
+        st.session_state["analysis_cluster_id"] = pending_cluster
+    st.session_state["cluster_summary_expanded"] = False
+
+
+def select_cluster_for_analysis(cluster_id: int) -> None:
+    st.session_state["pending_analysis_cluster_id"] = int(cluster_id)
+    st.session_state["cluster_summary_expanded"] = False
+    st.rerun()
 
 
 def style_umap_point_markers(
@@ -622,6 +678,7 @@ def render_semisupervised_umap_interaction(
 def main() -> None:
     page_icon = Image.open(EUCLID_FAVICON_PATH) if EUCLID_FAVICON_PATH.exists() else None
     st.set_page_config(page_title=APP_TITLE, page_icon=page_icon, layout="wide")
+    process_pending_cluster_selection()
     inject_plot_cursor_css()
     install_click_processing_overlay()
     render_back_to_top_control()
@@ -822,6 +879,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             st.warning("Select at least one lens grade before clustering.")
             st.stop()
 
+        clear_selected_cluster_analysis(clear_selection=True)
         st.session_state["cluster_ready"] = True
         st.session_state["cluster_params"] = {
             "lens_grades": selected_lens_grades,
@@ -833,7 +891,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             "birch_features": DEFAULT_BIRCH_FEATURES,
             "birch_scaling": DEFAULT_BIRCH_SCALING,
         }
-        st.session_state["cluster_summary_expanded"] = False
+        st.session_state["cluster_summary_expanded"] = True
         log_app_event(
             "birch_clustering_requested",
             selected_grades=list(selected_lens_grades),
@@ -921,7 +979,6 @@ This analysis uses Euclid Q1 catalogue products available at:
         cluster_summary_df = build_cluster_summary(clustered_df)
         st.session_state["cluster_summary_df"] = cluster_summary_df
     cluster_summary_df = cluster_summary_df.copy()
-    cluster_summary_df["option"] = cluster_summary_df.apply(format_cluster_option, axis=1)
 
     left_metric, middle_metric, right_metric = st.columns(3)
     left_metric.metric("Clustered objects", format_thousands_dot(len(clustered_df)))
@@ -1000,9 +1057,13 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.session_state["cluster_summary_view_signature"] = current_summary_signature
     cluster_summary_view_model = st.session_state["cluster_summary_view_model"]
 
+    cluster_summary_expanded = bool(
+        st.session_state.get("cluster_summary_expanded", False)
+    )
+    preview_requested_cluster = None
     with st.expander(
         "Clustering summary",
-        expanded=st.session_state.get("cluster_summary_expanded", False),
+        expanded=cluster_summary_expanded,
     ):
         render_execution_time(clustered_df.attrs.get("processing_seconds"))
         cluster_download_df = cluster_summary_view_model["cluster_download_df"]
@@ -1013,43 +1074,66 @@ This analysis uses Euclid Q1 catalogue products available at:
         summary_display["enrichment_x"] = summary_display["enrichment"].map(
             lambda value: format_decimal_comma(float(value), 2)
         )
-        st.dataframe(
-            summary_display[
-                [
-                    "cluster",
-                    "n_objects",
-                    "n_lenses",
-                    "lens_rate_%",
-                    "enrichment_x",
-                    "canonical",
-                    "anomalous",
-                ]
-            ],
+        summary_table = summary_display[
+            [
+                "cluster",
+                "n_objects",
+                "n_lenses",
+                "lens_rate_%",
+                "enrichment_x",
+                "canonical",
+                "anomalous",
+            ]
+        ].reset_index(drop=True)
+        st.caption(
+            "Select any table row or use **Analyse this cluster** in a visual preview."
+        )
+        table_event = st.dataframe(
+            summary_table,
             use_container_width=True,
             hide_index=True,
+            key=f"cluster_summary_table_{id(clustered_df)}",
+            on_select="rerun",
+            selection_mode="single-row",
         )
+        selected_rows = tuple(int(row) for row in table_event.selection.rows)
+        table_selection_key = f"cluster_summary_table_selection_{id(clustered_df)}"
+        previous_rows = tuple(st.session_state.get(table_selection_key, ()))
+        table_requested_cluster = None
+        if selected_rows != previous_rows:
+            st.session_state[table_selection_key] = selected_rows
+            if selected_rows:
+                table_requested_cluster = int(
+                    summary_table.iloc[selected_rows[0]]["cluster"]
+                )
         st.download_button(
             "Download clustering table",
             data=dataframe_to_csv_bytes(cluster_download_df),
             file_name="clustering_summary.csv",
             mime="text/csv",
         )
-        render_cluster_visual_summary_view_model(
-            cluster_summary_view_model,
-            clustered_df,
-        )
+        if cluster_summary_expanded:
+            preview_requested_cluster = render_cluster_visual_summary_view_model(
+                cluster_summary_view_model
+            )
 
-    selected_option = st.selectbox(
-        "Cluster selection",
-        cluster_summary_df["option"].tolist(),
-        index=default_cluster_option_index(cluster_summary_df),
+    requested_cluster = (
+        preview_requested_cluster
+        if preview_requested_cluster is not None
+        else table_requested_cluster
     )
-    selected_cluster = int(
-        cluster_summary_df.loc[
-            cluster_summary_df["option"] == selected_option,
-            "cluster",
-        ].iloc[0]
-    )
+    if requested_cluster is not None:
+        select_cluster_for_analysis(requested_cluster)
+
+    selected_cluster_value = st.session_state.get("analysis_cluster_id")
+    available_clusters = set(cluster_summary_df["cluster"].astype(int))
+    if selected_cluster_value is None or int(selected_cluster_value) not in available_clusters:
+        st.info(
+            "Select a cluster from **Clustering summary** to continue with PCA, "
+            "physical characterization and UMAP."
+        )
+        st.stop()
+    selected_cluster = int(selected_cluster_value)
 
     if (
         ENABLE_EXCLUDED_ARTIFACT_ASSIGNMENT_UI
@@ -1077,10 +1161,12 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.warning("Physical measurements could not be loaded for this cluster.")
         physical_cluster_df = pd.DataFrame()
 
-    raw_physical_filters = render_physical_filter_controls(
-        physical_cluster_df,
-        selected_cluster,
-    )
+    with st.sidebar:
+        apply_pending_recommended_physical_filter(selected_cluster)
+        raw_physical_filters = render_physical_filter_controls(
+            physical_cluster_df,
+            selected_cluster,
+        )
     physical_filters = normalize_physical_filters(
         raw_physical_filters,
         available_physical_analysis_fields(physical_cluster_df),
@@ -1090,6 +1176,36 @@ This analysis uses Euclid Q1 catalogue products available at:
         filtered_cluster_df,
         physical_cluster_df,
         physical_filters,
+    )
+
+    selected_heading, change_cluster_col = st.columns([4, 1])
+    with selected_heading:
+        st.subheader(f"Selected cluster {selected_cluster}")
+    with change_cluster_col:
+        if st.button("Change cluster", use_container_width=True):
+            st.session_state["cluster_summary_expanded"] = True
+            st.rerun()
+
+    selected_cluster_model = build_selected_cluster_view_model(
+        clustered_df,
+        cluster_summary_df,
+        selected_cluster,
+        pca_columns,
+        selected_features,
+    )
+    render_cluster_preview_card(
+        selected_cluster_model,
+        show_analysis_button=False,
+    )
+    render_selected_cluster_pca_characterization(
+        selected_cluster,
+        cluster_df,
+        cluster_summary_view_model["histogram_features"],
+    )
+    render_selected_cluster_physical_characterization(
+        selected_cluster,
+        cluster_df,
+        physical_cluster_df,
     )
 
     with st.expander(

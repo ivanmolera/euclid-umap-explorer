@@ -177,6 +177,81 @@ def pca_features_for_preset(
     return [feature for feature in preset_features if feature in available_columns]
 
 
+def recommended_numeric_filter(
+    data: pd.DataFrame,
+    feature: str,
+    *,
+    min_valid_objects: int,
+    min_selected_objects: int,
+    min_lenses: int,
+    min_unknowns: int,
+    min_recall: float,
+) -> dict[str, float | int | str] | None:
+    """Find a one-sided threshold that balances enrichment and lens recall."""
+    if "is_lens" not in data.columns or feature not in data.columns:
+        return None
+
+    work_df = data[[feature, "is_lens"]].copy()
+    work_df[feature] = pd.to_numeric(work_df[feature], errors="coerce")
+    work_df = work_df.dropna(subset=[feature, "is_lens"])
+    if len(work_df) < min_valid_objects:
+        return None
+
+    work_df["is_lens"] = work_df["is_lens"].astype(bool)
+    total_objects = len(work_df)
+    total_lenses = int(work_df["is_lens"].sum())
+    total_unknowns = total_objects - total_lenses
+    if total_lenses < min_lenses or total_unknowns < min_unknowns:
+        return None
+
+    base_lens_rate = total_lenses / total_objects
+    values = work_df[feature].astype(float)
+    candidate_thresholds = np.unique(np.percentile(values, np.linspace(5, 95, 91)))
+    required_objects = min(
+        max(min_selected_objects, int(total_objects * 0.005)),
+        max(total_objects - 1, 1),
+    )
+    best: dict[str, float | int | str] | None = None
+
+    for threshold in candidate_thresholds:
+        for operator, selected_mask in (
+            (">=", values >= threshold),
+            ("<=", values <= threshold),
+        ):
+            selected = work_df[selected_mask]
+            n_selected = len(selected)
+            if n_selected < required_objects:
+                continue
+
+            n_lenses = int(selected["is_lens"].sum())
+            if n_lenses < 1:
+                continue
+
+            lens_rate = n_lenses / n_selected
+            recall = n_lenses / total_lenses
+            if recall < min_recall:
+                continue
+
+            enrichment = lens_rate / base_lens_rate if base_lens_rate else 0.0
+            score = enrichment * np.sqrt(recall)
+            recommendation: dict[str, float | int | str] = {
+                "feature": feature,
+                "operator": operator,
+                "value": float(threshold),
+                "n_selected": int(n_selected),
+                "n_lenses": int(n_lenses),
+                "lens_rate": float(lens_rate),
+                "base_lens_rate": float(base_lens_rate),
+                "recall": float(recall),
+                "enrichment": float(enrichment),
+                "score": float(score),
+            }
+            if best is None or float(recommendation["score"]) > float(best["score"]):
+                best = recommendation
+
+    return best
+
+
 def add_cluster_extreme_roles(
     data: pd.DataFrame,
     selected_features: list[str],

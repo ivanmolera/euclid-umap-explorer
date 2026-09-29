@@ -17,12 +17,12 @@ from .analysis import (
     add_cluster_extreme_roles,
     format_pca_filter,
     lens_grade_sort_key,
+    recommended_numeric_filter,
 )
 from .catalogs import (
     load_lens_catalog,
     load_morphology_object,
     load_physical_measurement_object,
-    load_physical_measurements,
     normalize_object_ids,
 )
 from .config import (
@@ -39,6 +39,9 @@ from .config import (
     PCA_FILTER_RECOMMENDATION_MIN_LENSES,
     PCA_FILTER_RECOMMENDATION_MIN_OBJECTS,
     PCA_FILTER_RECOMMENDATION_MIN_RECALL,
+    PHYSICAL_FILTER_RECOMMENDATION_MIN_LENSES,
+    PHYSICAL_FILTER_RECOMMENDATION_MIN_UNKNOWNS,
+    PHYSICAL_FILTER_RECOMMENDATION_MIN_VALID_OBJECTS,
     SUMMARY_DISTPLOT_MAX_POINTS_PER_GROUP,
     SUMMARY_HISTOGRAM_BINS,
     SUMMARY_HISTOGRAM_FEATURE_LIMIT,
@@ -587,8 +590,10 @@ def render_physical_filter_controls(
 ) -> list[dict[str, object]]:
     with st.expander("Physical property filters", expanded=False):
         st.caption(
-            "Optional filters are combined with AND and applied only before UMAP. "
-            "Changing them does not run a calculation. Quality flags are respected."
+            "Filters are combined with AND and applied to the selected cluster before "
+            "UMAP and subsequent analyses. Changing them does not start a calculation. "
+            "Measurements flagged as unreliable in the Euclid catalogue are treated "
+            "as missing."
         )
         clean = analysis_ready_physical_measurements(physical_df)
         available_fields = available_physical_analysis_fields(clean)
@@ -613,24 +618,26 @@ def render_physical_filter_controls(
             operator = st.selectbox(
                 "Operator",
                 PHYSICAL_FILTER_OPERATORS,
-                key=f"physical_filter_{field}_operator",
+                key=f"physical_filter_{selected_cluster}_{field}_operator",
                 label_visibility="collapsed",
             )
             if operator == "between":
                 lower_col, upper_col = st.columns(2)
+                lower_key = f"physical_filter_{selected_cluster}_{field}_lower"
+                upper_key = f"physical_filter_{selected_cluster}_{field}_upper"
+                st.session_state.setdefault(lower_key, minimum)
+                st.session_state.setdefault(upper_key, maximum)
                 with lower_col:
                     lower = st.number_input(
                         "Minimum",
-                        value=minimum,
                         format="%.6f",
-                        key=f"physical_filter_{selected_cluster}_{field}_lower",
+                        key=lower_key,
                     )
                 with upper_col:
                     upper = st.number_input(
                         "Maximum",
-                        value=maximum,
                         format="%.6f",
-                        key=f"physical_filter_{selected_cluster}_{field}_upper",
+                        key=upper_key,
                     )
                 raw_filters.append(
                     {
@@ -643,11 +650,12 @@ def render_physical_filter_controls(
                 )
             else:
                 default_value = float(values.median())
+                value_key = f"physical_filter_{selected_cluster}_{field}_value"
+                st.session_state.setdefault(value_key, default_value)
                 value = st.number_input(
                     "Value",
-                    value=default_value,
                     format="%.6f",
-                    key=f"physical_filter_{selected_cluster}_{field}_value",
+                    key=value_key,
                 )
                 raw_filters.append(
                     {
@@ -659,6 +667,38 @@ def render_physical_filter_controls(
                 )
 
         return raw_filters
+
+
+def queue_recommended_physical_filter(
+    recommendation: dict[str, object],
+    cluster_id: int,
+) -> None:
+    st.session_state["pending_recommended_physical_filter"] = {
+        "cluster_id": int(cluster_id),
+        "field": str(recommendation["feature"]),
+        "operator": str(recommendation["operator"]),
+        "value": float(recommendation["value"]),
+    }
+
+
+def apply_pending_recommended_physical_filter(cluster_id: int) -> None:
+    recommendation = st.session_state.get("pending_recommended_physical_filter")
+    if recommendation is None or int(recommendation["cluster_id"]) != int(cluster_id):
+        return
+    st.session_state.pop("pending_recommended_physical_filter", None)
+
+    field = str(recommendation["field"])
+    fields_key = f"physical_filter_fields_{cluster_id}"
+    selected_fields = list(st.session_state.get(fields_key, []))
+    if field not in selected_fields:
+        selected_fields.append(field)
+    st.session_state[fields_key] = selected_fields
+    st.session_state[
+        f"physical_filter_{cluster_id}_{field}_operator"
+    ] = recommendation["operator"]
+    st.session_state[f"physical_filter_{cluster_id}_{field}_value"] = float(
+        recommendation["value"]
+    )
 
 
 def show_thumbnail(
@@ -854,67 +894,15 @@ def format_thousands_dot(value: int | float) -> str:
     return f"{int(value):,}".replace(",", ".")
 
 def recommended_pca_filter(cluster_df: pd.DataFrame, feature: str) -> dict | None:
-    if "is_lens" not in cluster_df.columns or feature not in cluster_df.columns:
-        return None
-
-    work_df = cluster_df[[feature, "is_lens"]].dropna().copy()
-    if work_df.empty:
-        return None
-
-    work_df["is_lens"] = work_df["is_lens"].astype(bool)
-    total_objects = len(work_df)
-    total_lenses = int(work_df["is_lens"].sum())
-    if total_lenses == 0 or total_lenses == total_objects:
-        return None
-
-    base_lens_rate = total_lenses / total_objects
-    values = work_df[feature].astype(float)
-    candidate_thresholds = np.unique(np.percentile(values, np.linspace(5, 95, 91)))
-    best: dict | None = None
-
-    min_objects = min(
-        max(PCA_FILTER_RECOMMENDATION_MIN_OBJECTS, int(total_objects * 0.005)),
-        max(total_objects - 1, 1),
+    return recommended_numeric_filter(
+        cluster_df,
+        feature,
+        min_valid_objects=2,
+        min_selected_objects=PCA_FILTER_RECOMMENDATION_MIN_OBJECTS,
+        min_lenses=PCA_FILTER_RECOMMENDATION_MIN_LENSES,
+        min_unknowns=1,
+        min_recall=PCA_FILTER_RECOMMENDATION_MIN_RECALL,
     )
-    min_lenses = min(PCA_FILTER_RECOMMENDATION_MIN_LENSES, total_lenses)
-
-    for threshold in candidate_thresholds:
-        for operator, selected_mask in (
-            (">=", values >= threshold),
-            ("<=", values <= threshold),
-        ):
-            selected = work_df[selected_mask]
-            n_selected = len(selected)
-            if n_selected < min_objects:
-                continue
-
-            n_lenses = int(selected["is_lens"].sum())
-            if n_lenses < min_lenses:
-                continue
-
-            lens_rate = n_lenses / n_selected
-            recall = n_lenses / total_lenses
-            if recall < PCA_FILTER_RECOMMENDATION_MIN_RECALL:
-                continue
-
-            enrichment = lens_rate / base_lens_rate if base_lens_rate else 0.0
-            score = enrichment * np.sqrt(recall)
-            recommendation = {
-                "feature": feature,
-                "operator": operator,
-                "value": float(threshold),
-                "n_selected": int(n_selected),
-                "n_lenses": int(n_lenses),
-                "lens_rate": float(lens_rate),
-                "base_lens_rate": float(base_lens_rate),
-                "recall": float(recall),
-                "enrichment": float(enrichment),
-                "score": float(score),
-            }
-            if best is None or recommendation["score"] > best["score"]:
-                best = recommendation
-
-    return best
 
 def queue_recommended_pca_filter(recommendation: dict) -> None:
     st.session_state["pending_recommended_pca_filter"] = {
@@ -1016,31 +1004,19 @@ def build_cluster_distplot_figure(
     fig.update_xaxes(showgrid=False, zeroline=False)
     return fig
 
-@st.fragment
-def render_cluster_histograms(
+def render_selected_cluster_pca_characterization(
     cluster_id: int,
     cluster_df: pd.DataFrame,
     summary_features: list[str],
 ) -> None:
+    st.subheader("PCA characterization")
     n_lenses = int(cluster_df["is_lens"].sum())
     n_non_lenses = len(cluster_df) - n_lenses
     if n_lenses == 0:
-        return
-
-    state_key = f"cluster_histograms_visible_{cluster_id}"
-    st.session_state.setdefault(state_key, False)
-    button_label = (
-        "Update PCA histograms"
-        if st.session_state.get(state_key)
-        else "Compute PCA histograms"
-    )
-    st.button(
-        button_label,
-        key=f"cluster_histograms_button_{cluster_id}",
-        on_click=lambda key=state_key: st.session_state.update({key: True}),
-    )
-
-    if not st.session_state.get(state_key):
+        st.info(
+            "This cluster has no labelled lens candidates, so lens-versus-unknown "
+            "PCA distributions and recommended thresholds cannot be calculated."
+        )
         return
 
     if n_non_lenses == 0:
@@ -1216,90 +1192,64 @@ def build_compact_physical_histogram_figure(
     return figure
 
 
-@st.fragment
-def render_cluster_physical_histograms(
+def _cluster_physical_analysis_data(
+    cluster_df: pd.DataFrame,
+    physical_df: pd.DataFrame,
+) -> pd.DataFrame:
+    memberships = cluster_df[["object_id", "is_lens"]].copy()
+    memberships["object_id"] = normalize_object_ids(memberships["object_id"])
+    memberships = memberships.drop_duplicates("object_id")
+    clean = analysis_ready_physical_measurements(physical_df).drop_duplicates(
+        "object_id"
+    )
+    return memberships.merge(clean, on="object_id", how="left")
+
+
+def _physical_filter_unavailable_reason(
+    analysis_df: pd.DataFrame,
+    field: str,
+) -> str:
+    values = analysis_df[[field, "is_lens"]].copy()
+    values[field] = pd.to_numeric(values[field], errors="coerce")
+    values = values.dropna(subset=[field, "is_lens"])
+    if len(values) < PHYSICAL_FILTER_RECOMMENDATION_MIN_VALID_OBJECTS:
+        return (
+            "At least "
+            f"{PHYSICAL_FILTER_RECOMMENDATION_MIN_VALID_OBJECTS} valid measurements "
+            "are required."
+        )
+    n_lenses = int(values["is_lens"].astype(bool).sum())
+    n_unknowns = len(values) - n_lenses
+    if n_lenses < PHYSICAL_FILTER_RECOMMENDATION_MIN_LENSES:
+        return (
+            "At least "
+            f"{PHYSICAL_FILTER_RECOMMENDATION_MIN_LENSES} labelled lens candidates "
+            "with valid measurements are required."
+        )
+    if n_unknowns < PHYSICAL_FILTER_RECOMMENDATION_MIN_UNKNOWNS:
+        return (
+            "At least "
+            f"{PHYSICAL_FILTER_RECOMMENDATION_MIN_UNKNOWNS} unknown objects with "
+            "valid measurements are required."
+        )
+    return "No stable one-sided threshold was found for this property."
+
+
+def render_selected_cluster_physical_characterization(
     cluster_id: int,
     cluster_df: pd.DataFrame,
-    cluster_result_id: int,
+    physical_df: pd.DataFrame,
 ) -> None:
-    data_key = f"cluster_physical_data_{cluster_result_id}_{cluster_id}"
-    visible_key = f"cluster_physical_histograms_visible_{cluster_result_id}_{cluster_id}"
-    is_visible = bool(st.session_state.get(visible_key, False))
-    button_label = (
-        "Update physical histograms" if is_visible else "Compute physical histograms"
-    )
-    if st.button(
-        button_label,
-        key=f"cluster_physical_histograms_button_{cluster_result_id}_{cluster_id}",
-    ):
-        try:
-            if is_visible or data_key not in st.session_state:
-                physical_df = load_physical_measurements(
-                    PHYSICAL_MEASUREMENTS_PATH,
-                    cluster_df["object_id"],
-                    columns=PHYSICAL_QUERY_FIELDS,
-                )
-                st.session_state[data_key] = physical_df
-            else:
-                physical_df = st.session_state[data_key]
-            st.session_state[visible_key] = True
-            log_app_event(
-                "cluster_physical_histograms_computed",
-                cluster=cluster_id,
-                cluster_objects=int(len(cluster_df)),
-                matched_objects=int(len(physical_df)),
-            )
-        except Exception as exc:
-            log_app_event(
-                "cluster_physical_histograms_failed",
-                cluster=cluster_id,
-                error_type=type(exc).__name__,
-            )
-            st.error("Physical measurements could not be loaded for this cluster.")
-            return
-
-    if not st.session_state.get(visible_key, False):
-        return
-    physical_df = st.session_state.get(data_key)
-    if physical_df is None:
-        return
-
+    st.subheader("Physical characterization")
     summary = build_physical_summary(physical_df, total_objects=len(cluster_df))
     if summary.empty:
         st.info("No usable physical measurements were found for this cluster.")
         return
 
-    st.markdown("**Physical characterization**")
-    display = pd.DataFrame(
-        {
-            "measurement": summary["measurement"],
-            "median": summary["median"].map(
-                lambda value: format_decimal_comma(value, 3)
-            ),
-            "IQR [q25, q75]": summary.apply(
-                lambda row: (
-                    f"[{format_decimal_comma(row['q25'], 3)}, "
-                    f"{format_decimal_comma(row['q75'], 3)}]"
-                ),
-                axis=1,
-            ),
-            "valid_objects": summary["valid_objects"].map(format_thousands_dot),
-            "coverage_%": summary["coverage_%"].map(
-                lambda value: format_decimal_comma(value, 1)
-            ),
-        }
-    )
-    st.dataframe(
-        display,
-        use_container_width=True,
-        hide_index=True,
-        height=318,
-    )
     st.caption(
-        "Quality-controlled values are used: phz_flags=0 for photometric "
-        "redshift, phys_param_flags=0 for stellar mass, and "
-        "sersic_visnir_flags=0 for the Sersic index. Other displayed "
-        "morphology measurements must be finite."
+        "Measurements flagged as unreliable in the Euclid catalogue are treated "
+        "as missing. This applies to photometric redshift, stellar mass and the "
+        "Sersic index; all other displayed measurements must be finite."
     )
     st.plotly_chart(
         build_compact_physical_histogram_figure(
@@ -1308,8 +1258,113 @@ def render_cluster_physical_histograms(
         ),
         use_container_width=True,
         config={"displaylogo": False, "responsive": True},
-        key=f"cluster_physical_histograms_chart_{cluster_result_id}_{cluster_id}",
+        key=f"selected_cluster_physical_histograms_{cluster_id}",
     )
+
+    analysis_df = _cluster_physical_analysis_data(cluster_df, physical_df)
+    recommendations = {
+        field: recommended_numeric_filter(
+            analysis_df,
+            field,
+            min_valid_objects=PHYSICAL_FILTER_RECOMMENDATION_MIN_VALID_OBJECTS,
+            min_selected_objects=PCA_FILTER_RECOMMENDATION_MIN_OBJECTS,
+            min_lenses=PHYSICAL_FILTER_RECOMMENDATION_MIN_LENSES,
+            min_unknowns=PHYSICAL_FILTER_RECOMMENDATION_MIN_UNKNOWNS,
+            min_recall=PCA_FILTER_RECOMMENDATION_MIN_RECALL,
+        )
+        for field in summary["field"]
+    }
+
+    st.markdown("**Physical measurements and recommended thresholds**")
+    column_widths = [1.8, 1.7, 2.2, 1.25, 1.35, 0.95, 0.85]
+    header_cols = st.columns(column_widths)
+    headers = [
+        "filter",
+        "measurement",
+        "median / IQR",
+        "valid / coverage",
+        "threshold",
+        "enrichment_x",
+        "recall_%",
+    ]
+    for header_col, header in zip(header_cols, headers):
+        align = "right" if header in {"enrichment_x", "recall_%"} else "left"
+        header_col.markdown(
+            f"""
+            <div style="
+                border-bottom: 1px solid rgba(128, 128, 128, 0.35);
+                font-size: 0.78rem;
+                font-weight: 700;
+                padding: 0.25rem 0;
+                text-align: {align};
+            ">{html.escape(header)}</div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    for row_index, row in summary.reset_index(drop=True).iterrows():
+        field = str(row["field"])
+        recommendation = recommendations[field]
+        row_cols = st.columns(column_widths)
+        with row_cols[0]:
+            if st.button(
+                "Apply filter",
+                key=f"apply_physical_filter_{cluster_id}_{field}_{row_index}",
+                disabled=recommendation is None,
+                use_container_width=True,
+                help=(
+                    None
+                    if recommendation is not None
+                    else _physical_filter_unavailable_reason(analysis_df, field)
+                ),
+            ):
+                queue_recommended_physical_filter(recommendation, cluster_id)
+                st.rerun()
+
+        threshold = "-"
+        enrichment = "-"
+        recall = "-"
+        if recommendation is not None:
+            threshold = (
+                f"{recommendation['operator']} "
+                f"{format_decimal_comma(float(recommendation['value']), 4)}"
+            )
+            enrichment = format_decimal_comma(
+                float(recommendation["enrichment"]),
+                2,
+            )
+            recall = format_decimal_comma(float(recommendation["recall"]) * 100, 2)
+
+        row_values = [
+            row["measurement"],
+            (
+                f"{format_decimal_comma(float(row['median']), 3)} / "
+                f"[{format_decimal_comma(float(row['q25']), 3)}, "
+                f"{format_decimal_comma(float(row['q75']), 3)}]"
+            ),
+            (
+                f"{format_thousands_dot(int(row['valid_objects']))} / "
+                f"{format_decimal_comma(float(row['coverage_%']), 1)}%"
+            ),
+            threshold,
+            enrichment,
+            recall,
+        ]
+        alignments = ["left", "left", "left", "left", "right", "right"]
+        for value_col, value, align in zip(row_cols[1:], row_values, alignments):
+            value_col.markdown(
+                f"""
+                <div style="
+                    border-bottom: 1px solid rgba(128, 128, 128, 0.16);
+                    font-size: 0.8rem;
+                    min-height: 2.5rem;
+                    overflow-wrap: anywhere;
+                    padding: 0.48rem 0;
+                    text-align: {align};
+                ">{html.escape(str(value))}</div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 def render_thumbnail_group_title(title: str) -> None:
@@ -1463,7 +1518,7 @@ def render_cluster_visual_summary(
         pca_columns,
         selected_features,
     )
-    render_cluster_visual_summary_view_model(view_model, clustered_df)
+    render_cluster_visual_summary_view_model(view_model)
 
 def cluster_summary_signature(
     clustered_df: pd.DataFrame,
@@ -1494,6 +1549,61 @@ def summary_features_for_visuals(
     ] or [feature for feature in DEFAULT_CLUSTER_FEATURES if feature in pca_columns]
     return summary_features or pca_columns[: min(4, len(pca_columns))]
 
+
+def build_cluster_preview_model(
+    cluster_df: pd.DataFrame,
+    summary_row: pd.Series,
+    summary_features: list[str],
+) -> dict[str, object]:
+    cluster_id = int(summary_row["cluster"])
+    canonical_row, anomaly_row, random_rows, lens_rows = cluster_visual_rows(
+        cluster_df,
+        summary_features,
+        cluster_id,
+    )
+    lens_captions = []
+    for row in lens_rows:
+        lens_grade = row.get("lens_grade", "")
+        if pd.isna(lens_grade) or not str(lens_grade).strip():
+            lens_captions.append("Grade ?")
+        else:
+            lens_captions.append(f"Grade {str(lens_grade).strip()}")
+
+    return {
+        "cluster_id": cluster_id,
+        "n_objects": int(summary_row["n_objects"]),
+        "n_lenses": int(summary_row["n_lenses"]),
+        "lens_rate": float(summary_row["lens_rate"]),
+        "enrichment": float(summary_row["enrichment"]),
+        "canonical_row": canonical_row,
+        "anomaly_row": anomaly_row,
+        "random_rows": random_rows,
+        "lens_rows": lens_rows,
+        "lens_captions": lens_captions,
+    }
+
+
+def build_selected_cluster_view_model(
+    clustered_df: pd.DataFrame,
+    cluster_summary_df: pd.DataFrame,
+    selected_cluster: int,
+    pca_columns: list[str],
+    selected_features: list[str],
+) -> dict[str, object]:
+    summary_rows = cluster_summary_df[
+        cluster_summary_df["cluster"].astype(int) == int(selected_cluster)
+    ]
+    if summary_rows.empty:
+        raise ValueError(f"Cluster {selected_cluster} is not present in the summary.")
+    cluster_df = clustered_df[
+        clustered_df["cluster"].astype(int) == int(selected_cluster)
+    ].copy()
+    return build_cluster_preview_model(
+        cluster_df,
+        summary_rows.iloc[0],
+        summary_features_for_visuals(pca_columns, selected_features),
+    )
+
 def build_cluster_summary_view_model(
     clustered_df: pd.DataFrame,
     cluster_summary_df: pd.DataFrame,
@@ -1511,17 +1621,18 @@ def build_cluster_summary_view_model(
         cluster_df = cluster_groups.get_group(cluster_id).copy()
         include_visual_preview = position < SUMMARY_VISUAL_CLUSTER_LIMIT
         if include_visual_preview:
-            canonical_row, anomaly_row, random_rows, lens_rows = cluster_visual_rows(
+            cluster_model = build_cluster_preview_model(
                 cluster_df,
+                summary_row,
                 summary_features,
-                cluster_id,
             )
+            canonical_row = cluster_model["canonical_row"]
+            anomaly_row = cluster_model["anomaly_row"]
         else:
             canonical_row, anomaly_row = cluster_extreme_rows(
                 cluster_df,
                 summary_features,
             )
-            random_rows, lens_rows = [], []
         canonical = ""
         anomalous = ""
         if canonical_row is not None:
@@ -1543,29 +1654,7 @@ def build_cluster_summary_view_model(
 
         if not include_visual_preview:
             continue
-
-        lens_captions = []
-        for row in lens_rows:
-            lens_grade = row.get("lens_grade", "")
-            if pd.isna(lens_grade) or not str(lens_grade).strip():
-                lens_captions.append("Grade ?")
-            else:
-                lens_captions.append(f"Grade {str(lens_grade).strip()}")
-
-        visual_clusters.append(
-            {
-                "cluster_id": cluster_id,
-                "n_objects": int(summary_row["n_objects"]),
-                "n_lenses": int(summary_row["n_lenses"]),
-                "lens_rate": float(summary_row["lens_rate"]),
-                "enrichment": float(summary_row["enrichment"]),
-                "canonical_row": canonical_row,
-                "anomaly_row": anomaly_row,
-                "random_rows": random_rows,
-                "lens_rows": lens_rows,
-                "lens_captions": lens_captions,
-            }
-        )
+        visual_clusters.append(cluster_model)
 
     return {
         "cluster_download_df": pd.DataFrame(cluster_download_rows),
@@ -1574,10 +1663,68 @@ def build_cluster_summary_view_model(
         "total_clusters": len(cluster_download_rows),
     }
 
+def render_cluster_preview_card(
+    cluster_model: Mapping[str, object],
+    *,
+    show_analysis_button: bool,
+) -> bool:
+    cluster_id = int(cluster_model["cluster_id"])
+    requested = False
+    with st.container(border=True):
+        stats_cols = st.columns([1, 1, 1, 1, 1])
+        stats_cols[0].metric("Cluster", cluster_id)
+        stats_cols[1].metric(
+            "Objects",
+            format_thousands_dot(int(cluster_model["n_objects"])),
+        )
+        stats_cols[2].metric(
+            "Lenses",
+            format_thousands_dot(int(cluster_model["n_lenses"])),
+        )
+        stats_cols[3].metric(
+            "Density",
+            f"{format_decimal_comma(float(cluster_model['lens_rate']) * 100, 2)}%",
+        )
+        stats_cols[4].metric(
+            "Enrichment",
+            f"{format_decimal_comma(float(cluster_model['enrichment']), 2)}x",
+        )
+
+        image_cols = st.columns([2, 3, 5])
+        with image_cols[0]:
+            show_thumbnail_group(
+                "Canonical / anomalous",
+                [cluster_model["canonical_row"], cluster_model["anomaly_row"]],
+                ["Canonical", "Anomalous"],
+            )
+        with image_cols[1]:
+            random_rows = list(cluster_model["random_rows"])
+            show_thumbnail_group(
+                "Random",
+                random_rows,
+                [f"Random {index + 1}" for index in range(len(random_rows))],
+            )
+        with image_cols[2]:
+            show_thumbnail_group(
+                "Labelled lens candidates in the cluster",
+                list(cluster_model["lens_rows"]),
+                list(cluster_model["lens_captions"]),
+                prefer_lens_image=True,
+            )
+
+        if show_analysis_button:
+            requested = st.button(
+                "Analyse this cluster",
+                key=f"analyse_cluster_{cluster_id}",
+                type="primary",
+                use_container_width=True,
+            )
+    return requested
+
+
 def render_cluster_visual_summary_view_model(
     view_model: dict,
-    clustered_df: pd.DataFrame,
-) -> None:
+) -> int | None:
     total_clusters = int(view_model.get("total_clusters", len(view_model["clusters"])))
     visible_clusters = len(view_model["clusters"])
     if total_clusters > visible_clusters:
@@ -1585,64 +1732,15 @@ def render_cluster_visual_summary_view_model(
             "Showing visual previews for the first "
             f"{visible_clusters} of {format_thousands_dot(total_clusters)} clusters."
         )
+    requested_cluster: int | None = None
     for cluster_model in view_model["clusters"]:
         cluster_id = int(cluster_model["cluster_id"])
-
-        with st.container(border=True):
-            stats_cols = st.columns([1, 1, 1, 1, 1])
-            stats_cols[0].metric("Cluster", cluster_id)
-            stats_cols[1].metric(
-                "Objects",
-                format_thousands_dot(cluster_model["n_objects"]),
-            )
-            stats_cols[2].metric(
-                "Lenses",
-                format_thousands_dot(cluster_model["n_lenses"]),
-            )
-            stats_cols[3].metric(
-                "Density",
-                f"{format_decimal_comma(cluster_model['lens_rate'] * 100, 2)}%",
-            )
-            stats_cols[4].metric(
-                "Enrichment",
-                f"{format_decimal_comma(cluster_model['enrichment'], 2)}x",
-            )
-
-            image_cols = st.columns([2, 3, 5])
-            with image_cols[0]:
-                show_thumbnail_group(
-                    "Canonical / anomalous",
-                    [cluster_model["canonical_row"], cluster_model["anomaly_row"]],
-                    ["Canonical", "Anomalous"],
-                )
-            with image_cols[1]:
-                show_thumbnail_group(
-                    "Random",
-                    cluster_model["random_rows"],
-                    [
-                        f"Random {index + 1}"
-                        for index in range(len(cluster_model["random_rows"]))
-                    ],
-                )
-            with image_cols[2]:
-                show_thumbnail_group(
-                    "Labelled lens candidates in the cluster",
-                    cluster_model["lens_rows"],
-                    cluster_model["lens_captions"],
-                    prefer_lens_image=True,
-                )
-            cluster_df = clustered_df[clustered_df["cluster"] == cluster_id].copy()
-            if cluster_model["n_lenses"] > 0:
-                render_cluster_histograms(
-                    cluster_id,
-                    cluster_df,
-                    view_model["histogram_features"],
-                )
-            render_cluster_physical_histograms(
-                cluster_id,
-                cluster_df,
-                id(clustered_df),
-            )
+        if render_cluster_preview_card(
+            cluster_model,
+            show_analysis_button=True,
+        ):
+            requested_cluster = cluster_id
+    return requested_cluster
 
 def show_lens_status(row: pd.Series) -> None:
     is_lens = bool(row.get("is_lens", False))
@@ -2110,7 +2208,7 @@ def validate_paths() -> pd.DataFrame:
 
 def request_clustering() -> None:
     st.session_state["cluster_requested"] = True
-    st.session_state["cluster_summary_expanded"] = False
+    st.session_state["cluster_summary_expanded"] = True
 
 def collapse_cluster_summary() -> None:
     st.session_state["cluster_summary_expanded"] = False
