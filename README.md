@@ -97,7 +97,8 @@ The cluster selected by default for downstream UMAP must contain at least 100 ob
 - Computes PCA histograms comparing `Lens candidate` vs `Unknown`.
 - Estimates PCA threshold recommendations that enrich lens candidates in a cluster.
 - Applies recommended PCA filters interactively.
-- Summarizes cluster and hierarchical-subcluster physical properties with medians, interquartile ranges, coverage, and histograms.
+- Adds on-demand compact physical characterization to each visual cluster preview, with medians, interquartile ranges, coverage, and eight histograms arranged four per row.
+- Restricts physical characterization to photometric redshift, stellar mass, concentration, asymmetry, smoothness, Gini, M20, and Sersic index.
 - Applies optional quality-aware physical-property filters before UMAP without refitting BIRCH.
 - Computes UMAP embeddings for selected clusters.
 - Uses a shared UMAP legend for Grade A (small red circles), Grade B (small
@@ -132,7 +133,7 @@ The app provides several complementary visualizations:
 - UMAP overlays for lens candidates, canonical objects, anomalous objects, and hierarchical subclusters.
 - Semi-supervised UMAP for subclusters guided by `A/B/C` candidate labels.
 - Dendrogram preview to guide the number of hierarchical subclusters.
-- Cluster and subcluster physical-property summaries and distributions.
+- Compact cluster and subcluster physical-property summaries and distributions.
 - Cutout inspection for selected or searched objects.
 - Offline evaluation workflow for curve-aware arc-like-structure detection.
 

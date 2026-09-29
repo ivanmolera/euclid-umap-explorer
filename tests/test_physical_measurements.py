@@ -38,6 +38,7 @@ class PhysicalMeasurementsTests(unittest.TestCase):
                 "phz_flags": [0.0, 11.0, 0.0, 0.0],
                 "phz_pp_median_stellarmass": [10.0, 11.0, 12.0, np.inf],
                 "phys_param_flags": [0.0, 0.0, 1.0, 0.0],
+                "flux_detection_total": [100.0, 200.0, 300.0, 400.0],
                 "concentration": [2.0, 3.0, 4.0, 5.0],
                 "sersic_sersic_vis_index": [1.0, 2.0, 3.0, 4.0],
                 "sersic_visnir_flags": [0, 0, 8192, 0],
@@ -85,6 +86,11 @@ class PhysicalMeasurementsTests(unittest.TestCase):
         }
         self.assertNotIn("phz_pp_median_sfr", displayed_fields)
         self.assertIn("gini", displayed_fields)
+
+        curated_rows = physical_measurement_display_rows(self.physical_df.iloc[0])
+        curated_fields = {row["field"] for row in curated_rows}
+        self.assertNotIn("flux_detection_total", curated_fields)
+        self.assertIn("phz_median", curated_fields)
 
     def test_physical_filters_are_normalized_signed_and_combined_with_and(self):
         source = pd.DataFrame(
@@ -135,6 +141,8 @@ class PhysicalMeasurementsTests(unittest.TestCase):
         )
         self.assertEqual(len(export), 4)
         self.assertIn("phz_median", export.columns)
+        self.assertNotIn("flux_detection_total", export.columns)
+        self.assertNotIn("phys_param_flags", export.columns)
 
 
 if __name__ == "__main__":

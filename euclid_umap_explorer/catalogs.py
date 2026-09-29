@@ -238,6 +238,11 @@ def load_physical_measurements(
 def load_physical_measurement_object(
     physical_path: str,
     object_id: object,
+    columns: Iterable[str] | None = None,
 ) -> pd.DataFrame:
-    result = load_physical_measurements(physical_path, [object_id])
+    result = load_physical_measurements(
+        physical_path,
+        [object_id],
+        columns=columns,
+    )
     return result.iloc[:1].copy()

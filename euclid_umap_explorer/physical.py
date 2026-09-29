@@ -11,61 +11,16 @@ from .catalogs import normalize_object_ids
 
 PHYSICAL_MEASUREMENT_GROUPS = (
     (
-        "Identifiers and coordinates",
+        "Physical characterization",
         (
-            "object_id",
-            "segmentation_map_id",
-            "tile_index",
-            "right_ascension",
-            "declination",
-        ),
-    ),
-    (
-        "Flux and shape",
-        (
-            "flux_detection_total",
-            "flux_vis_1fwhm_aper",
-            "flux_y_1fwhm_aper",
-            "flux_j_1fwhm_aper",
-            "flux_h_1fwhm_aper",
-            "flux_i_ext_decam_1fwhm_aper",
-            "flux_r_ext_decam_1fwhm_aper",
-            "flux_g_ext_decam_1fwhm_aper",
-            "flux_z_ext_decam_1fwhm_aper",
-            "mu_max",
-            "mumax_minus_mag",
-            "semimajor_axis",
-            "position_angle",
-            "det_quality_flag",
-        ),
-    ),
-    (
-        "Catalogue morphology",
-        (
+            "phz_median",
+            "phz_pp_median_stellarmass",
             "concentration",
             "asymmetry",
             "smoothness",
             "gini",
             "moment_20",
             "sersic_sersic_vis_index",
-            "sersic_visnir_flags",
-        ),
-    ),
-    (
-        "Photometric redshift",
-        (
-            "phz_median",
-            "phz_flags",
-            "phz_pp_median_redshift",
-        ),
-    ),
-    (
-        "Physical parameters",
-        (
-            "phz_pp_median_stellarmass",
-            "phz_pp_median_luminosity",
-            "phz_pp_median_sfr",
-            "phys_param_flags",
         ),
     ),
 )
@@ -80,6 +35,17 @@ PHYSICAL_ANALYSIS_FIELDS = {
     "moment_20": "M20",
     "sersic_sersic_vis_index": "Sersic index",
 }
+
+PHYSICAL_QUALITY_FLAG_FIELDS = (
+    "phz_flags",
+    "phys_param_flags",
+    "sersic_visnir_flags",
+)
+
+PHYSICAL_QUERY_FIELDS = (
+    *PHYSICAL_ANALYSIS_FIELDS,
+    *PHYSICAL_QUALITY_FLAG_FIELDS,
+)
 
 PHYSICAL_FILTER_OPERATORS = ("between", ">=", "<=")
 
@@ -136,9 +102,11 @@ def physical_measurement_display_rows(
     excluded_fields: Iterable[str] = (),
 ) -> list[dict[str, object]]:
     values = row.to_dict() if isinstance(row, pd.Series) else dict(row)
+    clean = analysis_ready_physical_measurements(pd.DataFrame([values]))
+    if not clean.empty:
+        values = clean.iloc[0].to_dict()
     excluded = set(excluded_fields)
     rows: list[dict[str, object]] = []
-    included_fields: set[str] = set()
 
     def is_missing(value: object) -> bool:
         if value is None or pd.isna(value):
@@ -151,12 +119,6 @@ def physical_measurement_display_rows(
             if field in excluded or is_missing(value):
                 continue
             rows.append({"section": section, "field": field, "value": value})
-            included_fields.add(field)
-
-    for field, value in values.items():
-        if field in included_fields or field in excluded or is_missing(value):
-            continue
-        rows.append({"section": "Other", "field": field, "value": value})
 
     return rows
 
@@ -328,6 +290,12 @@ def merge_physical_measurements(
     base = data.copy()
     base["object_id"] = normalize_object_ids(base["object_id"])
     physical = clean_physical_measurements(physical_data).drop_duplicates("object_id")
+    export_columns = [
+        column
+        for column in ("object_id", *PHYSICAL_ANALYSIS_FIELDS)
+        if column in physical.columns
+    ]
+    physical = physical[export_columns]
     duplicate_columns = {
         column for column in physical.columns if column in base.columns and column != "object_id"
     }

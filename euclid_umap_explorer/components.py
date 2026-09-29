@@ -22,6 +22,7 @@ from .catalogs import (
     load_lens_catalog,
     load_morphology_object,
     load_physical_measurement_object,
+    load_physical_measurements,
     normalize_object_ids,
 )
 from .config import (
@@ -62,8 +63,10 @@ from .storage import path_exists
 from .physical import (
     PHYSICAL_ANALYSIS_FIELDS,
     PHYSICAL_FILTER_OPERATORS,
+    PHYSICAL_QUERY_FIELDS,
     analysis_ready_physical_measurements,
     available_physical_analysis_fields,
+    build_physical_summary,
     physical_measurement_display_rows,
 )
 
@@ -1171,6 +1174,144 @@ def render_cluster_histograms(
         st.caption("No stable PCA threshold recommendation was found for this cluster.")
 
 
+def build_compact_physical_histogram_figure(
+    physical_df: pd.DataFrame,
+    fields: list[str],
+) -> object:
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    clean = analysis_ready_physical_measurements(physical_df)
+    columns = 4
+    rows = max(1, (len(fields) + columns - 1) // columns)
+    figure = make_subplots(
+        rows=rows,
+        cols=columns,
+        subplot_titles=[PHYSICAL_ANALYSIS_FIELDS[field] for field in fields],
+        horizontal_spacing=0.055,
+        vertical_spacing=0.22,
+    )
+    for index, field in enumerate(fields):
+        values = pd.to_numeric(clean[field], errors="coerce").dropna()
+        figure.add_trace(
+            go.Histogram(
+                x=values,
+                nbinsx=24,
+                marker_color="#5b8db8",
+                opacity=0.82,
+                showlegend=False,
+                hovertemplate="Value: %{x}<br>Objects: %{y}<extra></extra>",
+            ),
+            row=index // columns + 1,
+            col=index % columns + 1,
+        )
+    figure.update_annotations(font_size=11)
+    figure.update_xaxes(tickfont={"size": 9}, showgrid=False, zeroline=False)
+    figure.update_yaxes(tickfont={"size": 9}, title=None, zeroline=False)
+    figure.update_layout(
+        height=max(220, rows * 220),
+        margin={"l": 20, "r": 10, "t": 38, "b": 25},
+        bargap=0.05,
+    )
+    return figure
+
+
+@st.fragment
+def render_cluster_physical_histograms(
+    cluster_id: int,
+    cluster_df: pd.DataFrame,
+    cluster_result_id: int,
+) -> None:
+    data_key = f"cluster_physical_data_{cluster_result_id}_{cluster_id}"
+    visible_key = f"cluster_physical_histograms_visible_{cluster_result_id}_{cluster_id}"
+    is_visible = bool(st.session_state.get(visible_key, False))
+    button_label = (
+        "Update physical histograms" if is_visible else "Compute physical histograms"
+    )
+    if st.button(
+        button_label,
+        key=f"cluster_physical_histograms_button_{cluster_result_id}_{cluster_id}",
+    ):
+        try:
+            if is_visible or data_key not in st.session_state:
+                physical_df = load_physical_measurements(
+                    PHYSICAL_MEASUREMENTS_PATH,
+                    cluster_df["object_id"],
+                    columns=PHYSICAL_QUERY_FIELDS,
+                )
+                st.session_state[data_key] = physical_df
+            else:
+                physical_df = st.session_state[data_key]
+            st.session_state[visible_key] = True
+            log_app_event(
+                "cluster_physical_histograms_computed",
+                cluster=cluster_id,
+                cluster_objects=int(len(cluster_df)),
+                matched_objects=int(len(physical_df)),
+            )
+        except Exception as exc:
+            log_app_event(
+                "cluster_physical_histograms_failed",
+                cluster=cluster_id,
+                error_type=type(exc).__name__,
+            )
+            st.error("Physical measurements could not be loaded for this cluster.")
+            return
+
+    if not st.session_state.get(visible_key, False):
+        return
+    physical_df = st.session_state.get(data_key)
+    if physical_df is None:
+        return
+
+    summary = build_physical_summary(physical_df, total_objects=len(cluster_df))
+    if summary.empty:
+        st.info("No usable physical measurements were found for this cluster.")
+        return
+
+    st.markdown("**Physical characterization**")
+    display = pd.DataFrame(
+        {
+            "measurement": summary["measurement"],
+            "median": summary["median"].map(
+                lambda value: format_decimal_comma(value, 3)
+            ),
+            "IQR [q25, q75]": summary.apply(
+                lambda row: (
+                    f"[{format_decimal_comma(row['q25'], 3)}, "
+                    f"{format_decimal_comma(row['q75'], 3)}]"
+                ),
+                axis=1,
+            ),
+            "valid_objects": summary["valid_objects"].map(format_thousands_dot),
+            "coverage_%": summary["coverage_%"].map(
+                lambda value: format_decimal_comma(value, 1)
+            ),
+        }
+    )
+    st.dataframe(
+        display,
+        use_container_width=True,
+        hide_index=True,
+        height=318,
+    )
+    st.caption(
+        "Quality-controlled values are used: phz_flags=0 for photometric "
+        "redshift, phys_param_flags=0 for stellar mass, and "
+        "sersic_visnir_flags=0 for the Sersic index. Other displayed "
+        "morphology measurements must be finite."
+    )
+    st.plotly_chart(
+        build_compact_physical_histogram_figure(
+            physical_df,
+            summary["field"].tolist(),
+        ),
+        use_container_width=True,
+        config={"displaylogo": False, "responsive": True},
+        key=f"cluster_physical_histograms_chart_{cluster_result_id}_{cluster_id}",
+    )
+
+
 def render_thumbnail_group_title(title: str) -> None:
     if title != "Canonical / anomalous":
         st.caption(title)
@@ -1490,13 +1631,18 @@ def render_cluster_visual_summary_view_model(
                     cluster_model["lens_captions"],
                     prefer_lens_image=True,
                 )
+            cluster_df = clustered_df[clustered_df["cluster"] == cluster_id].copy()
             if cluster_model["n_lenses"] > 0:
-                cluster_df = clustered_df[clustered_df["cluster"] == cluster_id].copy()
                 render_cluster_histograms(
                     cluster_id,
                     cluster_df,
                     view_model["histogram_features"],
                 )
+            render_cluster_physical_histograms(
+                cluster_id,
+                cluster_df,
+                id(clustered_df),
+            )
 
 def show_lens_status(row: pd.Series) -> None:
     is_lens = bool(row.get("is_lens", False))
@@ -1643,6 +1789,7 @@ def show_physical_measurements_row(
         physical_df = load_physical_measurement_object(
             PHYSICAL_MEASUREMENTS_PATH,
             object_id,
+            columns=PHYSICAL_QUERY_FIELDS,
         )
     elif not physical_df.empty:
         normalized_ids = normalize_object_ids(physical_df["object_id"])
@@ -1812,6 +1959,7 @@ def render_euclid_object_search(object_id: str) -> None:
             physical_df = load_physical_measurement_object(
                 PHYSICAL_MEASUREMENTS_PATH,
                 result["object_id"],
+                columns=PHYSICAL_QUERY_FIELDS,
             )
         except Exception as exc:
             log_app_event(

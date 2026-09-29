@@ -94,11 +94,11 @@ from .runtime import AlgorithmTimeoutError, format_duration, log_app_event
 from .storage import path_exists, prepare_catalog_cache
 from .physical import (
     PHYSICAL_ANALYSIS_FIELDS,
+    PHYSICAL_QUERY_FIELDS,
     analysis_ready_physical_measurements,
     apply_physical_filters,
     available_physical_analysis_fields,
     build_grouped_physical_summary,
-    build_physical_summary,
     format_physical_filter,
     normalize_physical_filters,
     physical_filter_signature,
@@ -223,9 +223,13 @@ def selected_cluster_physical_measurements(
     physical_df = load_physical_measurements(
         PHYSICAL_MEASUREMENTS_PATH,
         cluster_ids,
+        columns=PHYSICAL_QUERY_FIELDS,
     )
     st.session_state["physical_cluster_signature"] = signature
     st.session_state["physical_cluster_df"] = physical_df
+    st.session_state[
+        f"cluster_physical_data_{id(clustered_df)}_{int(selected_cluster)}"
+    ] = physical_df
     log_app_event(
         "physical_measurements_loaded",
         duration_seconds=round(
@@ -237,78 +241,6 @@ def selected_cluster_physical_measurements(
         matched_objects=int(len(physical_df)),
     )
     return physical_df
-
-
-def build_physical_histogram_figure(
-    physical_df: pd.DataFrame,
-    fields: list[str],
-) -> object:
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-
-    clean = analysis_ready_physical_measurements(physical_df)
-    columns = 2
-    rows = max(1, (len(fields) + columns - 1) // columns)
-    figure = make_subplots(
-        rows=rows,
-        cols=columns,
-        subplot_titles=[PHYSICAL_ANALYSIS_FIELDS[field] for field in fields],
-    )
-    for index, field in enumerate(fields):
-        values = pd.to_numeric(clean[field], errors="coerce").dropna()
-        figure.add_trace(
-            go.Histogram(
-                x=values,
-                nbinsx=35,
-                marker_color="#5b8db8",
-                opacity=0.82,
-                showlegend=False,
-                hovertemplate="Value: %{x}<br>Objects: %{y}<extra></extra>",
-            ),
-            row=index // columns + 1,
-            col=index % columns + 1,
-        )
-    figure.update_layout(
-        height=max(320, rows * 280),
-        margin={"l": 20, "r": 20, "t": 45, "b": 20},
-        bargap=0.04,
-    )
-    return figure
-
-
-def render_cluster_physical_characterization(
-    cluster_df: pd.DataFrame,
-    physical_df: pd.DataFrame,
-    selected_cluster: int,
-) -> None:
-    with st.expander("Physical characterization", expanded=False):
-        matched = len(physical_df)
-        metric_cols = st.columns(3)
-        metric_cols[0].metric("Cluster", int(selected_cluster))
-        metric_cols[1].metric("Cluster objects", format_thousands_dot(len(cluster_df)))
-        metric_cols[2].metric("Physical matches", format_thousands_dot(matched))
-        st.caption(
-            "Redshift, physical-parameter and Sersic measurements with non-zero "
-            "quality flags are excluded from summaries and filters."
-        )
-        summary = build_physical_summary(physical_df, total_objects=len(cluster_df))
-        if summary.empty:
-            st.info("No usable physical measurements were found for this cluster.")
-            return
-
-        display = summary[
-            ["measurement", "valid_objects", "coverage_%", "q25", "median", "q75"]
-        ].copy()
-        display[["coverage_%", "q25", "median", "q75"]] = display[
-            ["coverage_%", "q25", "median", "q75"]
-        ].round(4)
-        st.dataframe(display, use_container_width=True, hide_index=True)
-        fields = summary["field"].tolist()
-        st.plotly_chart(
-            build_physical_histogram_figure(physical_df, fields),
-            use_container_width=True,
-            config={"displaylogo": False},
-        )
 
 
 def render_subcluster_physical_characterization(
@@ -1145,11 +1077,6 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.warning("Physical measurements could not be loaded for this cluster.")
         physical_cluster_df = pd.DataFrame()
 
-    render_cluster_physical_characterization(
-        cluster_df,
-        physical_cluster_df,
-        selected_cluster,
-    )
     raw_physical_filters = render_physical_filter_controls(
         physical_cluster_df,
         selected_cluster,
