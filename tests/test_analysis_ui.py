@@ -1,5 +1,6 @@
 import unittest
 from contextlib import ExitStack
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -11,6 +12,61 @@ from euclid_umap_explorer.subclustering import _compute_hierarchical_subclusters
 
 
 class AnalysisUITests(unittest.TestCase):
+    def test_change_cluster_reopens_summary_and_preserves_fit_until_new_selection(self):
+        catalogue = pd.DataFrame([
+            {"object_id": str(cluster * 1000 + index), "cluster": cluster,
+             "id_str": f"Q1_R1_1_{cluster * 1000 + index}", "feat_pca_0": float(index),
+             "is_lens": index % 3 == 0, "lens_grade": "A" if index % 3 == 0 else ""}
+            for cluster in (356, 380) for index in range(12)
+        ])
+        app = AppTest.from_string("from euclid_umap_explorer.ui import main\nmain()")
+        for key, value in {
+            "cluster_ready": True, "cluster_result": (catalogue, ["feat_pca_0"], None),
+            "cluster_params": {"lens_grades": ("A", "B", "C"), "threshold": 5.5,
+                               "branching_factor": 42, "batch_size": 25000},
+            "analysis_cluster_id": 356, "cluster_summary_expanded": False,
+            "pca_filter_count": 1, "pca_filter_0_feature": "feat_pca_0",
+            "pca_filter_0_operator": ">=", "pca_filter_0_value": 4.,
+        }.items():
+            app.session_state[key] = value
+        selected_rows = [0]
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(ui, "path_exists", return_value=True))
+            stack.enter_context(patch.object(ui, "selected_cluster_physical_measurements", return_value=pd.DataFrame()))
+            stack.enter_context(patch.object(ui.st, "dataframe", side_effect=lambda *a, **k: SimpleNamespace(
+                selection=SimpleNamespace(rows=list(selected_rows)),
+            )))
+            for name in (
+                "render_cluster_preview_card", "render_cluster_visual_summary_view_model",
+                "render_selected_cluster_pca_characterization", "render_selected_cluster_physical_characterization",
+                "render_morphology_graph", "render_cluster_multivariate", "render_object_multivariate",
+            ):
+                stack.enter_context(patch.object(ui, name, return_value=None))
+            fit = stack.enter_context(patch.object(ui, "run_birch_clustering"))
+
+            app.run(timeout=30)
+            self.assertFalse(app.exception)
+            for _ in range(2):
+                next(b for b in app.button if b.label == "Change cluster").click().run(timeout=30)
+                self.assertFalse(app.exception)
+                self.assertTrue(app.session_state["cluster_summary_expanded"])
+                self.assertTrue(next(e for e in app.expander if e.label == "Clustering summary").proto.expanded)
+                self.assertEqual(app.session_state["analysis_cluster_id"], 356)
+                self.assertEqual(app.session_state["pca_filter_0_value"], 4.)
+
+            selected_rows[:] = [1]
+            app.run(timeout=30)
+            self.assertFalse(app.exception)
+            self.assertEqual(app.session_state["analysis_cluster_id"], 380)
+            self.assertFalse(app.session_state["cluster_summary_expanded"])
+            self.assertEqual(app.session_state["pca_filter_count"], 0)
+            next(b for b in app.button if b.label == "Change cluster").click().run(timeout=30)
+            self.assertFalse(app.exception)
+            self.assertTrue(app.session_state["cluster_summary_expanded"])
+            self.assertEqual(app.session_state["analysis_cluster_id"], 380)
+            pd.testing.assert_frame_equal(app.session_state["cluster_result"][0], catalogue)
+            fit.assert_not_called()
+
     def test_filters_reach_hierarchical_and_semisupervised_inputs(self):
         cluster = pd.DataFrame({
             "object_id": [str(index) for index in range(24)],

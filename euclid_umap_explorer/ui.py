@@ -208,6 +208,10 @@ def select_cluster_for_analysis(cluster_id: int) -> None:
     st.rerun()
 
 
+def open_cluster_summary() -> None:
+    st.session_state["cluster_summary_expanded"] = True
+
+
 def style_umap_point_markers(
     figure: object,
     *,
@@ -1224,9 +1228,7 @@ This analysis uses Euclid Q1 catalogue products available at:
     with selected_heading:
         st.subheader(f"Selected cluster {selected_cluster}")
     with change_cluster_col:
-        if st.button("Change cluster", use_container_width=True):
-            st.session_state["cluster_summary_expanded"] = True
-            st.rerun()
+        st.button("Change cluster", use_container_width=True, on_click=open_cluster_summary)
 
     selected_cluster_model = build_selected_cluster_view_model(
         clustered_df,
