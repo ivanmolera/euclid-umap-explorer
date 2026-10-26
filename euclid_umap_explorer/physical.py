@@ -9,22 +9,6 @@ import pandas as pd
 from .catalogs import normalize_object_ids
 
 
-PHYSICAL_MEASUREMENT_GROUPS = (
-    (
-        "Physical characterization",
-        (
-            "phz_median",
-            "phz_pp_median_stellarmass",
-            "concentration",
-            "asymmetry",
-            "smoothness",
-            "gini",
-            "moment_20",
-            "sersic_sersic_vis_index",
-        ),
-    ),
-)
-
 PHYSICAL_ANALYSIS_FIELDS = {
     "phz_median": "Photometric redshift",
     "phz_pp_median_stellarmass": "Stellar mass (log10 M_sun)",
@@ -34,6 +18,50 @@ PHYSICAL_ANALYSIS_FIELDS = {
     "gini": "Gini",
     "moment_20": "M20",
     "sersic_sersic_vis_index": "Sersic index",
+}
+
+# Definitions follow the Euclid Q1 data product description (MER morphology / PHZ).
+PHYSICAL_MEASUREMENT_HELP = {
+    "phz_median": (
+        "Redshift estimated from multi-band photometry, rather than a spectrum. "
+        "This is the median of the catalogue PHZ redshift distribution, a "
+        "dimensionless quantity. If phz_flags is available, ESCOPE uses only "
+        "values with phz_flags = 0 in summaries and filters."
+    ),
+    "phz_pp_median_stellarmass": (
+        "Estimated stellar mass expressed as log10 of the mass in solar masses. "
+        "A value of 10 corresponds to ten billion solar masses. If phys_param_flags "
+        "is available, ESCOPE uses only values with phys_param_flags = 0 in "
+        "summaries and filters."
+    ),
+    "concentration": (
+        "Light concentration based on the radii enclosing 80% and 20% of the "
+        "total light. Larger values indicate more centrally concentrated light."
+    ),
+    "asymmetry": (
+        "Difference between an image and its 180-degree rotated counterpart. "
+        "Larger values indicate a less symmetric light distribution."
+    ),
+    "smoothness": (
+        "Amount of small-scale structure in the light distribution. "
+        "Larger values generally indicate more clumpy structure."
+    ),
+    "gini": (
+        "Unevenness of the light distribution among pixels. "
+        "Larger values mean more light is concentrated in fewer pixels."
+    ),
+    "moment_20": (
+        "Logarithm of the normalized second spatial moment of the brightest "
+        "20% of the light. Higher (less negative) values indicate bright "
+        "structures that are more extended or off-centre."
+    ),
+    "sersic_sersic_vis_index": (
+        "Shape parameter of the fitted Sersic surface-brightness profile. "
+        "Higher values describe a more centrally concentrated profile with "
+        "more extended outer wings. This is a dimensionless catalogue fit, "
+        "not a fit to the displayed JPEG. If sersic_visnir_flags is available, "
+        "ESCOPE uses only values with sersic_visnir_flags = 0 in summaries and filters."
+    ),
 }
 
 PHYSICAL_QUALITY_FLAG_FIELDS = (
@@ -113,12 +141,12 @@ def physical_measurement_display_rows(
             return True
         return isinstance(value, (float, np.floating)) and not np.isfinite(value)
 
-    for section, fields in PHYSICAL_MEASUREMENT_GROUPS:
-        for field in fields:
-            value = values.get(field)
-            if field in excluded or is_missing(value):
-                continue
-            rows.append({"section": section, "field": field, "value": value})
+    ordered_fields = list(dict.fromkeys((*PHYSICAL_ANALYSIS_FIELDS, *values)))
+    for field in ordered_fields:
+        if field in excluded or field not in values:
+            continue
+        value = values[field]
+        rows.append({"field": field, "value": None if is_missing(value) else value})
 
     return rows
 

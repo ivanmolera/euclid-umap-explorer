@@ -1,4 +1,4 @@
-streamlit>=1.37,<2
+streamlit>=1.64,<2
 pandas>=2.2,<3
 numpy>=1.26,<2.1
 numba>=0.60,<0.61
@@ -13,3 +13,4 @@ opencv-python-headless>=4.9,<5
 gcsfs>=2024.6,<2026
 astropy>=6,<8
 astroquery>=0.4.11,<0.5
+requests>=2.32,<3

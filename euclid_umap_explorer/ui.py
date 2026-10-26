@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import base64
+
 import numpy as np
 import pandas as pd
 import streamlit as st
-from PIL import Image
 
 from .analysis import (
     DEFAULT_PCA_SELECTION_PRESET,
@@ -45,10 +46,8 @@ from .components import (
     render_selected_cluster_pca_characterization,
     render_selected_cluster_physical_characterization,
     request_clustering,
-    show_morphology_catalogue_row,
     show_object_details,
-    show_physical_measurements_row,
-    show_selected_pca_components,
+    show_selected_object_tables,
     show_thumbnail_group,
 )
 from .config import (
@@ -585,16 +584,10 @@ def render_cluster_umap_interaction(
         if selected_row is None:
             st.info("Select a point on the map to view its details and image.")
         else:
-            show_object_details(selected_row, selected_features)
+            show_object_details(selected_row, key="umap")
 
     if selected_row is not None:
-        morphology_col, pca_col = st.columns([1, 1])
-        with morphology_col:
-            show_morphology_catalogue_row(selected_row)
-        with pca_col:
-            show_selected_pca_components(selected_row, selected_features)
-        with st.expander("Selected object physical measurements", expanded=False):
-            show_physical_measurements_row(selected_row, physical_df)
+        show_selected_object_tables(selected_row, selected_features)
 
 
 @st.fragment
@@ -663,20 +656,18 @@ def render_semisupervised_umap_interaction(
         if semi_selected_row is None:
             st.info("Select a point on the map to view its details and image.")
         else:
-            show_object_details(semi_selected_row, selected_features)
+            show_object_details(semi_selected_row, key="semisupervised_umap")
 
     if semi_selected_row is not None:
-        semi_morphology_col, semi_pca_col = st.columns([1, 1])
-        with semi_morphology_col:
-            show_morphology_catalogue_row(semi_selected_row)
-        with semi_pca_col:
-            show_selected_pca_components(semi_selected_row, selected_features)
-        with st.expander("Selected object physical measurements", expanded=False):
-            show_physical_measurements_row(semi_selected_row, physical_df)
+        show_selected_object_tables(semi_selected_row, selected_features)
 
 
 def main() -> None:
-    page_icon = Image.open(EUCLID_FAVICON_PATH) if EUCLID_FAVICON_PATH.exists() else None
+    page_icon = (
+        "data:image/png;base64," + base64.b64encode(EUCLID_FAVICON_PATH.read_bytes()).decode("ascii")
+        if EUCLID_FAVICON_PATH.exists()
+        else None
+    )
     st.set_page_config(page_title=APP_TITLE, page_icon=page_icon, layout="wide")
     process_pending_cluster_selection()
     inject_plot_cursor_css()
@@ -840,14 +831,17 @@ This analysis uses Euclid Q1 catalogue products available at:
                 label_visibility="collapsed",
             )
             render_help_label("batch_size", PARAMETER_HELP["batch_size"])
-            batch_size = st.number_input(
+            st.number_input(
                 "batch_size",
                 min_value=1_000,
                 max_value=250_000,
                 value=DEFAULT_BIRCH_BATCH_SIZE,
                 step=1_000,
+                disabled=True,
+                key="birch_fixed_batch_size",
                 label_visibility="collapsed",
             )
+            batch_size = DEFAULT_BIRCH_BATCH_SIZE
             run_clustering = st.button(
                 "Run clustering",
                 type="primary",
@@ -975,7 +969,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         birch_projection = cached_cluster[2] if len(cached_cluster) > 2 else None
 
     cluster_summary_df = st.session_state.get("cluster_summary_df")
-    if cluster_summary_df is None:
+    if cluster_summary_df is None or "label_entropy_bits" not in cluster_summary_df:
         cluster_summary_df = build_cluster_summary(clustered_df)
         st.session_state["cluster_summary_df"] = cluster_summary_df
     cluster_summary_df = cluster_summary_df.copy()
@@ -1068,12 +1062,8 @@ This analysis uses Euclid Q1 catalogue products available at:
         render_execution_time(clustered_df.attrs.get("processing_seconds"))
         cluster_download_df = cluster_summary_view_model["cluster_download_df"]
         summary_display = cluster_download_df.copy()
-        summary_display["lens_rate_%"] = summary_display["lens_rate"].map(
-            lambda value: format_decimal_comma(float(value) * 100, 2)
-        )
-        summary_display["enrichment_x"] = summary_display["enrichment"].map(
-            lambda value: format_decimal_comma(float(value), 2)
-        )
+        summary_display["lens_rate_%"] = summary_display["lens_rate"] * 100
+        summary_display["enrichment_x"] = summary_display["enrichment"]
         summary_table = summary_display[
             [
                 "cluster",
@@ -1081,6 +1071,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 "n_lenses",
                 "lens_rate_%",
                 "enrichment_x",
+                "label_entropy_bits",
                 "canonical",
                 "anomalous",
             ]
@@ -1088,13 +1079,25 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.caption(
             "Select any table row or use **Analyse this cluster** in a visual preview."
         )
+        summary_table_display = summary_table.style.format(
+            {
+                "lens_rate_%": lambda value: format_decimal_comma(value, 2),
+                "enrichment_x": lambda value: format_decimal_comma(value, 2),
+                "label_entropy_bits": lambda value: format_decimal_comma(value, 3),
+            }
+        )
         table_event = st.dataframe(
-            summary_table,
+            summary_table_display,
             use_container_width=True,
             hide_index=True,
             key=f"cluster_summary_table_{id(clustered_df)}",
             on_select="rerun",
             selection_mode="single-row",
+            column_config={
+                "label_entropy_bits": st.column_config.NumberColumn(
+                    "Entropy",
+                ),
+            },
         )
         selected_rows = tuple(int(row) for row in table_event.selection.rows)
         table_selection_key = f"cluster_summary_table_selection_{id(clustered_df)}"
@@ -1293,7 +1296,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                     "Maximum objects for subclustering",
                     100,
                     20_000,
-                    min(15_000, max(100, len(cluster_df))),
+                    min(15_000, max(100, len(filtered_cluster_df))),
                     step=100,
                 )
             with subclustering_cols[2]:
@@ -1419,7 +1422,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         try:
             overlay.open("Computing hierarchical clustering...")
             subclustered_df = compute_hierarchical_subclusters(
-                cluster_df,
+                filtered_cluster_df,
                 selected_features,
                 n_subclusters,
                 max_subcluster_objects,

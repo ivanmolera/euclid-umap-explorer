@@ -49,6 +49,7 @@ def cluster_summary_download_df(
                 "n_lenses": int(summary_row["n_lenses"]),
                 "lens_rate": float(summary_row["lens_rate"]),
                 "enrichment": float(summary_row["enrichment"]),
+                "label_entropy_bits": float(summary_row["label_entropy_bits"]),
                 "canonical": canonical,
                 "anomalous": anomalous,
             }
@@ -233,7 +234,7 @@ def object_search_download_df(
     if physical_df is not None and not physical_df.empty:
         rows.extend(
             {
-                "section": f"Physical measurements - {item['section']}",
+                "section": "Physical measurements",
                 "field": item["field"],
                 "value": item["value"],
             }

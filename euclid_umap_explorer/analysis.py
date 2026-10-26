@@ -68,6 +68,20 @@ PCA_PRESET_FEATURES = {
 }
 
 
+def binary_label_entropy(
+    labelled_fraction: float | pd.Series | np.ndarray,
+) -> float | np.ndarray:
+    """Shannon entropy in bits for reference membership versus its complement."""
+    p = np.asarray(labelled_fraction, dtype=float)
+    if np.any(~np.isfinite(p)) or np.any((p < 0) | (p > 1)):
+        raise ValueError("Labelled fractions must be finite and between 0 and 1.")
+    entropy = np.zeros_like(p)
+    mixed = (p > 0) & (p < 1)
+    q = p[mixed]
+    entropy[mixed] = -q * np.log2(q) - (1 - q) * np.log2(1 - q)
+    return float(entropy) if entropy.ndim == 0 else entropy
+
+
 def build_cluster_summary(clustered_df: pd.DataFrame) -> pd.DataFrame:
     total_objects = len(clustered_df)
     total_lenses = int(clustered_df["is_lens"].sum())
@@ -85,6 +99,7 @@ def build_cluster_summary(clustered_df: pd.DataFrame) -> pd.DataFrame:
     summary_df["enrichment"] = (
         summary_df["lens_rate"] / global_lens_rate if global_lens_rate else 0.0
     )
+    summary_df["label_entropy_bits"] = binary_label_entropy(summary_df["lens_rate"])
     summary_df = summary_df.sort_values(
         ["n_lenses", "lens_rate", "n_objects", "cluster"],
         ascending=[False, False, False, True],

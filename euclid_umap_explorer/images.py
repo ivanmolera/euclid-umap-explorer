@@ -158,7 +158,7 @@ def display_image_src(path: str) -> str:
     return image_src
 
 def render_image_caption(caption: str, caption_markdown: str | None) -> None:
-    caption_content = caption_markdown or caption
+    caption_content = caption_markdown or f'<span style="opacity:0.65">{caption}</span>'
     st.markdown(
         f"""
         <div style="
@@ -167,7 +167,6 @@ def render_image_caption(caption: str, caption_markdown: str | None) -> None:
             font-size: 0.875rem;
             line-height: 1.25;
             margin-top: 0.25rem;
-            opacity: 0.65;
             text-align: center;
             width: 100%;
         ">
@@ -206,12 +205,5 @@ def show_image(path: str, caption: str, caption_markdown: str | None = None) -> 
     render_image_src(image_src, caption)
     render_image_caption(caption, caption_markdown)
 
-def object_image_path(row: pd.Series, prefer_lens_image: bool = False) -> str | None:
-    if prefer_lens_image:
-        lens_path = lens_image_path(row.get("lens_id_str"))
-        if lens_path is None:
-            lens_path = lens_image_path(row.get("id_str"))
-        if lens_path is not None:
-            return lens_path
-
+def object_image_path(row: pd.Series) -> str | None:
     return morphology_cutout_path(row.get("id_str"), row.get("object_id"))

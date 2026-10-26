@@ -12,6 +12,8 @@ from euclid_umap_explorer.catalogs import (
     load_physical_measurements,
 )
 from euclid_umap_explorer.physical import (
+    PHYSICAL_ANALYSIS_FIELDS,
+    PHYSICAL_MEASUREMENT_HELP,
     analysis_ready_physical_measurements,
     apply_physical_filters,
     build_grouped_physical_summary,
@@ -82,16 +84,45 @@ class PhysicalMeasurementsTests(unittest.TestCase):
                 "gini": 0.6,
             }
         )
-        displayed_fields = {
-            row["field"] for row in physical_measurement_display_rows(display_source)
+        displayed_values = {
+            row["field"]: row["value"]
+            for row in physical_measurement_display_rows(display_source)
         }
-        self.assertNotIn("phz_pp_median_sfr", displayed_fields)
-        self.assertIn("gini", displayed_fields)
+        self.assertIsNone(displayed_values["phz_pp_median_sfr"])
+        self.assertEqual(displayed_values["gini"], 0.6)
 
-        curated_rows = physical_measurement_display_rows(self.physical_df.iloc[0])
-        curated_fields = {row["field"] for row in curated_rows}
-        self.assertNotIn("flux_detection_total", curated_fields)
-        self.assertIn("phz_median", curated_fields)
+    def test_object_details_include_all_fields_with_primary_measurements_first(self):
+        rows = physical_measurement_display_rows(
+            self.physical_df.iloc[1], excluded_fields=("object_id",)
+        )
+        fields = [row["field"] for row in rows]
+        primary_fields = [
+            field for field in PHYSICAL_ANALYSIS_FIELDS if field in self.physical_df
+        ]
+        self.assertEqual(fields[:len(primary_fields)], primary_fields)
+        self.assertEqual(set(fields), set(self.physical_df) - {"object_id"})
+        self.assertTrue(all(set(row) == {"field", "value"} for row in rows))
+        values = {row["field"]: row["value"] for row in rows}
+        self.assertIsNone(values["phz_median"])
+        self.assertEqual(values["phz_flags"], 11.0)
+        self.assertEqual(values["flux_detection_total"], 200.0)
+
+    def test_each_primary_measurement_has_a_help_description(self):
+        self.assertEqual(set(PHYSICAL_ANALYSIS_FIELDS), set(PHYSICAL_MEASUREMENT_HELP))
+        self.assertTrue(all(PHYSICAL_MEASUREMENT_HELP.values()))
+        for field, flag in (
+            ("phz_median", "phz_flags"),
+            ("phz_pp_median_stellarmass", "phys_param_flags"),
+            ("sersic_sersic_vis_index", "sersic_visnir_flags"),
+        ):
+            self.assertIn(f"{flag} = 0", PHYSICAL_MEASUREMENT_HELP[field])
+
+    def test_search_export_includes_complete_physical_details(self):
+        from euclid_umap_explorer.downloads import object_search_download_df
+
+        export = object_search_download_df({}, pd.DataFrame(), {}, self.physical_df)
+        self.assertEqual(set(export["section"]), {"Physical measurements"})
+        self.assertEqual(set(export["field"]), set(self.physical_df) - {"object_id"})
 
     def test_physical_filters_are_normalized_signed_and_combined_with_and(self):
         source = pd.DataFrame(

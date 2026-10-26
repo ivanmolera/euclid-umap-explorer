@@ -134,7 +134,11 @@ def load_morphology_object(morph_path: str, object_id: str) -> pd.DataFrame:
 
     return table.slice(0, 1).to_pandas()
 
-def load_morphology_objects(morph_path: str, object_ids: Iterable[object]) -> pd.DataFrame:
+def load_morphology_objects(
+    morph_path: str,
+    object_ids: Iterable[object],
+    columns: Iterable[str] | None = None,
+) -> pd.DataFrame:
     import pyarrow as pa
     import pyarrow.dataset as ds
     import pyarrow.fs as pafs
@@ -169,7 +173,17 @@ def load_morphology_objects(morph_path: str, object_ids: Iterable[object]) -> pd
     else:
         values = pa.array(normalized_ids.astype(str).tolist(), type=field_type)
 
-    table = dataset.to_table(filter=ds.field("object_id").isin(values))
+    selected_columns = None
+    if columns is not None:
+        requested = ["object_id", *(column for column in columns if column != "object_id")]
+        selected_columns = [
+            column for column in dict.fromkeys(requested)
+            if column in dataset.schema.names
+        ]
+    table = dataset.to_table(
+        columns=selected_columns,
+        filter=ds.field("object_id").isin(values),
+    )
     if table.num_rows == 0:
         return pd.DataFrame()
 

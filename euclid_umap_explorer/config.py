@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APP_TITLE_LINE_1 = "Euclid Strong-lensing Candidate Observation"
 APP_TITLE_LINE_2 = "and Projection Explorer"
 APP_TITLE = f"{APP_TITLE_LINE_1} {APP_TITLE_LINE_2}"
-APP_VERSION = "v0.1.17"
+APP_VERSION = "v0.1.20"
 EUCLID_LOGO_PATH = PROJECT_ROOT / "assets" / "euclid_logo.png"
 EUCLID_FAVICON_PATH = PROJECT_ROOT / "assets" / "favicon.png"
 LENS_GRADE_EXAMPLE_PATHS = {
@@ -138,59 +138,150 @@ ARC_DETECTION_CACHE_MAX_ITEMS = 64
 ENABLE_ARC_LIKE_STRUCTURE_DETECTION = (
     os.getenv("EUCLID_ENABLE_ARC_DETECTION", "0") == "1"
 )
+ENABLE_SLED_CHECK = os.getenv("EUCLID_ENABLE_SLED", "0") == "1"
 ENABLE_EXCLUDED_ARTIFACT_ASSIGNMENT_UI = (
     os.getenv("EUCLID_ENABLE_EXCLUDED_ARTIFACT_UI", "0") == "1"
 )
 THUMBNAIL_CACHE_MAX_ITEMS = 512
 PCA_FILTER_OPERATORS = [">", ">=", "<", "<=", "between"]
+LABEL_DENSITY_HELP = (
+    "**Labelled candidate fraction**\n\n"
+    "$$\n"
+    r"p_c = \frac{L_c}{N_c}"
+    "\n$$\n\n"
+    r"$L_c$: candidates matching the selected reference grades. "
+    r"$N_c$: all objects in cluster $c$, including Unknown. "
+    r"Displayed as $100p_c$%, before PCA/physical filters."
+    "\n\n"
+    "This measures reference labels, not spatial density or lens probability. "
+    "Unknown is not a confirmed non-lens."
+)
+ENRICHMENT_HELP = (
+    "**Label enrichment**\n\n"
+    "$$\n"
+    r"E_c = \frac{L_c/N_c}{L/N}"
+    "\n$$\n\n"
+    r"$L_c$, $N_c$: labelled candidates and all objects in cluster $c$. "
+    r"$L$, $N$: corresponding counts in the catalogue analysed in this run. "
+    "Uses the same selected grades, before PCA/physical filters.\n\n"
+    r"$E_c = 1$: catalogue average; above 1: over-representation; below 1: "
+    r"under-representation. If $L = 0$, undefined (displayed as 0).\n\n"
+    "Not lens probability, purity or significance. Check cluster size and labelled "
+    "counts. Candidates are not necessarily confirmed lenses; Unknown is not a "
+    "confirmed non-lens."
+)
+LABEL_ENTROPY_HELP = (
+    "**Binary Shannon entropy**\n\n"
+    "$$\n"
+    r"H = -p\log_2 p - (1-p)\log_2(1-p)"
+    "\n$$\n\n"
+    r"- $H$: entropy of labelled versus Unknown status, in bits." "\n"
+    r"- $p = L_c/N_c$: labelled fraction, between 0 and 1 (not a percentage)." "\n"
+    r"- $L_c$: candidates matching the selected grades (A/B/C by default), pooled." "\n"
+    r"- $N_c$: all objects in cluster $c$, including Unknown." "\n"
+    r"- $1-p$: Unknown fraction; $\log_2$: base-2 logarithm."
+    "\n\n"
+    r"$H = 0$: all labelled or all Unknown; $H = 1$: 50/50 mixture. "
+    r"Example: 10 labelled + 90 Unknown gives $p=0.1$, $H \approx 0.469$ bits. "
+    r"Convention: $0\log_2 0 = 0$."
+    "\n\n"
+    "Uses the original cluster before PCA/physical filters. Unknown is not a "
+    "confirmed non-lens. Entropy measures label mix, not morphology or lens "
+    "probability; interpret alongside enrichment and labelled counts."
+)
 LENS_GRADE_HELP = {
     "A": (
-        "Secure or almost secure lens candidates with clear lensing features "
-        "(expert score > 2.0)."
+        "High-confidence reference candidates with clear lensing features. "
+        "The catalogue grade does not by itself establish spectroscopic or modelling confirmation."
     ),
     "B": (
-        "Probable lens candidates requiring additional confirmation "
-        "(expert score > 1.5)."
+        "Probable reference lens candidates requiring additional confirmation."
     ),
     "C": (
-        "Possible lens candidates with lens-like morphology that may still be "
-        "explained by other physical structures (expert score > 1.0)."
+        "Lower-confidence reference candidates whose lens-like features may have "
+        "other explanations. This is not a confirmed non-lens category."
     ),
 }
+LENS_GRADE_HELP_NOTE = (
+    "Uses catalogue grades, not expert-score thresholds. Selected grades count "
+    "as labelled candidates; others are Unknown, not confirmed non-lenses. "
+    "Changes apply on Run clustering. Grades do not train BIRCH."
+)
 STRAIGHT_LINE_ARTIFACT_FILTER_HELP = (
-    "Straight-line artifacts are identified with Canny edges and probabilistic "
-    "and global Hough transforms. Automatic exclusions require long, bright, "
-    "continuous lines with strong contrast and edge support; ambiguous detections "
-    "are kept for review. When enabled, BIRCH uses the PCA catalogue from which "
-    "images containing these high-confidence artifacts were removed."
+    "On: use the prefiltered catalogue. Off: use the complete catalogue. "
+    "The offline Canny/Hough filter excludes clear, long, continuous straight-line "
+    "artifacts and keeps ambiguous cases; it does not edit images. "
+    "Changes apply on Run clustering."
 )
 PARAMETER_HELP = {
     "threshold": (
-        "BIRCH radius threshold. Larger values create broader clusters; "
-        "smaller values split the data into more compact groups."
+        "Maximum RMS radius for merging into a BIRCH CF subcluster in standardized "
+        "40-PCA space. Larger values generally produce broader groups. "
+        "Not an angular radius or a distance limit for every final cluster member. "
+        "Lens labels are not used."
     ),
     "branching_factor": (
-        "Maximum number of subclusters kept at each BIRCH tree node. Higher "
-        "values can preserve more structure, with extra memory cost."
+        "Maximum CF subclusters per tree node before splitting. Controls tree "
+        "capacity and memory use, not the number of final clusters. Changing it "
+        "can change assignments; larger values do not guarantee better enrichment."
     ),
     "batch_size": (
-        "Number of catalogue rows processed at once during BIRCH fitting and "
-        "prediction. Larger batches can be faster but use more memory."
+        "Rows processed per BIRCH fitting/prediction batch. "
+        f"Fixed at {DEFAULT_BIRCH_BATCH_SIZE:,} to match precalculated runs. "
+        "Cached results require matching data, preprocessing and BIRCH settings."
     ),
     "n_neighbors": (
-        "UMAP neighborhood size. Lower values emphasize local structure; higher "
-        "values preserve broader global structure."
+        "UMAP neighborhood size: lower values emphasize local structure; higher "
+        "values emphasize broader structure. Capped at fitted objects minus one. "
+        "Does not set the number of clusters."
     ),
     "min_dist": (
-        "Minimum distance between nearby points in the UMAP layout. Lower values "
-        "form tighter groups; higher values spread points out."
+        "UMAP layout packing: lower values allow tighter groups; higher values "
+        "spread points out. Not a guaranteed minimum separation or physical "
+        "distance. Does not change BIRCH membership."
     ),
     "target_weight": (
-        "Relative influence of the A/B/C labels on the semi-supervised UMAP. "
-        "A value of 0 uses only morphology; larger values give labels more influence."
+        "Reference-grade influence on semi-supervised UMAP. At 0, only PCA data "
+        "are used. A=2, B=1, C=0 are categories, not confidence weights; "
+        "Unknown=-1 is unlabelled. Label-guided proximity is not independent "
+        "evidence for lensing."
     ),
     "Maximum objects": (
-        "Upper limit for objects drawn in the UMAP view, used to keep interaction "
-        "responsive on large clusters."
+        "Limit used both to fit and to draw UMAP after filters. Sampling prioritizes "
+        "canonical/anomalous objects, then labelled candidates, then random objects "
+        "(seed 42). Labels can be over-represented; original cluster metrics "
+        "are unchanged."
     ),
 }
+CLUSTER_EXTREME_HELP = {
+    "Canonical": (
+        "Observed object nearest the mean in selected PCA components, standardized "
+        "within the original cluster. Not a synthetic image or the BIRCH CF centre. "
+        "UMAP recalculates this after filters, so its landmark may differ."
+    ),
+    "Anomalous": (
+        "Observed object farthest from the mean in selected PCA components, "
+        "standardized within the original cluster. Not a LOF score or lens "
+        "probability. UMAP recalculates this after filters, so its landmark may differ."
+    ),
+}
+RECOMMENDED_FILTER_HELP = (
+    "Tests >= and <= cuts at the original cluster's 5th-95th percentiles, choosing "
+    "the eligible cut with highest enrichment x square root of recall. "
+    "Baseline: that cluster's objects with a usable value, not the whole catalogue. "
+    "Recall: fraction of labelled candidates retained. Label-based, before active "
+    "filters; exploratory, not independent validation."
+)
+ANALYSIS_FLOW_STEPS = (
+    "Run BIRCH on the chosen catalogue using all 40 standardized PCA components, "
+    "without lens labels. Matching cached results are reused.",
+    "Inspect clusters, ordered by labelled-candidate count, then labelled fraction "
+    "and cluster size by default.",
+    "Review cutouts, property distributions and label-based recommended cuts.",
+    "Apply PCA/physical filters to select a subset; original cluster metrics stay unchanged.",
+    "Fit UMAP on selected standardized PCA components, sampling at Maximum objects if needed.",
+    "Optionally run Ward clustering in PCA space, then label-guided UMAP on a subcluster.",
+    "Export selected or loaded UMAP objects (labelled and Unknown), "
+    f"up to {DOWNLOAD_MAX_UMAP_ROWS:,} rows.",
+    "Inspect cutouts and Aladin positions. Neither enrichment nor map proximity confirms lensing.",
+)

@@ -22,13 +22,21 @@ from .analysis import (
 from .catalogs import (
     load_lens_catalog,
     load_morphology_object,
+    load_morphology_objects,
     load_physical_measurement_object,
     normalize_object_ids,
 )
 from .config import (
+    ANALYSIS_FLOW_STEPS,
+    CLUSTER_EXTREME_HELP,
     CUTOUT_BASE,
     DEFAULT_CLUSTER_FEATURES,
     ENABLE_ARC_LIKE_STRUCTURE_DETECTION,
+    ENABLE_SLED_CHECK,
+    ENRICHMENT_HELP,
+    LABEL_DENSITY_HELP,
+    LABEL_ENTROPY_HELP,
+    LENS_GRADE_HELP_NOTE,
     LENS_GRADE_OPTIONS,
     LENS_IMG_BASE,
     LENS_PATH,
@@ -42,6 +50,7 @@ from .config import (
     PHYSICAL_FILTER_RECOMMENDATION_MIN_LENSES,
     PHYSICAL_FILTER_RECOMMENDATION_MIN_UNKNOWNS,
     PHYSICAL_FILTER_RECOMMENDATION_MIN_VALID_OBJECTS,
+    RECOMMENDED_FILTER_HELP,
     SUMMARY_DISTPLOT_MAX_POINTS_PER_GROUP,
     SUMMARY_HISTOGRAM_BINS,
     SUMMARY_HISTOGRAM_FEATURE_LIMIT,
@@ -62,16 +71,35 @@ from .images import (
     thumbnail_image_src,
 )
 from .runtime import log_app_event
+from .help_tooltips import HELP_TOOLTIP_SCRIPT
 from .storage import path_exists
+from .sled_ui import render_sled_check
+from .service_icons import ALADIN_LINK_CSS, aladin_icon_link
 from .physical import (
     PHYSICAL_ANALYSIS_FIELDS,
     PHYSICAL_FILTER_OPERATORS,
-    PHYSICAL_QUERY_FIELDS,
+    PHYSICAL_MEASUREMENT_HELP,
     analysis_ready_physical_measurements,
     available_physical_analysis_fields,
     build_physical_summary,
     physical_measurement_display_rows,
 )
+
+# Streamlit's default row and header height is 35 px, plus the table borders.
+OBJECT_DETAIL_TABLE_HEIGHT = 35 * (8 + 1) + 3
+
+COPY_ICON_SRC = "data:image/svg+xml;base64," + base64.b64encode(
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+    b'stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" '
+    b'stroke-linejoin="round"><rect x="8" y="8" width="13" height="13" rx="2"/>'
+    b'<path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>'
+    b'</svg>'
+).decode("ascii")
+COPIED_ICON_SRC = "data:image/svg+xml;base64," + base64.b64encode(
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+    b'stroke="#86efac" stroke-width="2" stroke-linecap="round" '
+    b'stroke-linejoin="round"><path d="m20 6-11 11-5-5"/></svg>'
+).decode("ascii")
 
 OVERLAY_BUTTON_MESSAGES = {
     "Run clustering": "Running BIRCH clustering...",
@@ -128,10 +156,12 @@ OVERLAY_SPINNER_CSS = """
 
 def inject_plot_cursor_css() -> None:
     st.markdown(
-        """
-        <style>
+        "<style>" + ALADIN_LINK_CSS + """
         .block-container {
             padding-top: 2rem;
+        }
+        div[data-testid="stTooltipContent"] {
+            max-width: min(42rem, calc(100vw - 2rem));
         }
         @media (min-width: 768px) {
             section[data-testid="stSidebar"][aria-expanded="true"] {
@@ -189,6 +219,24 @@ def inject_plot_cursor_css() -> None:
             line-height: 1.25;
             margin-top: 0.2rem;
         }
+        :is(.st-key-umap_object_id, .st-key-semisupervised_umap_object_id)
+        [data-testid="stCode"] {
+            background: transparent;
+        }
+        :is(.st-key-umap_object_id, .st-key-semisupervised_umap_object_id)
+        [data-testid="stCode"] pre {
+            font-size: 1rem;
+            font-weight: 600;
+            padding: 0.5rem 2.5rem 0.5rem 0;
+        }
+        :is(.st-key-umap_object_id, .st-key-semisupervised_umap_object_id)
+        [data-testid="stCode"] > div {
+            opacity: 1;
+            visibility: visible;
+        }
+        .st-key-search_physical_measurements {
+            min-height: 318px;
+        }
         .back-to-top {
             align-items: center;
             background: #ff5a52;
@@ -222,30 +270,36 @@ def inject_plot_cursor_css() -> None:
             background: #111923;
             border: 1px solid rgba(148, 163, 184, 0.45);
             border-radius: 10px;
+            box-sizing: border-box;
             bottom: calc(100% + 0.75rem);
             box-shadow: 0 14px 34px rgba(15, 23, 42, 0.32);
             color: #f8fafc !important;
             display: none;
             font-size: 0.9rem;
-            font-weight: 700;
+            font-weight: 400;
             left: 0;
             line-height: 1.35;
+            max-height: calc(100dvh - 1.5rem);
             max-width: min(360px, calc(100vw - 2rem));
-            min-width: 260px;
+            min-width: min(260px, calc(100vw - 2rem));
+            overflow-wrap: anywhere;
+            overflow-y: auto;
+            overscroll-behavior: contain;
             padding: 0.75rem 0.9rem;
             position: absolute;
             text-align: left;
+            white-space: normal;
             z-index: 1000;
         }
-        .concept-popover::after {
-            border-left: 0.55rem solid transparent;
-            border-right: 0.55rem solid transparent;
-            border-top: 0.55rem solid #111923;
-            bottom: -0.52rem;
-            content: "";
-            left: 1.8rem;
-            position: absolute;
-            transform: translateX(-50%);
+        .concept-popover strong {
+            font-weight: 700;
+        }
+        .concept-popover__steps {
+            margin: 0.5rem 0 0;
+            padding-left: 1.35rem;
+        }
+        .concept-popover__steps li + li {
+            margin-top: 0.5rem;
         }
         .concept-popover--with-thumbnails {
             min-width: min(330px, calc(100vw - 2rem));
@@ -272,10 +326,7 @@ def inject_plot_cursor_css() -> None:
             margin-top: 0.7rem;
         }
         .lens-grade-help__description {
-            font-weight: 500;
-        }
-        .lens-grade-help__description strong {
-            font-weight: 800;
+            font-weight: 400;
         }
         .lens-grade-help__thumbnail-grid {
             display: grid;
@@ -292,9 +343,26 @@ def inject_plot_cursor_css() -> None:
             object-fit: contain;
             width: 100%;
         }
-        .concept-help:hover .concept-popover,
-        .concept-help:focus .concept-popover {
+        html:not(.escope-tooltips-ready) .concept-help:hover .concept-popover,
+        html:not(.escope-tooltips-ready) .concept-help:focus .concept-popover {
             display: block;
+        }
+        .concept-popover[data-escope-open] {
+            bottom: auto;
+            display: block;
+            inset: auto;
+            margin: 0;
+            min-width: 0;
+            position: fixed;
+            z-index: 100000;
+        }
+        .concept-popover::-webkit-scrollbar {
+            width: 8px;
+        }
+        .concept-popover::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border: 2px solid #111923;
+            border-radius: 4px;
         }
         .sidebar-flow-help {
             line-height: 1;
@@ -311,30 +379,11 @@ def inject_plot_cursor_css() -> None:
             text-align: center;
             width: 1.35rem;
         }
-        .sidebar-flow-help .concept-popover {
-            bottom: auto;
-            left: 5.75rem;
-            max-width: min(360px, calc(100vw - 7rem));
-            min-width: 310px;
-            position: fixed;
-            right: auto;
-            top: 4.75rem;
-            white-space: normal;
-        }
-        .sidebar-flow-help .concept-popover::after {
-            border-bottom: 0.55rem solid transparent;
-            border-right: 0.55rem solid #111923;
-            border-top: 0.55rem solid transparent;
-            bottom: auto;
-            left: -0.52rem;
-            right: auto;
-            top: 0.3rem;
-            transform: none;
-        }
         </style>
         """,
         unsafe_allow_html=True,
     )
+    st_components.html(HELP_TOOLTIP_SCRIPT, height=0, width=0)
 
 def render_back_to_top_control() -> None:
     st.markdown(
@@ -592,8 +641,8 @@ def render_physical_filter_controls(
         st.caption(
             "Filters are combined with AND and applied to the selected cluster before "
             "UMAP and subsequent analyses. Changing them does not start a calculation. "
-            "Measurements flagged as unreliable in the Euclid catalogue are treated "
-            "as missing."
+            "Only usable measurements are included; photometric redshift, stellar "
+            "mass and Sersic index also require a zero quality flag."
         )
         clean = analysis_ready_physical_measurements(physical_df)
         available_fields = available_physical_analysis_fields(clean)
@@ -704,31 +753,45 @@ def apply_pending_recommended_physical_filter(cluster_id: int) -> None:
 def show_thumbnail(
     row: pd.Series | None,
     caption: str,
-    prefer_lens_image: bool = False,
+    image_src: str | None = None,
+    aladin_link: str | None = None,
 ) -> None:
     if row is None:
         st.caption(caption)
         st.caption("No object")
         return
 
-    path = object_image_path(row, prefer_lens_image=prefer_lens_image)
-    if path is None:
-        st.caption(caption)
-        st.caption("No image")
-        return
+    if image_src is None:
+        path = object_image_path(row)
+        if path is None:
+            st.caption(caption)
+            st.caption("No image")
+            return
 
-    try:
-        image_src = thumbnail_image_src(path)
-    except Exception:
-        st.caption(caption)
-        st.caption("No image")
-        return
+        try:
+            image_src = thumbnail_image_src(path)
+        except Exception:
+            st.caption(caption)
+            st.caption("No image")
+            return
 
     object_id = row.get("object_id", "")
     id_str = row.get("id_str", "")
     modal_key = hashlib.sha1(f"{caption}|{object_id}|{id_str}".encode()).hexdigest()[:12]
     modal_id = f"thumb-{modal_key}"
     escaped_caption = html.escape(str(caption))
+    modal_caption = str(caption)
+    is_lens = row.get("is_lens", False)
+    lens_grade = row.get("lens_grade", "")
+    if (
+        caption in ("Canonical", "Anomalous")
+        and pd.notna(is_lens) and bool(is_lens)
+        and pd.notna(lens_grade)
+    ):
+        grade = str(lens_grade).strip().upper()
+        if grade in {"A", "B", "C"}:
+            modal_caption = f"{caption} - Grade {grade}"
+    escaped_modal_caption = html.escape(modal_caption)
     escaped_object_id = html.escape(str(object_id))
     escaped_id_str = html.escape(str(id_str))
     id_str_html = (
@@ -736,10 +799,12 @@ def show_thumbnail(
         if not pd.isna(id_str) and str(id_str).strip()
         else ""
     )
+    aladin_link_html = aladin_icon_link(aladin_link, css_class="thumb-aladin-link") if aladin_link else ""
 
-    st.markdown(
+    st.html(
         f"""
         <style>
+        {ALADIN_LINK_CSS}
         #{modal_id} {{
             display: none;
         }}
@@ -758,13 +823,56 @@ def show_thumbnail(
             border: 1px solid rgba(255, 255, 255, 0.18);
             border-radius: 8px;
             padding: 1rem;
+            position: relative;
+            z-index: 1;
         }}
         #{modal_id} .thumb-modal-meta {{
             color: #f8fafc;
             font-size: 0.9rem;
             margin-bottom: 0.45rem;
         }}
-        #{modal_id} img {{
+        #{modal_id} .thumb-modal-object-id {{
+            align-items: center;
+            display: flex;
+            gap: 0.4rem;
+        }}
+        #{modal_id} .thumb-copy-id {{
+            align-items: center;
+            background: transparent;
+            border: 0;
+            border-radius: 4px;
+            color: #cbd5e1;
+            cursor: pointer;
+            display: inline-flex;
+            flex: none;
+            height: 24px;
+            justify-content: center;
+            padding: 0;
+            width: 24px;
+        }}
+        #{modal_id} .thumb-copy-id:hover {{
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+        }}
+        #{modal_id} .thumb-copy-id:focus-visible {{
+            outline: 2px solid #93c5fd;
+            outline-offset: 2px;
+        }}
+        #{modal_id} .thumb-copy-id img {{
+            height: 16px;
+            width: 16px;
+        }}
+        #{modal_id} .thumb-copy-id .thumb-copied-icon,
+        #{modal_id} .thumb-copy-id.copied .thumb-copy-icon {{
+            display: none;
+        }}
+        #{modal_id} .thumb-copy-id.copied .thumb-copied-icon {{
+            display: block;
+        }}
+        #{modal_id} .thumb-aladin-link {{
+            margin-left: 0.2rem;
+        }}
+        #{modal_id} .thumb-modal-image {{
             display: block;
             height: 400px;
             object-fit: contain;
@@ -793,27 +901,92 @@ def show_thumbnail(
         <div id="{modal_id}">
             <a href="#" style="position: fixed; inset: 0;" aria-label="Close"></a>
             <div class="thumb-modal-panel">
-                <div class="thumb-modal-meta"><strong>{escaped_caption}</strong></div>
-                <div class="thumb-modal-meta">object_id: {escaped_object_id}</div>
+                <div class="thumb-modal-meta"><strong>{escaped_modal_caption}</strong></div>
+                <div class="thumb-modal-meta thumb-modal-object-id">
+                    <span>object_id: {escaped_object_id}</span>
+                    <button type="button" class="thumb-copy-id"
+                            data-object-id="{escaped_object_id}"
+                            title="Copy object ID" aria-label="Copy object ID">
+                        <img class="thumb-copy-icon" src="{COPY_ICON_SRC}" alt="" />
+                        <img class="thumb-copied-icon" src="{COPIED_ICON_SRC}" alt="" />
+                    </button>
+                    {aladin_link_html}
+                </div>
                 {id_str_html}
-                <img src="{image_src}" alt="{escaped_caption}" />
+                <img class="thumb-modal-image" src="{image_src}" alt="{escaped_caption}" />
             </div>
         </div>
+        <script>
+        if (!window.__escopeCopyObjectIdBound) {{
+            document.addEventListener("click", async (event) => {{
+                const button = event.target.closest(".thumb-copy-id");
+                if (!button) return;
+                try {{
+                    await navigator.clipboard.writeText(button.dataset.objectId);
+                    button.classList.add("copied");
+                    button.title = "Copied";
+                    button.setAttribute("aria-label", "Object ID copied");
+                    setTimeout(() => {{
+                        button.classList.remove("copied");
+                        button.title = "Copy object ID";
+                        button.setAttribute("aria-label", "Copy object ID");
+                    }}, 1800);
+                }} catch (error) {{
+                    button.title = "Copy failed";
+                    button.setAttribute("aria-label", "Could not copy object ID");
+                }}
+            }});
+            window.__escopeCopyObjectIdBound = true;
+        }}
+        </script>
         """,
-        unsafe_allow_html=True,
+        unsafe_allow_javascript=True,
     )
 
 def show_thumbnail_group(
     title: str,
     rows: list[pd.Series],
     captions: list[str],
-    prefer_lens_image: bool = False,
+    skip_missing_images: bool = False,
+    aladin_links: Mapping[str, str] | None = None,
 ) -> None:
+    aladin_links = aladin_links or {}
+    if skip_missing_images:
+        available = []
+        for row, caption in zip(rows, captions):
+            try:
+                path = object_image_path(row)
+                if path is None:
+                    continue
+                available.append((row, caption, thumbnail_image_src(path)))
+            except Exception:
+                continue
+        if not available:
+            return
+        render_thumbnail_group_title(title)
+        for column, (row, caption, image_src) in zip(st.columns(len(available)), available):
+            with column:
+                show_thumbnail(
+                    row,
+                    caption,
+                    image_src=image_src,
+                    aladin_link=aladin_links.get(str(row.get("object_id"))),
+                )
+        return
+
     render_thumbnail_group_title(title)
     count = max(len(rows), 1)
     for column, row, caption in zip(st.columns(count), rows or [None], captions or [""]):
         with column:
-            show_thumbnail(row, caption, prefer_lens_image=prefer_lens_image)
+            aladin_link = (
+                aladin_links.get(str(row.get("object_id")))
+                if row is not None else None
+            )
+            show_thumbnail(
+                row,
+                caption,
+                aladin_link=aladin_link,
+            )
 
 def cluster_extreme_rows(
     cluster_df: pd.DataFrame,
@@ -1020,7 +1193,7 @@ def render_selected_cluster_pca_characterization(
         return
 
     if n_non_lenses == 0:
-        st.info("This cluster does not contain non-lens objects for comparison.")
+        st.info("This cluster does not contain Unknown objects for comparison.")
         return
 
     recommendations = {
@@ -1056,15 +1229,12 @@ def render_selected_cluster_pca_characterization(
 
     if valid_recommendations:
         st.markdown(
-            """
+            f"""
             <div style="font-weight: 700; margin-bottom: 0.35rem;">
                 Recommended PCA thresholds
                 <span class="concept-help" tabindex="0" style="margin-left: 0.25rem;">?
                     <span class="concept-popover">
-                        For each PCA component, the table shows the threshold that best enriches
-                        lens candidates against unknown objects in this cluster, balancing lens
-                        enrichment and lens recall. These thresholds are exploratory filters,
-                        not confirmed classification rules.
+                        {html.escape(RECOMMENDED_FILTER_HELP)}
                     </span>
                 </span>
             </div>
@@ -1232,7 +1402,7 @@ def _physical_filter_unavailable_reason(
             f"{PHYSICAL_FILTER_RECOMMENDATION_MIN_UNKNOWNS} unknown objects with "
             "valid measurements are required."
         )
-    return "No stable one-sided threshold was found for this property."
+    return "No one-sided cut meets the minimum selected-size and candidate-recall requirements."
 
 
 def render_selected_cluster_physical_characterization(
@@ -1247,9 +1417,9 @@ def render_selected_cluster_physical_characterization(
         return
 
     st.caption(
-        "Measurements flagged as unreliable in the Euclid catalogue are treated "
-        "as missing. This applies to photometric redshift, stellar mass and the "
-        "Sersic index; all other displayed measurements must be finite."
+        "Only usable values from the Euclid Q1 physical-measurements table are "
+        "included. Photometric redshift, stellar mass and Sersic index also "
+        "require a zero quality flag when their flag column is available."
     )
     st.plotly_chart(
         build_compact_physical_histogram_figure(
@@ -1275,7 +1445,17 @@ def render_selected_cluster_physical_characterization(
         for field in summary["field"]
     }
 
-    st.markdown("**Physical measurements and recommended thresholds**")
+    st.markdown(
+        "**Physical measurements and recommended thresholds**",
+        help=RECOMMENDED_FILTER_HELP,
+    )
+    st.caption(
+        "For each property, ESCOPE compares candidates of the selected reference grades with "
+        "unlabelled objects in this cluster. It tests upper and lower cuts and "
+        "recommends the one that best balances candidate enrichment and recall "
+        "among objects with usable measurements. These cuts guide inspection; "
+        "they do not confirm lenses."
+    )
     column_widths = [1.8, 1.7, 2.2, 1.25, 1.35, 0.95, 0.85]
     header_cols = st.columns(column_widths)
     headers = [
@@ -1311,7 +1491,7 @@ def render_selected_cluster_physical_characterization(
                 "Apply filter",
                 key=f"apply_physical_filter_{cluster_id}_{field}_{row_index}",
                 disabled=recommendation is None,
-                use_container_width=True,
+                type="secondary",
                 help=(
                     None
                     if recommendation is not None
@@ -1351,7 +1531,16 @@ def render_selected_cluster_physical_characterization(
             recall,
         ]
         alignments = ["left", "left", "left", "left", "right", "right"]
-        for value_col, value, align in zip(row_cols[1:], row_values, alignments):
+        for value_index, (value_col, value, align) in enumerate(
+            zip(row_cols[1:], row_values, alignments)
+        ):
+            value_html = html.escape(str(value))
+            if value_index == 0:
+                value_html = (
+                    '<span class="concept-help" tabindex="0">'
+                    f'{value_html}<span class="concept-popover">'
+                    f'{html.escape(PHYSICAL_MEASUREMENT_HELP[field])}</span></span>'
+                )
             value_col.markdown(
                 f"""
                 <div style="
@@ -1361,7 +1550,7 @@ def render_selected_cluster_physical_characterization(
                     overflow-wrap: anywhere;
                     padding: 0.48rem 0;
                     text-align: {align};
-                ">{html.escape(str(value))}</div>
+                ">{value_html}</div>
                 """,
                 unsafe_allow_html=True,
             )
@@ -1373,17 +1562,17 @@ def render_thumbnail_group_title(title: str) -> None:
         return
 
     st.markdown(
-        """
-        <div style="color: inherit; font-size: 0.82rem; margin-bottom: 0.35rem; opacity: 0.72;">
+        f"""
+        <div style="color: inherit; font-size: 0.82rem; margin-bottom: 0.35rem;">
             <span class="concept-help" tabindex="0">Canonical
                 <span class="concept-popover">
-                    Object closest to the cluster centroid in the selected PCA feature space.
+                    {html.escape(CLUSTER_EXTREME_HELP['Canonical'])}
                 </span>
             </span>
             <span style="margin: 0 0.2rem;">/</span>
             <span class="concept-help" tabindex="0">Anomalous
                 <span class="concept-popover">
-                    Object farthest from the cluster centroid in the selected PCA feature space.
+                    {html.escape(CLUSTER_EXTREME_HELP['Anomalous'])}
                 </span>
             </span>
         </div>
@@ -1459,7 +1648,10 @@ def render_lens_grade_help_label(
     grade_descriptions: Mapping[str, str],
     grade_example_paths: Mapping[str, Sequence[str | Path]],
 ) -> None:
-    sections = []
+    sections = [
+        '<div class="lens-grade-help__description">'
+        f'{html.escape(LENS_GRADE_HELP_NOTE)}</div>'
+    ]
     for grade, description in grade_descriptions.items():
         thumbnail_grid = _tooltip_thumbnail_grid(
             grade_example_paths.get(grade, ()),
@@ -1482,23 +1674,17 @@ def render_lens_grade_help_label(
     )
 
 def render_app_flow_help() -> None:
+    steps_html = "".join(
+        f"<li>{html.escape(step)}</li>"
+        for step in ANALYSIS_FLOW_STEPS
+    )
     st.markdown(
-        """
+        f"""
         <div class="sidebar-flow-help">
             <span class="concept-help" tabindex="0">?
                 <span class="concept-popover">
-                    <strong>Analysis flow</strong><br>
-                    1. Run BIRCH over the full PCA catalogue.<br>
-                    2. Rank clusters by lens-candidate density.<br>
-                    3. Visually inspect enriched clusters.<br>
-                    4. Compute PCA histograms and recommended thresholds.<br>
-                    5. Apply PCA and physical-property filters to isolate enriched regions.<br>
-                    6. Generate UMAP for the filtered subset.<br>
-                    7. Apply hierarchical subclustering.<br>
-                    8. Use A/B/C labels to guide semi-supervised UMAP in promising subclusters.<br>
-                    9. Export Unknown objects close to lens-rich regions.<br>
-                    10. Visually review cutouts and cross-check them in Aladin.<br>
-                    11. Use prioritized candidates for human inspection, active learning, or downstream models.
+                    <strong>Analysis flow</strong>
+                    <ol class="concept-popover__steps">{steps_html}</ol>
                 </span>
             </span>
         </div>
@@ -1529,7 +1715,7 @@ def cluster_summary_signature(
     cluster_values = tuple(
         tuple(row)
         for row in cluster_summary_df[
-            ["cluster", "n_objects", "n_lenses", "lens_rate", "enrichment"]
+            ["cluster", "n_objects", "n_lenses", "lens_rate", "enrichment", "label_entropy_bits"]
         ].itertuples(index=False, name=None)
     )
     return (
@@ -1575,6 +1761,7 @@ def build_cluster_preview_model(
         "n_lenses": int(summary_row["n_lenses"]),
         "lens_rate": float(summary_row["lens_rate"]),
         "enrichment": float(summary_row["enrichment"]),
+        "label_entropy_bits": float(summary_row["label_entropy_bits"]),
         "canonical_row": canonical_row,
         "anomaly_row": anomaly_row,
         "random_rows": random_rows,
@@ -1647,6 +1834,7 @@ def build_cluster_summary_view_model(
                 "n_lenses": int(summary_row["n_lenses"]),
                 "lens_rate": float(summary_row["lens_rate"]),
                 "enrichment": float(summary_row["enrichment"]),
+                "label_entropy_bits": float(summary_row["label_entropy_bits"]),
                 "canonical": canonical,
                 "anomalous": anomalous,
             }
@@ -1663,15 +1851,67 @@ def build_cluster_summary_view_model(
         "total_clusters": len(cluster_download_rows),
     }
 
+
+def cluster_preview_object_ids(cluster_models: Sequence[Mapping[str, object]]) -> tuple[str, ...]:
+    object_ids = set()
+    for model in cluster_models:
+        rows = [
+            model["canonical_row"],
+            model["anomaly_row"],
+            *model["random_rows"],
+            *model["lens_rows"],
+        ]
+        for row in rows:
+            if row is not None and not pd.isna(row.get("object_id")):
+                object_ids.add(str(row["object_id"]))
+    return tuple(sorted(object_ids))
+
+
+@st.cache_data(show_spinner=False)
+def cluster_preview_aladin_links(
+    morph_path: str,
+    object_ids: tuple[str, ...],
+) -> dict[str, str]:
+    if not object_ids:
+        return {}
+    try:
+        morphology = load_morphology_objects(
+            morph_path,
+            object_ids,
+            columns=("right_ascension", "declination"),
+        )
+    except OSError:
+        return {}
+    if not {"right_ascension", "declination"}.issubset(morphology.columns):
+        return {}
+
+    links = {}
+    for row in morphology.itertuples(index=False):
+        try:
+            ra = float(row.right_ascension)
+            dec = float(row.declination)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(ra) and np.isfinite(dec) and -90 <= dec <= 90:
+            links[str(row.object_id)] = aladin_url(ra, dec)
+    return links
+
+
 def render_cluster_preview_card(
     cluster_model: Mapping[str, object],
     *,
     show_analysis_button: bool,
+    aladin_links: Mapping[str, str] | None = None,
 ) -> bool:
     cluster_id = int(cluster_model["cluster_id"])
+    if aladin_links is None:
+        aladin_links = cluster_preview_aladin_links(
+            MORPH_PATH,
+            cluster_preview_object_ids([cluster_model]),
+        )
     requested = False
     with st.container(border=True):
-        stats_cols = st.columns([1, 1, 1, 1, 1])
+        stats_cols = st.columns([1, 1, 1, 1, 1, 1])
         stats_cols[0].metric("Cluster", cluster_id)
         stats_cols[1].metric(
             "Objects",
@@ -1684,10 +1924,17 @@ def render_cluster_preview_card(
         stats_cols[3].metric(
             "Density",
             f"{format_decimal_comma(float(cluster_model['lens_rate']) * 100, 2)}%",
+            help=LABEL_DENSITY_HELP,
         )
         stats_cols[4].metric(
             "Enrichment",
             f"{format_decimal_comma(float(cluster_model['enrichment']), 2)}x",
+            help=ENRICHMENT_HELP,
+        )
+        stats_cols[5].metric(
+            "Entropy",
+            format_decimal_comma(float(cluster_model["label_entropy_bits"]), 3),
+            help=LABEL_ENTROPY_HELP,
         )
 
         image_cols = st.columns([2, 3, 5])
@@ -1696,6 +1943,7 @@ def render_cluster_preview_card(
                 "Canonical / anomalous",
                 [cluster_model["canonical_row"], cluster_model["anomaly_row"]],
                 ["Canonical", "Anomalous"],
+                aladin_links=aladin_links,
             )
         with image_cols[1]:
             random_rows = list(cluster_model["random_rows"])
@@ -1703,21 +1951,22 @@ def render_cluster_preview_card(
                 "Random",
                 random_rows,
                 [f"Random {index + 1}" for index in range(len(random_rows))],
+                aladin_links=aladin_links,
             )
         with image_cols[2]:
             show_thumbnail_group(
                 "Labelled lens candidates in the cluster",
                 list(cluster_model["lens_rows"]),
                 list(cluster_model["lens_captions"]),
-                prefer_lens_image=True,
+                skip_missing_images=True,
+                aladin_links=aladin_links,
             )
 
         if show_analysis_button:
             requested = st.button(
                 "Analyse this cluster",
                 key=f"analyse_cluster_{cluster_id}",
-                type="primary",
-                use_container_width=True,
+                type="secondary",
             )
     return requested
 
@@ -1732,12 +1981,17 @@ def render_cluster_visual_summary_view_model(
             "Showing visual previews for the first "
             f"{visible_clusters} of {format_thousands_dot(total_clusters)} clusters."
         )
+    aladin_links = cluster_preview_aladin_links(
+        MORPH_PATH,
+        cluster_preview_object_ids(view_model["clusters"]),
+    )
     requested_cluster: int | None = None
     for cluster_model in view_model["clusters"]:
         cluster_id = int(cluster_model["cluster_id"])
         if render_cluster_preview_card(
             cluster_model,
             show_analysis_button=True,
+            aladin_links=aladin_links,
         ):
             requested_cluster = cluster_id
     return requested_cluster
@@ -1829,23 +2083,20 @@ def selected_umap_cutout_path(row: pd.Series) -> str | None:
     return morphology_cutout_path(row.get("id_str"), row.get("object_id"))
 
 
-def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
+def show_object_details(row: pd.Series, *, key: str) -> None:
     st.subheader("Selected object")
+    with st.container(key=f"{key}_object_id"):
+        label_col, value_col = st.columns(
+            [1, 3], gap="small", vertical_alignment="center"
+        )
+        with label_col:
+            st.markdown("**Object ID**")
+        with value_col:
+            st.code(str(row.get("object_id", "")), language=None, wrap_lines=True)
     show_lens_status(row)
-
-    details = {
-        "id_str": row.get("id_str", ""),
-        "object_id": row.get("object_id", ""),
-        "cluster": row.get("cluster", ""),
-        "is_lens": bool(row.get("is_lens", False)),
-        "is_canonical": bool(row.get("is_canonical", False)),
-        "is_anomaly": bool(row.get("is_anomaly", False)),
-        "lens_grade": row.get("lens_grade", ""),
-        "dist_to_cluster_centroid": row.get("dist_to_cluster_centroid", np.nan),
-        "umap_1": row.get("umap_1", np.nan),
-        "umap_2": row.get("umap_2", np.nan),
-    }
-    st.dataframe(pd.DataFrame([details]), use_container_width=True, hide_index=True)
+    if ENABLE_SLED_CHECK and not bool(row.get("is_lens", False)):
+        ra, dec = object_sky_coordinates(str(row.get("object_id", "")))
+        render_sled_check(str(row.get("object_id", "")), ra, dec, key=key)
 
     cutout_path = selected_umap_cutout_path(row)
     lens_path = lens_image_path(row.get("lens_id_str"))
@@ -1868,6 +2119,44 @@ def show_object_details(row: pd.Series, selected_features: list[str]) -> None:
         if lens_path is not None:
             show_detectable_image(lens_path, "Strong-lens image", "selected_lens")
 
+
+def show_selected_object_summary(row: pd.Series) -> None:
+    st.markdown("**Object summary**")
+    details = {
+        "id_str": row.get("id_str", ""),
+        "cluster": row.get("cluster", ""),
+        "is_lens": bool(row.get("is_lens", False)),
+        "is_canonical": bool(row.get("is_canonical", False)),
+        "is_anomaly": bool(row.get("is_anomaly", False)),
+        "lens_grade": row.get("lens_grade", ""),
+        "dist_to_cluster_centroid": row.get("dist_to_cluster_centroid", np.nan),
+        "umap_1": row.get("umap_1", np.nan),
+        "umap_2": row.get("umap_2", np.nan),
+    }
+    st.dataframe(
+        pd.DataFrame([
+            {"field": field, "value": str(value) if pd.notna(value) else None}
+            for field, value in details.items()
+        ]),
+        use_container_width=True,
+        hide_index=True,
+        height=OBJECT_DETAIL_TABLE_HEIGHT,
+    )
+
+
+def show_selected_object_tables(row: pd.Series, selected_features: list[str]) -> None:
+    summary_col, morphology_col = st.columns(2)
+    with summary_col:
+        show_selected_object_summary(row)
+    with morphology_col:
+        show_morphology_catalogue_row(row)
+    pca_col, physical_col = st.columns(2)
+    with pca_col:
+        show_selected_pca_components(row, selected_features)
+    with physical_col:
+        show_physical_measurements_row(row)
+
+
 def show_morphology_catalogue_row(row: pd.Series) -> None:
     morphology_df = load_morphology_object(MORPH_PATH, str(row.get("object_id", "")))
     if not morphology_df.empty:
@@ -1875,26 +2164,42 @@ def show_morphology_catalogue_row(row: pd.Series) -> None:
         morph_display = pd.DataFrame(
             table_rows_with_coordinate_formats(morphology_df.iloc[0].dropna().to_dict())
         )
-        st.dataframe(morph_display, use_container_width=True, hide_index=True)
-
-
-def show_physical_measurements_row(
-    row: pd.Series,
-    physical_df: pd.DataFrame | None = None,
-) -> None:
-    object_id = normalize_object_ids(pd.Series([row.get("object_id", "")])).iloc[0]
-    if physical_df is None:
-        physical_df = load_physical_measurement_object(
-            PHYSICAL_MEASUREMENTS_PATH,
-            object_id,
-            columns=PHYSICAL_QUERY_FIELDS,
+        st.dataframe(
+            morph_display,
+            use_container_width=True,
+            hide_index=True,
+            height=OBJECT_DETAIL_TABLE_HEIGHT,
         )
-    elif not physical_df.empty:
-        normalized_ids = normalize_object_ids(physical_df["object_id"])
-        physical_df = physical_df.loc[normalized_ids == object_id].iloc[:1].copy()
 
+
+def object_physical_measurements(object_id: object) -> pd.DataFrame:
+    """Cache complete single-object rows without widening cluster-level queries."""
+    normalized_id = normalize_object_ids(pd.Series([object_id])).iloc[0]
+    cache = st.session_state.setdefault("object_physical_measurements", {})
+    cache_key = (PHYSICAL_MEASUREMENTS_PATH, normalized_id)
+    if cache_key not in cache:
+        measurements = load_physical_measurement_object(
+            PHYSICAL_MEASUREMENTS_PATH, normalized_id
+        )
+        if len(cache) >= 64:
+            cache.pop(next(iter(cache)))
+        cache[cache_key] = measurements
+    return cache[cache_key].copy()
+
+
+def show_physical_measurements_row(row: pd.Series) -> None:
     st.markdown("**Physical measurements**")
-    if physical_df is None or physical_df.empty:
+    try:
+        physical_df = object_physical_measurements(row.get("object_id", ""))
+    except Exception as exc:
+        log_app_event(
+            "object_physical_measurements_failed",
+            object_id=str(row.get("object_id", "")),
+            error_type=type(exc).__name__,
+        )
+        st.warning("Physical measurements could not be loaded for this object.")
+        return
+    if physical_df.empty:
         st.info("No physical measurements were found for this object_id.")
         return
 
@@ -1904,7 +2209,12 @@ def show_physical_measurements_row(
             excluded_fields=("object_id", "right_ascension", "declination"),
         )
     )
-    st.dataframe(display, use_container_width=True, hide_index=True)
+    st.dataframe(
+        display,
+        use_container_width=True,
+        hide_index=True,
+        height=OBJECT_DETAIL_TABLE_HEIGHT,
+    )
 
 def show_selected_pca_components(row: pd.Series, selected_features: list[str]) -> None:
     st.markdown("**Selected PCA components**")
@@ -1914,6 +2224,7 @@ def show_selected_pca_components(row: pd.Series, selected_features: list[str]) -
         ),
         use_container_width=True,
         hide_index=True,
+        height=OBJECT_DETAIL_TABLE_HEIGHT,
     )
 
 def format_ra_hms(ra_degrees: float) -> str:
@@ -1961,24 +2272,32 @@ def aladin_url(ra_degrees: float, dec_degrees: float) -> str:
 def aladin_caption(caption: str, ra_degrees: float, dec_degrees: float) -> str:
     aladin_link = aladin_url(ra_degrees, dec_degrees)
     return (
-        f"<span>{html.escape(caption)} </span>"
-        f'<a href="{aladin_link}" target="_blank" '
-        'rel="noopener noreferrer">[View in Aladin]</a>'
+        '<span style="display:inline-flex;align-items:center;justify-content:center;'
+        'gap:0.6rem;flex-wrap:wrap;max-width:100%">'
+        f'<span style="opacity:0.65">{html.escape(caption)}</span>'
+        + aladin_icon_link(aladin_link)
+        + "</span>"
     )
 
-def aladin_caption_for_object(caption: str, object_id: object) -> str | None:
-    morphology_df = load_morphology_object(MORPH_PATH, str(object_id))
-    if morphology_df.empty:
-        return None
-    morphology_row = morphology_df.iloc[0]
+@st.cache_data(ttl=3600, max_entries=256, show_spinner=False)
+def object_sky_coordinates(object_id: str) -> tuple[float | None, float | None]:
     try:
-        return aladin_caption(
-            caption,
-            float(morphology_row["right_ascension"]),
-            float(morphology_row["declination"]),
-        )
-    except (KeyError, TypeError, ValueError):
+        morphology_df = load_morphology_object(MORPH_PATH, object_id)
+        if not morphology_df.empty:
+            row = morphology_df.iloc[0]
+            ra, dec = float(row["right_ascension"]), float(row["declination"])
+            if np.isfinite(ra) and np.isfinite(dec):
+                return ra, dec
+    except Exception:
+        log_app_event("object_coordinates_unavailable", object_id=object_id)
+    return None, None
+
+
+def aladin_caption_for_object(caption: str, object_id: object) -> str | None:
+    ra, dec = object_sky_coordinates(str(object_id))
+    if ra is None or dec is None:
         return None
+    return aladin_caption(caption, ra, dec)
 
 def table_rows_with_coordinate_formats(values: dict) -> list[dict]:
     rows = []
@@ -2054,11 +2373,7 @@ def render_euclid_object_search(object_id: str) -> None:
         result = fetch_euclid_object_summary(object_id)
         morphology_df = load_morphology_object(MORPH_PATH, str(result["object_id"]))
         try:
-            physical_df = load_physical_measurement_object(
-                PHYSICAL_MEASUREMENTS_PATH,
-                result["object_id"],
-                columns=PHYSICAL_QUERY_FIELDS,
-            )
+            physical_df = object_physical_measurements(result["object_id"])
         except Exception as exc:
             log_app_event(
                 "object_physical_measurements_failed",
@@ -2098,18 +2413,17 @@ def render_euclid_object_search(object_id: str) -> None:
 
         image_col, summary_col = st.columns([1, 1])
         with image_col:
+            if ENABLE_SLED_CHECK and lens_candidate_summary.get("is_lens_candidate") != "Yes":
+                render_sled_check(
+                    str(result["object_id"]), ra_degrees, dec_degrees, key="object_search"
+                )
             cutout_path = result.get("cutout_path")
             if cutout_path:
-                aladin_link = aladin_url(ra_degrees, dec_degrees)
                 show_detectable_image(
                     str(cutout_path),
                     "Euclid VIS cutout",
                     "search_cutout",
-                    caption_markdown=(
-                        '<span>Euclid VIS cutout </span>'
-                        f'<a href="{aladin_link}" target="_blank" '
-                        'rel="noopener noreferrer">[View in Aladin]</a>'
-                    ),
+                    caption_markdown=aladin_caption("Euclid VIS cutout", ra_degrees, dec_degrees),
                 )
             else:
                 st.info(
@@ -2117,11 +2431,6 @@ def render_euclid_object_search(object_id: str) -> None:
                     "No FITS file was downloaded."
                 )
 
-            st.markdown("**Mosaic summary**")
-            mosaic_display = pd.DataFrame(
-                [{"field": field, "value": value} for field, value in mosaic_summary.items()]
-            )
-            st.dataframe(mosaic_display, use_container_width=True, hide_index=True)
         with summary_col:
             object_summary_title = "**Object summary**"
             lens_candidate_grade = str(
@@ -2140,6 +2449,14 @@ def render_euclid_object_search(object_id: str) -> None:
             )
             st.dataframe(object_display, use_container_width=True, hide_index=True)
 
+        catalogue_col, physical_col = st.columns([1, 1])
+        with catalogue_col:
+            st.markdown("**Mosaic summary**")
+            mosaic_display = pd.DataFrame(
+                [{"field": field, "value": value} for field, value in mosaic_summary.items()]
+            )
+            st.dataframe(mosaic_display, use_container_width=True, hide_index=True)
+
             st.markdown("**Morphology catalogue features**")
             if morphology_df.empty:
                 st.info("No morphology catalogue row was found for this object_id.")
@@ -2151,8 +2468,14 @@ def render_euclid_object_search(object_id: str) -> None:
                         )
                     )
                 )
-                st.dataframe(morphology_display, use_container_width=True, hide_index=True)
+                st.dataframe(
+                    morphology_display,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=OBJECT_DETAIL_TABLE_HEIGHT,
+                )
 
+        with physical_col:
             st.markdown("**Physical measurements**")
             if physical_df.empty:
                 st.info("No physical measurements were found for this object_id.")
@@ -2167,11 +2490,13 @@ def render_euclid_object_search(object_id: str) -> None:
                         ),
                     )
                 )
-                st.dataframe(
-                    physical_display,
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                with st.container(key="search_physical_measurements", height="stretch"):
+                    st.dataframe(
+                        physical_display,
+                        use_container_width=True,
+                        hide_index=True,
+                        height="stretch",
+                    )
 
         object_download_df = object_search_download_df(
             object_summary,

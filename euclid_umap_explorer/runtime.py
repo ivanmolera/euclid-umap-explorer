@@ -6,6 +6,7 @@ import multiprocessing as mp
 import os
 import pickle
 import queue
+import sys
 import tempfile
 
 from .config import APP_TITLE, APP_VERSION
@@ -45,7 +46,10 @@ def _run_in_process_worker(
 
 
 def run_with_timeout(function, *args, timeout_seconds: int, **kwargs):
-    ctx = mp.get_context("fork" if "fork" in mp.get_all_start_methods() else "spawn")
+    method = "spawn" if sys.platform == "darwin" else (
+        "fork" if "fork" in mp.get_all_start_methods() else "spawn"
+    )
+    ctx = mp.get_context(method)
     result_queue = ctx.Queue(maxsize=1)
     result_file = tempfile.NamedTemporaryFile(
         prefix="euclid_algorithm_result_",
@@ -76,7 +80,8 @@ def run_with_timeout(function, *args, timeout_seconds: int, **kwargs):
             status, payload = result_queue.get_nowait()
         except queue.Empty as exc:
             raise RuntimeError(
-                f"{function.__name__} finished without returning a result."
+                f"{function.__name__} finished without returning a result "
+                f"(exit code {process.exitcode})."
             ) from exc
 
         if status == "error":
