@@ -10,8 +10,8 @@ import streamlit as st
 from .birch_cache import source_signature
 from .cluster_graph import GRAPH_MIN_COVERAGE, MORPHOLOGY_GRAPH_FIELDS, membership_signature
 from .cluster_graph_ui import load_morphology_profiles
-from .components import render_help_label, show_object_details
-from .config import PHYSICAL_MEASUREMENTS_PATH
+from .components import cluster_preview_aladin_links, render_help_label, show_thumbnail
+from .config import MORPH_PATH, PHYSICAL_MEASUREMENTS_PATH
 from .multivariate import (
     CLUSTER_COLOURS, build_parallel_figure, cluster_parallel_frame, complete_parallel_profiles,
     filter_parallel_profiles, normalize_parallel_ranges, object_parallel_frame,
@@ -110,9 +110,10 @@ def _parallel_view(frame: pd.DataFrame, *, prefix: str, clusters: bool, dataset_
         st.session_state.pop(f"{prefix}_handled_selection", None)
         return None
     chosen = display.iloc[rows[0]][identifier]
-    if clusters and st.session_state.get(f"{prefix}_handled_selection") == (table_key, int(chosen)):
+    selection = (table_key, int(chosen) if clusters else str(chosen))
+    if st.session_state.get(f"{prefix}_handled_selection") == selection:
         return None
-    st.session_state[f"{prefix}_handled_selection"] = (table_key, int(chosen) if clusters else str(chosen))
+    st.session_state[f"{prefix}_handled_selection"] = selection
     return selected.loc[selected[identifier] == chosen].iloc[[0]]
 
 
@@ -170,4 +171,7 @@ def render_object_multivariate(
     frame = object_parallel_frame(objects, physical_df)
     selected = _parallel_view(frame, prefix="object_multivariate", clusters=False, dataset_key=dataset_key)
     if selected is not None:
-        show_object_details(selected.iloc[0], key="multivariate_object")
+        row = selected.iloc[0]
+        object_id = str(row.object_id)
+        links = cluster_preview_aladin_links(MORPH_PATH, (object_id,))
+        show_thumbnail(row, str(row.label), aladin_link=links.get(object_id), open_modal=True)

@@ -106,6 +106,48 @@ class ClusterPreviewImageTests(unittest.TestCase):
         self.assertIn("filter: brightness(1.08)", markup)
         self.assertLess(markup.index('class="thumb-copy-id"'), markup.index('class="aladin-icon-link thumb-aladin-link"'))
 
+    def test_table_selection_opens_shared_modal_without_inline_thumbnail(self):
+        row = pd.Series({"object_id": "-593868668512731170", "id_str": "Q1_R1_123_-593868668512731170"})
+        with patch.object(components.st, "html") as rendered:
+            components.show_thumbnail(row, "Unknown", image_src="data:image/jpeg;base64,test", open_modal=True)
+        markup = rendered.call_args.args[0]
+        self.assertIn('id="selected-thumb-', markup)
+        self.assertIn('data-open="true" role="dialog" aria-modal="true" aria-label="Unknown"', markup)
+        self.assertIn('data-object-id="-593868668512731170"', markup)
+        self.assertIn('class="thumb-modal-image"', markup)
+        self.assertNotIn('<a class="thumb-link"', markup)
+        self.assertNotIn('<div class="thumb-caption">', markup)
+        self.assertIn('event.key !== "Escape"', markup)
+        self.assertIn('modal.dataset.open = "false"', markup)
+        self.assertIn('modal.dataset.open = "true"', markup)
+        self.assertIn('event.preventDefault()', markup)
+        self.assertTrue(rendered.call_args.kwargs["unsafe_allow_javascript"])
+
+    def test_modal_without_available_image_keeps_identity_and_does_not_add_inline_content(self):
+        row = pd.Series({"object_id": "123", "id_str": '<img src=x onerror="alert(1)">'})
+        for unavailable in (None, OSError("Unavailable")):
+            with self.subTest(unavailable=unavailable), \
+                    patch.object(components, "object_image_path", return_value=None, side_effect=unavailable), \
+                    patch.object(components.st, "html") as rendered, \
+                    patch.object(components.st, "caption") as caption:
+                components.show_thumbnail(row, "Unknown", open_modal=True)
+                markup = rendered.call_args.args[0]
+                self.assertIn('data-object-id="123"', markup)
+                self.assertIn("No image available.", markup)
+                self.assertIn("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;", markup)
+                self.assertNotIn('class="thumb-modal-image"', markup)
+                caption.assert_not_called()
+
+    def test_modal_identifiers_do_not_collide_with_preview_for_same_object(self):
+        row = pd.Series({"object_id": "123", "id_str": "Q1_R1_123"})
+        with patch.object(components.st, "html") as rendered:
+            for open_modal in (False, True):
+                components.show_thumbnail(row, "Grade A", image_src="data:image/jpeg;base64,test", open_modal=open_modal)
+        preview, selected = [call.args[0] for call in rendered.call_args_list]
+        self.assertIn('id="thumb-', preview)
+        self.assertNotIn('id="selected-thumb-', preview)
+        self.assertIn('id="selected-thumb-', selected)
+
     def test_canonical_and_anomalous_lens_modals_show_grade(self):
         for caption, grade in (
             ("Canonical", "B"),

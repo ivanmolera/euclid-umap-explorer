@@ -755,6 +755,8 @@ def show_thumbnail(
     caption: str,
     image_src: str | None = None,
     aladin_link: str | None = None,
+    *,
+    open_modal: bool = False,
 ) -> None:
     if row is None:
         st.caption(caption)
@@ -762,15 +764,12 @@ def show_thumbnail(
         return
 
     if image_src is None:
-        path = object_image_path(row)
-        if path is None:
-            st.caption(caption)
-            st.caption("No image")
-            return
-
         try:
-            image_src = thumbnail_image_src(path)
+            path = object_image_path(row)
+            image_src = thumbnail_image_src(path) if path is not None else None
         except Exception:
+            image_src = None
+        if image_src is None and not open_modal:
             st.caption(caption)
             st.caption("No image")
             return
@@ -778,7 +777,7 @@ def show_thumbnail(
     object_id = row.get("object_id", "")
     id_str = row.get("id_str", "")
     modal_key = hashlib.sha1(f"{caption}|{object_id}|{id_str}".encode()).hexdigest()[:12]
-    modal_id = f"thumb-{modal_key}"
+    modal_id = f"{'selected-thumb' if open_modal else 'thumb'}-{modal_key}"
     escaped_caption = html.escape(str(caption))
     modal_caption = str(caption)
     is_lens = row.get("is_lens", False)
@@ -800,6 +799,17 @@ def show_thumbnail(
         else ""
     )
     aladin_link_html = aladin_icon_link(aladin_link, css_class="thumb-aladin-link") if aladin_link else ""
+    preview_html = "" if open_modal else f"""
+        <a class="thumb-link" href="#{modal_id}" title="Open enlarged image">
+            <img src="{image_src}" width="{SUMMARY_THUMBNAIL_WIDTH}" height="{SUMMARY_THUMBNAIL_WIDTH}" />
+        </a>
+        <div class="thumb-caption">{escaped_caption}</div>
+    """
+    image_html = (
+        f'<img class="thumb-modal-image" src="{image_src}" alt="{escaped_caption}" />'
+        if image_src else '<div class="thumb-modal-meta">No image available.</div>'
+    )
+    open_attribute = ' data-open="true"' if open_modal else ""
 
     st.html(
         f"""
@@ -808,7 +818,8 @@ def show_thumbnail(
         #{modal_id} {{
             display: none;
         }}
-        #{modal_id}:target {{
+        #{modal_id}:target,
+        #{modal_id}[data-open="true"] {{
             align-items: center;
             background: rgba(0, 0, 0, 0.82);
             display: flex;
@@ -818,10 +829,16 @@ def show_thumbnail(
             position: fixed;
             z-index: 10000;
         }}
+        #{modal_id}[data-open="false"] {{
+            display: none;
+        }}
         #{modal_id} .thumb-modal-panel {{
             background: #0f1117;
             border: 1px solid rgba(255, 255, 255, 0.18);
             border-radius: 8px;
+            max-height: calc(100dvh - 4rem);
+            max-width: 100%;
+            overflow: auto;
             padding: 1rem;
             position: relative;
             z-index: 1;
@@ -830,11 +847,16 @@ def show_thumbnail(
             color: #f8fafc;
             font-size: 0.9rem;
             margin-bottom: 0.45rem;
+            overflow-wrap: anywhere;
         }}
         #{modal_id} .thumb-modal-object-id {{
             align-items: center;
             display: flex;
+            flex-wrap: wrap;
             gap: 0.4rem;
+        }}
+        #{modal_id} .thumb-modal-object-id span {{
+            overflow-wrap: anywhere;
         }}
         #{modal_id} .thumb-copy-id {{
             align-items: center;
@@ -874,9 +896,10 @@ def show_thumbnail(
         }}
         #{modal_id} .thumb-modal-image {{
             display: block;
-            height: 400px;
+            height: min(400px, calc(100vw - 6rem - 2px));
+            max-height: calc(100dvh - 12rem);
             object-fit: contain;
-            width: 400px;
+            width: min(400px, calc(100vw - 6rem - 2px));
         }}
         .thumb-link img {{
             cursor: pointer;
@@ -894,12 +917,9 @@ def show_thumbnail(
             width: {SUMMARY_THUMBNAIL_WIDTH}px;
         }}
         </style>
-        <a class="thumb-link" href="#{modal_id}" title="Open enlarged image">
-            <img src="{image_src}" width="{SUMMARY_THUMBNAIL_WIDTH}" height="{SUMMARY_THUMBNAIL_WIDTH}" />
-        </a>
-        <div class="thumb-caption">{escaped_caption}</div>
-        <div id="{modal_id}">
-            <a href="#" style="position: fixed; inset: 0;" aria-label="Close"></a>
+        {preview_html}
+        <div id="{modal_id}" data-escope-modal{open_attribute} role="dialog" aria-modal="true" aria-label="{escaped_modal_caption}">
+            <a class="thumb-modal-close" href="#" style="position: fixed; inset: 0;" aria-label="Close"></a>
             <div class="thumb-modal-panel">
                 <div class="thumb-modal-meta"><strong>{escaped_modal_caption}</strong></div>
                 <div class="thumb-modal-meta thumb-modal-object-id">
@@ -913,12 +933,33 @@ def show_thumbnail(
                     {aladin_link_html}
                 </div>
                 {id_str_html}
-                <img class="thumb-modal-image" src="{image_src}" alt="{escaped_caption}" />
+                {image_html}
             </div>
         </div>
         <script>
-        if (!window.__escopeCopyObjectIdBound) {{
+        if (!window.__escopeThumbnailModalBound) {{
+            const closeModal = (modal) => {{
+                modal.dataset.open = "false";
+                if (window.location.hash === "#" + modal.id) {{
+                    history.replaceState(null, "", window.location.pathname + window.location.search);
+                }}
+            }};
             document.addEventListener("click", async (event) => {{
+                const trigger = event.target.closest(".thumb-link");
+                if (trigger) {{
+                    const modal = document.getElementById(trigger.hash.slice(1));
+                    if (modal) {{
+                        event.preventDefault();
+                        modal.dataset.open = "true";
+                    }}
+                    return;
+                }}
+                const close = event.target.closest(".thumb-modal-close");
+                if (close) {{
+                    event.preventDefault();
+                    closeModal(close.closest("[data-escope-modal]"));
+                    return;
+                }}
                 const button = event.target.closest(".thumb-copy-id");
                 if (!button) return;
                 try {{
@@ -936,7 +977,15 @@ def show_thumbnail(
                     button.setAttribute("aria-label", "Could not copy object ID");
                 }}
             }});
-            window.__escopeCopyObjectIdBound = true;
+            document.addEventListener("keydown", (event) => {{
+                if (event.key !== "Escape") return;
+                const modal = document.querySelector('[data-escope-modal][data-open="true"], [data-escope-modal]:target:not([data-open="false"])');
+                if (modal) {{
+                    event.preventDefault();
+                    closeModal(modal);
+                }}
+            }});
+            window.__escopeThumbnailModalBound = true;
         }}
         </script>
         """,

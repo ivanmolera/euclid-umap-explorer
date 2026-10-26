@@ -212,13 +212,38 @@ class MultivariateUITests(unittest.TestCase):
 
     def test_object_table_opens_exact_identifier_without_numeric_rounding(self):
         app = AppTest.from_string(UI_APP)
+        selection = SimpleNamespace(rows=[0])
+        aladin = "https://aladin.cds.unistra.fr/AladinLite/?target=12.5%20-4.0"
         with patch.object(multivariate_ui, "parallel_component", return_value=lambda **kwargs: {"brush": {}}), \
-                patch.object(multivariate_ui.st, "dataframe", return_value=SimpleNamespace(selection=SimpleNamespace(rows=[0]))), \
-                patch.object(multivariate_ui, "show_object_details") as details:
+                patch.object(multivariate_ui.st, "dataframe", return_value=SimpleNamespace(selection=selection)), \
+                patch.object(multivariate_ui, "cluster_preview_aladin_links", return_value={"2700244936644435563": aladin}) as links, \
+                patch.object(multivariate_ui, "show_thumbnail") as modal:
             app.run()
             app.toggle(key="show_object_multivariate").set_value(True).run()
             self.assertFalse(app.exception)
-            self.assertEqual(details.call_args.args[0].object_id, "2700244936644435563")
+            self.assertEqual(modal.call_args.args[0].object_id, "2700244936644435563")
+            self.assertEqual(modal.call_args.args[1], "Grade A")
+            self.assertEqual(modal.call_args.kwargs, {"aladin_link": aladin, "open_modal": True})
+            links.assert_called_once_with(multivariate_ui.MORPH_PATH, ("2700244936644435563",))
+            self.assertFalse(any(heading.value == "Selected object" for heading in app.subheader))
+
+            modal.reset_mock()
+            app.run()
+            modal.assert_not_called()
+            selection.rows = [1]
+            app.run()
+            self.assertFalse(app.exception)
+            self.assertEqual(modal.call_args.args[0].object_id, "-625302350493849139")
+            self.assertEqual(modal.call_args.args[1], "Unknown")
+            self.assertIsNone(modal.call_args.kwargs["aladin_link"])
+            modal.reset_mock()
+            selection.rows = []
+            app.run()
+            modal.assert_not_called()
+            selection.rows = [1]
+            app.run()
+            self.assertFalse(app.exception)
+            modal.assert_called_once()
 
     def test_graph_profile_reuse_and_new_fit_reset_chart_context(self):
         app = AppTest.from_string(UI_APP)
