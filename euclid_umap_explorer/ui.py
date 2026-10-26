@@ -98,6 +98,7 @@ from .downloads import (
 )
 from .euclid_search import is_valid_search_object_id, selected_point_index
 from .cluster_graph_ui import render_morphology_graph
+from .multivariate_ui import render_cluster_multivariate, render_object_multivariate
 from .runtime import AlgorithmTimeoutError, format_duration, log_app_event
 from .storage import path_exists, prepare_catalog_cache
 from .physical import (
@@ -1144,6 +1145,11 @@ This analysis uses Euclid Q1 catalogue products available at:
             mime="text/csv",
         )
         if cluster_summary_expanded:
+            multivariate_requested_cluster = render_cluster_multivariate(
+                clustered_df, cluster_summary_view_model,
+            )
+            if multivariate_requested_cluster is not None:
+                select_cluster_for_analysis(multivariate_requested_cluster)
             graph_requested_cluster = render_morphology_graph(
                 clustered_df, cluster_summary_view_model,
             )
@@ -1232,6 +1238,9 @@ This analysis uses Euclid Q1 catalogue products available at:
     render_cluster_preview_card(
         selected_cluster_model,
         show_analysis_button=False,
+    )
+    render_object_multivariate(
+        cluster_df, filtered_cluster_df, physical_cluster_df, dataset_key=str(id(clustered_df)),
     )
     render_selected_cluster_pca_characterization(
         selected_cluster,

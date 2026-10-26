@@ -89,6 +89,16 @@ Properties are standardized across all complete cluster profiles in the run, wit
 
 Enabling **Show morphological graph** builds it automatically with the default properties and two nearest profiles. Later property/neighbor edits are applied only with **Build / refresh graph**. The graph uses the first 20 initially ranked previews. Profiles are cached for one hour, keyed by the physical source generation (or local file metadata) and a full object-ID/membership hash. A source refresh checks that provenance again. Clicking a node opens its analysis directly. No graph-cluster selector, separate Analyse button, or graph-data download is shown.
 
+## Multivariate Profile Views
+
+Two independent switches display parallel coordinates: cluster medians below the clustering summary table, and individual object measurements below the selected-cluster preview. Both start disabled. Cluster scope defaults to the first 20 previews, with an all-cluster option; object scope defaults to the full cluster, with an active-PCA/physical-filter subset option. Properties and colour are independently configurable in each view. Cluster colours use enrichment, labelled fraction, A/B/C count, or entropy; object colours use catalogue grade/Unknown or a physical property. Unknown is not a confirmed non-lens.
+
+The eight existing physical/morphological catalogue properties are available, initially showing the six morphology-graph properties. Cluster medians use all members and require 80% valid coverage on each selected property. Objects need valid measurements on every axis and on the colour property, if applicable. Catalogue quality flags apply, missing values are not imputed, and axes retain their original units. These are descriptive visualizations, not the notebook's regression models or an inpainting-suitability score.
+
+Axis-range selections are inclusive, combined by OR within an axis and AND between axes. They filter a linked table without changing BIRCH, its metrics, initial preview order, or UMAP filters. Selecting a cluster row opens its analysis; selecting an object row displays its details. Reset restores the complete valid selection. Property, colour, scope, and dataset changes reset incompatible selections. Cluster profiles reuse the morphology graph's source-generation/full-membership cache.
+
+Object charts draw at most 20,000 lines using the existing deterministic labelled-priority sampling policy (seed 42). Axis limits, colour limits, range-selection counts, and matching tables still use all complete profiles, not just that chart sample. Tables show at most 5,000 matching rows with an explicit truncation count; filtering can narrow the result further. Neither support rule nor missing-data filtering excludes a cluster for having a high labelled fraction.
+
 ## Features
 
 - Loads PCA catalogues such as `representations_pca_40.parquet`.
