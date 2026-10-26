@@ -8,7 +8,6 @@ import streamlit as st
 
 from .analysis import (
     CLUSTER_PRIORITY_DESCRIPTIONS,
-    CLUSTER_PRIORITY_ORDERS,
     DEFAULT_CLUSTER_PRIORITY,
     DEFAULT_PCA_SELECTION_PRESET,
     PCA_SELECTION_PRESETS,
@@ -1059,7 +1058,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.warning("Select at least one PCA component to build UMAP.")
         st.stop()
 
-    summary_priority = st.session_state.get("cluster_summary_priority", DEFAULT_CLUSTER_PRIORITY)
+    summary_priority = DEFAULT_CLUSTER_PRIORITY
     cluster_summary_df = prioritize_cluster_summary(cluster_summary_df, summary_priority)
     current_summary_signature = cluster_summary_signature(
         clustered_df,
@@ -1088,9 +1087,6 @@ This analysis uses Euclid Q1 catalogue products available at:
         on_change="rerun",
     ):
         render_execution_time(clustered_df.attrs.get("processing_seconds"))
-        st.selectbox(
-            "Prioritize by", list(CLUSTER_PRIORITY_ORDERS), key="cluster_summary_priority",
-        )
         cluster_download_df = cluster_summary_view_model["cluster_download_df"]
         summary_display = cluster_download_df.copy()
         summary_display["lens_rate_%"] = summary_display["lens_rate"] * 100

@@ -44,7 +44,7 @@ class ClusterPriorityTests(unittest.TestCase):
         self.assertEqual(app.number_input(key="birch_threshold").value, 6.2)
         self.assertEqual(app.number_input(key="birch_branching_factor").value, 50)
 
-    def test_table_previews_and_graph_share_priority_without_reclustering(self):
+    def test_summary_keeps_initial_priority_without_selector_or_reclustering(self):
         catalogue = pd.DataFrame([
             {"object_id": str(cluster * 1000 + i), "cluster": cluster,
              "is_lens": i < 20 - cluster // 2, "lens_grade": "A" if i < 20 - cluster // 2 else "",
@@ -57,6 +57,7 @@ class ClusterPriorityTests(unittest.TestCase):
             "cluster_params": {"lens_grades": ("A", "B", "C"), "threshold": 5.5,
                                "branching_factor": 42, "batch_size": 25000},
             "cluster_summary_expanded": True,
+            "cluster_summary_priority": "Enrichment",
         }.items():
             app.session_state[key] = value
         with patch.object(ui, "path_exists", return_value=True), \
@@ -68,14 +69,20 @@ class ClusterPriorityTests(unittest.TestCase):
             first = app.session_state["cluster_summary_view_model"]
             self.assertEqual({m["cluster_id"] for m in first["clusters"]}, set(range(20)))
             self.assertEqual(first["clusters"][0]["cluster_id"], 1)
-            app.selectbox(key="cluster_summary_priority").set_value("Enrichment").run(timeout=30)
+            self.assertFalse(any(s.label == "Prioritize by" for s in app.selectbox))
+            self.assertEqual(app.dataframe[0].value.cluster.iloc[0], 1)
+            self.assertTrue(any(c.value == (
+                "Select any table row or use **Analyse this cluster** in a visual preview. "
+                "Initial priority: labelled-candidate count, then density, then cluster size (descending)."
+            ) for c in app.caption))
+            app.run(timeout=30)
             self.assertFalse(app.exception)
             second = app.session_state["cluster_summary_view_model"]
-            self.assertEqual(second["cluster_download_df"].cluster.iloc[0], 21)
-            self.assertEqual(app.dataframe[0].value.cluster.iloc[0], 21)
+            self.assertEqual(second["cluster_download_df"].cluster.tolist(), first["cluster_download_df"].cluster.tolist())
+            self.assertEqual(app.dataframe[0].value.cluster.iloc[0], 1)
             self.assertEqual([m["cluster_id"] for m in graph.call_args.args[1]["clusters"]],
                              second["cluster_download_df"].head(20).cluster.tolist())
-            self.assertTrue(any("enrichment, then labelled-candidate count" in c.value for c in app.caption))
+            self.assertEqual(graph.call_args.args[3], "Labelled-candidate count")
             expander_id = next(e for e in app.expander if e.label == "Clustering summary").proto.id
             graph_calls = graph.call_count
             app.session_state["cluster_summary_expanded"] = False
