@@ -3,9 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-import networkx as nx
 import pandas as pd
-import sklearn
 import streamlit as st
 
 from .birch_cache import source_signature
@@ -16,13 +14,12 @@ from .cluster_graph import (
     build_cluster_profiles,
     build_morphology_graph,
     build_morphology_graph_figure,
-    graph_download_bytes,
     membership_layout_key,
     membership_signature,
     selected_graph_cluster,
 )
 from .components import render_help_label
-from .config import APP_VERSION, PHYSICAL_MEASUREMENTS_PATH
+from .config import PHYSICAL_MEASUREMENTS_PATH
 from .images import object_image_path, thumbnail_image_src
 from .physical import PHYSICAL_ANALYSIS_FIELDS, PHYSICAL_QUERY_FIELDS
 from .runtime import log_app_event
@@ -39,9 +36,7 @@ def load_morphology_profiles(
     return build_cluster_profiles(_memberships, measurements)
 
 
-def render_morphology_graph(
-    clustered_df: pd.DataFrame, view_model: dict, params: dict, priority: str,
-) -> int | None:
+def render_morphology_graph(clustered_df: pd.DataFrame, view_model: dict) -> int | None:
     if not st.toggle("Show morphological graph", key="show_morphology_graph", value=False):
         return None
     state = st.session_state.get("morphology_profile_state")
@@ -113,12 +108,6 @@ def render_morphology_graph(
     excluded = model["diagnostics"].loc[~model["diagnostics"].included]
     if not excluded.empty:
         st.dataframe(excluded, hide_index=True, use_container_width=True)
-    provenance = {
-        "app_version": APP_VERSION, "membership_sha256": state["membership"],
-        "physical_source": state["source"], "loaded_at_utc": state["loaded_at"],
-        "birch": params, "priority": priority,
-        "sklearn_version": sklearn.__version__, "networkx_version": nx.__version__,
-    }
     selected = None
     if model["meta"]["status"] == "ready":
         thumbnails = {}
@@ -146,21 +135,6 @@ def render_morphology_graph(
             selected = None
         elif selected is not None:
             st.session_state[f"{key}_handled_selection"] = selected
-        selection_col, action_col = st.columns([3, 1], vertical_alignment="bottom")
-        chosen = selection_col.selectbox(
-            "Graph cluster", model["nodes"].cluster.astype(int).tolist(), index=None,
-            format_func=lambda value: f"Cluster {value}", key=f"{key}_cluster",
-        )
-        if action_col.button(
-            "Analyse", icon=":material/arrow_forward:", key=f"{key}_analyse",
-            disabled=chosen is None, use_container_width=True,
-        ):
-            selected = int(chosen)
     else:
         st.info("At least two complete, non-constant cluster profiles are needed for this graph.")
-    st.download_button(
-        "Download graph data", icon=":material/download:",
-        data=graph_download_bytes(model, provenance), file_name="morphological_graph.zip",
-        mime="application/zip",
-    )
     return selected

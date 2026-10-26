@@ -1145,7 +1145,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
         if cluster_summary_expanded:
             graph_requested_cluster = render_morphology_graph(
-                clustered_df, cluster_summary_view_model, params, summary_priority,
+                clustered_df, cluster_summary_view_model,
             )
             if graph_requested_cluster is not None:
                 select_cluster_for_analysis(graph_requested_cluster)

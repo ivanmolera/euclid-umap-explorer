@@ -82,7 +82,7 @@ class ClusterPriorityTests(unittest.TestCase):
             self.assertEqual(app.dataframe[0].value.cluster.iloc[0], 1)
             self.assertEqual([m["cluster_id"] for m in graph.call_args.args[1]["clusters"]],
                              second["cluster_download_df"].head(20).cluster.tolist())
-            self.assertEqual(graph.call_args.args[3], "Labelled-candidate count")
+            self.assertEqual(len(graph.call_args.args), 2)
             expander_id = next(e for e in app.expander if e.label == "Clustering summary").proto.id
             graph_calls = graph.call_count
             app.session_state["cluster_summary_expanded"] = False

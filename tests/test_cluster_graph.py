@@ -29,7 +29,7 @@ st.session_state['graph_requested'] = render_morphology_graph(st.session_state.f
     'cluster_download_df': summary,
     'clusters': [{'cluster_id': i, 'canonical_row': pd.Series({'object_id': str(i + 1)})
                   if st.session_state.get('canonical_rows') else None} for i in visible_ids],
-}, {}, 'Labelled-candidate count')
+})
 """
 
 
@@ -246,6 +246,9 @@ class GraphUITests(unittest.TestCase):
             self.assertEqual(neighbors.value, 2)
             self.assertEqual(neighbors.proto.label_visibility.value, 2)
             self.assertEqual(len(app.checkbox), 0)
+            self.assertEqual(len(app.selectbox), 0)
+            self.assertFalse(any(button.label == "Analyse" for button in app.button))
+            self.assertEqual(len(app.get("download_button")), 0)
             self.assertFalse(app.exception)
             self.assertEqual(load.call_count, 1)
 
@@ -280,9 +283,6 @@ class GraphUITests(unittest.TestCase):
             self.assertEqual(app.multiselect(key="morphology_graph_fields").value, ["concentration"])
             self.assertEqual(app.number_input(key="morphology_graph_neighbors").value, 1)
             self.assertEqual(build.call_count, 2)
-            app.selectbox[0].set_value(2).run()
-            next(b for b in app.button if b.label == "Analyse").click().run()
-            self.assertEqual(app.session_state["graph_requested"], 2)
             app.session_state.fixture = pd.DataFrame({'object_id': ['1', '2'], 'cluster': [0, 1]})
             app.run()
             self.assertFalse(app.exception)
@@ -290,6 +290,26 @@ class GraphUITests(unittest.TestCase):
             self.assertEqual(build.call_count, 3)
             self.assertEqual(app.multiselect(key="morphology_graph_fields").value, list(cluster_graph_ui.MORPHOLOGY_GRAPH_FIELDS))
             self.assertEqual(app.number_input(key="morphology_graph_neighbors").value, 2)
+
+    def test_node_click_opens_analysis_without_selector_and_deduplicates_reruns(self):
+        app = AppTest.from_string(GRAPH_UI_APP)
+        with patch.object(cluster_graph_ui, "source_signature", return_value={"generation": 1}), \
+                patch.object(cluster_graph_ui, "load_physical_measurements", return_value=graph_ui_measurements()), \
+                patch.object(cluster_graph_ui.st, "plotly_chart", return_value={}) as chart:
+            app.run()
+            app.toggle(key="show_morphology_graph").set_value(True).run()
+            self.assertIsNone(app.session_state["graph_requested"])
+            chart.return_value = {"selection": {"points": [{"curve_number": 2, "customdata": [2]}]}}
+            app.run()
+            self.assertFalse(app.exception)
+            self.assertEqual(app.session_state["graph_requested"], 2)
+            self.assertEqual(len(app.selectbox), 0)
+            self.assertEqual(len(app.get("download_button")), 0)
+            app.run()
+            self.assertIsNone(app.session_state["graph_requested"])
+            chart.return_value = {"selection": {"points": [{"curve_number": 2, "customdata": [1]}]}}
+            app.run()
+            self.assertEqual(app.session_state["graph_requested"], 1)
 
     def test_canonical_cutouts_are_automatic_and_missing_images_keep_the_node(self):
         app = AppTest.from_string(GRAPH_UI_APP)
