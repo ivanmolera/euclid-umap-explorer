@@ -169,6 +169,7 @@ class MultivariateUITests(unittest.TestCase):
             self.assertEqual(load.call_count, 1)
             app.toggle(key="show_object_multivariate").set_value(True).run()
             self.assertFalse(app.exception)
+            self.assertEqual(app.segmented_control(key="object_multivariate_scope").proto.label_visibility.value, 2)
             self.assertEqual(len(app.dataframe[1].value), 4)
             app.segmented_control(key="object_multivariate_scope").set_value("After active filters").run()
             self.assertFalse(app.exception)

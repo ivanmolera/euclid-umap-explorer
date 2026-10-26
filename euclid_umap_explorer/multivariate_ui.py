@@ -159,7 +159,10 @@ def render_object_multivariate(
     if not st.toggle("Show object multivariate analysis", key="show_object_multivariate", value=False):
         return
     render_help_label("Object measurements", OBJECT_HELP)
-    scope = st.segmented_control("Objects", ["Full cluster", "After active filters"], default="Full cluster", key="object_multivariate_scope")
+    scope = st.segmented_control(
+        "Objects", ["Full cluster", "After active filters"], default="Full cluster",
+        key="object_multivariate_scope", label_visibility="collapsed",
+    )
     objects = filtered_cluster_df if scope == "After active filters" else cluster_df
     if objects.empty or physical_df.empty:
         st.info("No physical measurements for this object selection.")
