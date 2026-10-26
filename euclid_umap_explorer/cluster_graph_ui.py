@@ -45,25 +45,36 @@ def render_morphology_graph(
     if not st.toggle("Morphological graph", key="show_morphology_graph", value=False):
         return None
     render_help_label("Cluster profiles", GRAPH_HELP)
-    fields = st.multiselect(
-        "Profile properties", list(PHYSICAL_ANALYSIS_FIELDS),
-        default=list(MORPHOLOGY_GRAPH_FIELDS), format_func=PHYSICAL_ANALYSIS_FIELDS.get,
-        key="morphology_graph_fields",
-    )
-    left, right = st.columns(2)
-    neighbors = left.number_input(
-        "Nearest profiles per cluster", min_value=1, max_value=4, value=2, step=1,
-        key="morphology_graph_neighbors",
-    )
-    show_cutouts = right.checkbox(
-        "Canonical cutouts", key="morphology_graph_cutouts",
-        help="Same PCA representatives as the previews, not objects with all median properties.",
-    )
+    with st.container(
+        horizontal=True, vertical_alignment="center", width=1000, wrap=False,
+        key="morphology_graph_properties",
+    ):
+        st.markdown("Profile properties", width="content")
+        fields = st.multiselect(
+            "Profile properties", list(PHYSICAL_ANALYSIS_FIELDS),
+            default=list(MORPHOLOGY_GRAPH_FIELDS), format_func=PHYSICAL_ANALYSIS_FIELDS.get,
+            key="morphology_graph_fields", label_visibility="collapsed",
+        )
+    with st.container(
+        horizontal=True, vertical_alignment="center", gap="small",
+        key="morphology_graph_controls",
+    ):
+        with st.container(horizontal=True, vertical_alignment="center", width="content"):
+            st.markdown("Nearest profiles per cluster", width="content")
+            neighbors = st.number_input(
+                "Nearest profiles per cluster", min_value=1, max_value=4, value=2, step=1,
+                key="morphology_graph_neighbors", label_visibility="collapsed", width=120,
+            )
+        show_cutouts = st.checkbox(
+            "Show canonical cutouts", key="morphology_graph_cutouts",
+            help="Same PCA representatives as the previews.",
+        )
+        refresh_graph = st.button("Build / refresh graph", icon=":material/hub:")
     state = st.session_state.get("morphology_profile_state")
     if state is None or state["data"] is not clustered_df:
         state = {"data": clustered_df, "membership": membership_signature(clustered_df)}
         st.session_state["morphology_profile_state"] = state
-    if st.button("Build / refresh graph", icon=":material/hub:"):
+    if refresh_graph:
         try:
             with st.spinner("Loading catalogue profiles..."):
                 version = source_signature(PHYSICAL_MEASUREMENTS_PATH)

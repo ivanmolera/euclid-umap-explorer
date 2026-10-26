@@ -154,6 +154,32 @@ class GraphUITests(unittest.TestCase):
     def setUp(self):
         cluster_graph_ui.load_morphology_profiles.clear()
 
+    def test_compact_controls_keep_accessible_labels_and_concise_help(self):
+        app = AppTest.from_string("""
+import pandas as pd
+from euclid_umap_explorer.cluster_graph_ui import render_morphology_graph
+render_morphology_graph(pd.DataFrame({'object_id': ['1'], 'cluster': [0]}), {}, {}, 'Enrichment')
+""")
+        with patch.object(cluster_graph_ui, "load_physical_measurements") as load:
+            app.run()
+            app.toggle(key="show_morphology_graph").set_value(True).run()
+            self.assertFalse(app.exception)
+            properties = app.multiselect(key="morphology_graph_fields")
+            self.assertEqual(properties.label, "Profile properties")
+            self.assertEqual(properties.value, list(cluster_graph_ui.MORPHOLOGY_GRAPH_FIELDS))
+            self.assertEqual(properties.proto.label_visibility.value, 2)
+            neighbors = app.number_input(key="morphology_graph_neighbors")
+            self.assertEqual(neighbors.label, "Nearest profiles per cluster")
+            self.assertEqual(neighbors.value, 2)
+            self.assertEqual(neighbors.proto.label_visibility.value, 2)
+            cutouts = app.checkbox(key="morphology_graph_cutouts")
+            self.assertEqual(cutouts.label, "Show canonical cutouts")
+            self.assertEqual(cutouts.help, "Same PCA representatives as the previews.")
+            cutouts.check().run()
+            self.assertTrue(app.checkbox(key="morphology_graph_cutouts").value)
+            self.assertFalse(app.exception)
+            load.assert_not_called()
+
     def test_loading_is_explicit_and_profiles_reused_across_controls(self):
         app = AppTest.from_string("""
 import pandas as pd
