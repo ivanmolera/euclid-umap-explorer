@@ -209,8 +209,7 @@ def build_morphology_graph_figure(model: dict, thumbnails: Mapping[int, str] | N
                          f"<br>Enrichment: {row['enrichment']:.2f}x<br>{properties}")
     figure.add_trace(go.Scatter(
         x=[positions[key][0] for key in ids], y=[positions[key][1] for key in ids],
-        mode="markers+text", text=[str(key) for key in ids], textposition="bottom center",
-        textfont={"size": 11}, customdata=[[key] for key in ids], hovertext=node_text,
+        mode="markers", customdata=[[key] for key in ids], hovertext=node_text,
         hovertemplate="%{hovertext}<extra></extra>",
         marker={"size": sizes, "color": enrichment, "colorscale": "Viridis",
                 "cmin": colour_min, "cmax": colour_max,
@@ -230,6 +229,16 @@ def build_morphology_graph_figure(model: dict, thumbnails: Mapping[int, str] | N
                 line={"color": colour_by_cluster[key], "width": 3},
                 fillcolor="rgba(0,0,0,0)", layer="above",
             )
+    for key, size in zip(ids, sizes):
+        x, y = positions[key]
+        has_cutout = key in (thumbnails or {})
+        # Anchor to the image edge in data units so zoom cannot cover its label.
+        figure.add_annotation(
+            x=x, y=y - .045 if has_cutout else y, xref="x", yref="y",
+            text=str(key), showarrow=False, xanchor="center", yanchor="top",
+            yshift=-5 if has_cutout else -(size / 2 + 5), font={"size": 11},
+            borderpad=0, captureevents=False,
+        )
     figure.update_layout(
         height=550, margin={"l": 5, "r": 5, "t": 15, "b": 60},
         xaxis={"visible": False, "range": [-1.2, 1.2], "fixedrange": False},

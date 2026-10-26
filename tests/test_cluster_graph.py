@@ -192,6 +192,26 @@ class ClusterGraphTests(unittest.TestCase):
         self.assertEqual(figure.layout.shapes[0].line.color, figure.layout.shapes[1].line.color)
         self.assertEqual((figure.data[2].marker.cmin + figure.data[2].marker.cmax) / 2, 5.)
 
+    def test_labels_follow_cutout_edges_when_zooming_and_keep_missing_image_fallback(self):
+        model = self.model()
+        figure = build_morphology_graph_figure(model, {0: "first-cutout", 99: "ignored"})
+        self.assertEqual(figure.data[2].mode, "markers")
+        self.assertEqual([label.text for label in figure.layout.annotations], ["0", "1", "2", "3"])
+        cutout = figure.layout.images[0]
+        label = figure.layout.annotations[0]
+        self.assertEqual((label.xref, label.yref), ("x", "y"))
+        self.assertEqual(label.x, cutout.x)
+        self.assertAlmostEqual(label.y, cutout.y - cutout.sizey / 2)
+        self.assertEqual((label.yanchor, label.yshift), ("top", -5))
+        self.assertFalse(label.captureevents)
+        for index, fallback in enumerate(figure.layout.annotations[1:], start=1):
+            self.assertEqual(fallback.y, model["positions"][index][1])
+            self.assertAlmostEqual(fallback.yshift, -(figure.data[2].marker.size[index] / 2 + 5))
+        for zoom in (1, 2, 4, 8):
+            figure.update_yaxes(range=[cutout.y - 1 / zoom, cutout.y + 1 / zoom])
+            self.assertAlmostEqual(label.y, cutout.y - cutout.sizey / 2)
+            self.assertEqual(label.yshift, -5)
+
     def test_export_includes_full_reference_profiles_layout_and_provenance(self):
         model = self.model()
         with zipfile.ZipFile(io.BytesIO(graph_download_bytes(model, {"fit": "5.5/42"}))) as archive:
