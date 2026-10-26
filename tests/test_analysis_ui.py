@@ -12,6 +12,50 @@ from euclid_umap_explorer.subclustering import _compute_hierarchical_subclusters
 
 
 class AnalysisUITests(unittest.TestCase):
+    def test_selected_cluster_characterizations_precede_object_multivariate(self):
+        catalogue = pd.DataFrame([
+            {"object_id": str(index), "cluster": 356, "id_str": f"Q1_R1_1_{index}",
+             "feat_pca_0": float(index), "is_lens": index % 3 == 0,
+             "lens_grade": "A" if index % 3 == 0 else ""}
+            for index in range(12)
+        ])
+        app = AppTest.from_string("from euclid_umap_explorer.ui import main\nmain()")
+        for key, value in {
+            "cluster_ready": True, "cluster_result": (catalogue, ["feat_pca_0"], None),
+            "cluster_params": {"lens_grades": ("A", "B", "C"), "threshold": 5.5,
+                               "branching_factor": 42, "batch_size": 25000},
+            "analysis_cluster_id": 356, "cluster_summary_expanded": False,
+        }.items():
+            app.session_state[key] = value
+
+        rendered = []
+        object_multivariate = ui.render_object_multivariate
+
+        def render_object_multivariate(*args, **kwargs):
+            rendered.append("multivariate")
+            return object_multivariate(*args, **kwargs)
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(ui, "path_exists", return_value=True))
+            stack.enter_context(patch.object(ui, "selected_cluster_physical_measurements", return_value=pd.DataFrame()))
+            stack.enter_context(patch.object(ui, "render_cluster_visual_summary_view_model", return_value=None))
+            for name, section in (
+                ("render_cluster_preview_card", "preview"),
+                ("render_selected_cluster_pca_characterization", "pca"),
+                ("render_selected_cluster_physical_characterization", "physical"),
+            ):
+                stack.enter_context(patch.object(
+                    ui, name, side_effect=lambda *a, section=section, **k: rendered.append(section),
+                ))
+            stack.enter_context(patch.object(ui, "render_object_multivariate", side_effect=render_object_multivariate))
+            app.run(timeout=30)
+
+        self.assertFalse(app.exception)
+        self.assertEqual(rendered, ["preview", "pca", "physical", "multivariate"])
+        toggle = next(t for t in app.toggle if t.label == "Show object multivariate analysis")
+        self.assertFalse(toggle.value)
+        self.assertTrue(any(e.label == "UMAP" for e in app.expander))
+
     def test_change_cluster_reopens_summary_and_preserves_fit_until_new_selection(self):
         catalogue = pd.DataFrame([
             {"object_id": str(cluster * 1000 + index), "cluster": cluster,

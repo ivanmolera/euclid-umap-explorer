@@ -1241,9 +1241,6 @@ This analysis uses Euclid Q1 catalogue products available at:
         selected_cluster_model,
         show_analysis_button=False,
     )
-    render_object_multivariate(
-        cluster_df, filtered_cluster_df, physical_cluster_df, dataset_key=str(id(clustered_df)),
-    )
     render_selected_cluster_pca_characterization(
         selected_cluster,
         cluster_df,
@@ -1253,6 +1250,9 @@ This analysis uses Euclid Q1 catalogue products available at:
         selected_cluster,
         cluster_df,
         physical_cluster_df,
+    )
+    render_object_multivariate(
+        cluster_df, filtered_cluster_df, physical_cluster_df, dataset_key=str(id(clustered_df)),
     )
 
     with st.expander(
