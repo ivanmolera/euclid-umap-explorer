@@ -22,7 +22,7 @@ from .runtime import log_app_event
 
 
 CLUSTER_HELP = (
-    "Each line is a cluster's median profile, not an individual galaxy. Each selected "
+    "Each line is a cluster's median profile. Each selected "
     "property needs 80% valid coverage. Axes retain their original units. "
     "Range selections are exploratory and do not change BIRCH or its metrics."
 )
@@ -139,7 +139,10 @@ def render_cluster_multivariate(clustered_df: pd.DataFrame, view_model: dict) ->
             log_app_event("multivariate_profiles_failed", error_type=type(exc).__name__)
             st.warning("Could not load cluster profiles. Existing clustering results are unchanged.")
             return None
-    scope = st.segmented_control("Clusters", ["First 20 previews", "All clusters"], default="First 20 previews", key="cluster_multivariate_scope")
+    scope = st.segmented_control(
+        "Clusters", ["First 20 previews", "All clusters"], default="First 20 previews",
+        key="cluster_multivariate_scope", label_visibility="collapsed",
+    )
     summary = view_model["cluster_download_df"]
     if scope != "All clusters":
         visible = [preview["cluster_id"] for preview in view_model["clusters"]]
