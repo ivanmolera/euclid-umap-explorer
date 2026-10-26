@@ -16,6 +16,31 @@ from euclid_umap_explorer.cluster_graph import (
 )
 
 
+GRAPH_UI_APP = """
+import pandas as pd
+import streamlit as st
+from euclid_umap_explorer.cluster_graph_ui import render_morphology_graph
+if 'fixture' not in st.session_state:
+    st.session_state.fixture = pd.DataFrame({'object_id': ['1', '2', '3', '4'], 'cluster': [0, 1, 2, 3]})
+visible_ids = st.session_state.get('visible_ids', [0, 1, 2])
+summary = pd.DataFrame({'cluster': [0, 1, 2, 3], 'n_objects': [1, 1, 1, 1],
+                        'n_lenses': [1, 0, 0, 1], 'enrichment': [2., 0., 0., 2.]})
+st.session_state['graph_requested'] = render_morphology_graph(st.session_state.fixture, {
+    'cluster_download_df': summary,
+    'clusters': [{'cluster_id': i, 'canonical_row': pd.Series({'object_id': str(i + 1)})
+                  if st.session_state.get('canonical_rows') else None} for i in visible_ids],
+}, {}, 'Labelled-candidate count')
+"""
+
+
+def graph_ui_measurements():
+    return pd.DataFrame({
+        "object_id": ["1", "2", "3", "4"],
+        **{field: np.arange(1., 5.) / (index + 1)
+           for index, field in enumerate(cluster_graph_ui.PHYSICAL_ANALYSIS_FIELDS)},
+    })
+
+
 def graph_fixture():
     profiles = pd.DataFrame({
         "cluster": [0, 1, 2, 3], "n_profile_objects": 10,
@@ -137,6 +162,36 @@ class ClusterGraphTests(unittest.TestCase):
         event["selection"]["points"][0]["curve_number"] = 1
         self.assertIsNone(selected_graph_cluster(event, [0, 1, 2, 3]))
 
+    def test_cutout_borders_match_enrichment_scale_and_hover_omits_coverage(self):
+        from plotly.colors import sample_colorscale
+
+        model = self.model()
+        figure = build_morphology_graph_figure(model, {0: "first-cutout", 1: "second-cutout", 99: "ignored"})
+        self.assertEqual(len(figure.data), 3)
+        self.assertEqual(len(figure.layout.images), 2)
+        self.assertEqual(len(figure.layout.shapes), 2)
+        marker = figure.data[2].marker
+        for cluster, shape, thumbnail in zip((0, 1), figure.layout.shapes, figure.layout.images):
+            enrichment = model["nodes"].set_index("cluster").loc[cluster, "enrichment"]
+            colour = sample_colorscale("Viridis", [(enrichment - marker.cmin) / (marker.cmax - marker.cmin)])[0]
+            self.assertEqual(shape.line.color, colour)
+            self.assertEqual(shape.line.width, 3)
+            self.assertEqual(shape.layer, "above")
+            self.assertAlmostEqual(shape.x1 - shape.x0, thumbnail.sizex)
+            self.assertAlmostEqual(shape.y1 - shape.y0, thumbnail.sizey)
+            self.assertAlmostEqual((shape.x0 + shape.x1) / 2, thumbnail.x)
+            self.assertAlmostEqual((shape.y0 + shape.y1) / 2, thumbnail.y)
+        self.assertTrue(all("valid" not in text and "Enrichment:" in text for text in figure.data[2].hovertext))
+        self.assertEqual(len(build_morphology_graph_figure(model).layout.shapes), 0)
+        self.assertIn("concentration_coverage", model["nodes"])
+
+    def test_equal_enrichment_still_has_consistent_cutout_colours(self):
+        profiles, summary = graph_fixture()
+        model = self.model(profiles, summary.assign(enrichment=5.))
+        figure = build_morphology_graph_figure(model, {0: "first", 1: "second"})
+        self.assertEqual(figure.layout.shapes[0].line.color, figure.layout.shapes[1].line.color)
+        self.assertEqual((figure.data[2].marker.cmin + figure.data[2].marker.cmax) / 2, 5.)
+
     def test_export_includes_full_reference_profiles_layout_and_provenance(self):
         model = self.model()
         with zipfile.ZipFile(io.BytesIO(graph_download_bytes(model, {"fit": "5.5/42"}))) as archive:
@@ -154,14 +209,12 @@ class GraphUITests(unittest.TestCase):
     def setUp(self):
         cluster_graph_ui.load_morphology_profiles.clear()
 
-    def test_compact_controls_keep_accessible_labels_and_concise_help(self):
-        app = AppTest.from_string("""
-import pandas as pd
-from euclid_umap_explorer.cluster_graph_ui import render_morphology_graph
-render_morphology_graph(pd.DataFrame({'object_id': ['1'], 'cluster': [0]}), {}, {}, 'Enrichment')
-""")
-        with patch.object(cluster_graph_ui, "load_physical_measurements") as load:
+    def test_compact_controls_keep_accessible_labels_without_cutout_checkbox(self):
+        app = AppTest.from_string(GRAPH_UI_APP)
+        with patch.object(cluster_graph_ui, "source_signature", return_value={"generation": 1}), \
+                patch.object(cluster_graph_ui, "load_physical_measurements", return_value=graph_ui_measurements()) as load:
             app.run()
+            self.assertEqual(app.toggle(key="show_morphology_graph").label, "Show morphological graph")
             app.toggle(key="show_morphology_graph").set_value(True).run()
             self.assertFalse(app.exception)
             properties = app.multiselect(key="morphology_graph_fields")
@@ -172,50 +225,104 @@ render_morphology_graph(pd.DataFrame({'object_id': ['1'], 'cluster': [0]}), {}, 
             self.assertEqual(neighbors.label, "Nearest profiles per cluster")
             self.assertEqual(neighbors.value, 2)
             self.assertEqual(neighbors.proto.label_visibility.value, 2)
-            cutouts = app.checkbox(key="morphology_graph_cutouts")
-            self.assertEqual(cutouts.label, "Show canonical cutouts")
-            self.assertEqual(cutouts.help, "Same PCA representatives as the previews.")
-            cutouts.check().run()
-            self.assertTrue(app.checkbox(key="morphology_graph_cutouts").value)
+            self.assertEqual(len(app.checkbox), 0)
             self.assertFalse(app.exception)
-            load.assert_not_called()
+            self.assertEqual(load.call_count, 1)
 
-    def test_loading_is_explicit_and_profiles_reused_across_controls(self):
-        app = AppTest.from_string("""
-import pandas as pd
-import streamlit as st
-from euclid_umap_explorer.cluster_graph_ui import render_morphology_graph
-if 'fixture' not in st.session_state:
-    st.session_state.fixture = pd.DataFrame({'object_id': ['1', '2', '3'], 'cluster': [0, 1, 2]})
-summary = pd.DataFrame({'cluster': [0, 1, 2], 'n_objects': [1, 1, 1], 'n_lenses': [1, 0, 0], 'enrichment': [3., 0., 0.]})
-st.session_state['graph_requested'] = render_morphology_graph(st.session_state.fixture, {
-    'cluster_download_df': summary,
-    'clusters': [{'cluster_id': i, 'canonical_row': None} for i in range(3)],
-}, {}, 'Labelled-candidate count')
-""")
-        physical = pd.DataFrame({"object_id": ["1", "2", "3"], "concentration": [1., 2., 3.]})
+    def test_initial_build_is_automatic_and_parameter_edits_wait_for_refresh(self):
+        app = AppTest.from_string(GRAPH_UI_APP)
         with patch.object(cluster_graph_ui, "source_signature", return_value={"generation": 1}), \
-                patch.object(cluster_graph_ui, "load_physical_measurements", return_value=physical) as load:
+                patch.object(cluster_graph_ui, "load_physical_measurements", return_value=graph_ui_measurements()) as load, \
+                patch.object(cluster_graph_ui, "build_morphology_graph", wraps=build_morphology_graph) as build:
             app.run()
             load.assert_not_called()
             app.toggle(key="show_morphology_graph").set_value(True).run()
-            load.assert_not_called()
+            self.assertFalse(app.exception)
+            self.assertEqual(load.call_count, 1)
+            self.assertEqual(build.call_count, 1)
+            original = app.session_state["morphology_profile_state"]["model"]
+            self.assertEqual(original["meta"]["fields"], list(cluster_graph_ui.MORPHOLOGY_GRAPH_FIELDS))
+            self.assertEqual(original["meta"]["neighbors"], 2)
             app.multiselect(key="morphology_graph_fields").set_value(["concentration"]).run()
-            next(b for b in app.button if b.label == "Build / refresh graph").click().run()
-            self.assertEqual(len(app.exception), 0)
-            self.assertEqual(load.call_count, 1)
             app.number_input(key="morphology_graph_neighbors").set_value(1).run()
-            self.assertEqual(len(app.exception), 0)
-            self.assertEqual(load.call_count, 1)
+            app.run()
+            self.assertEqual(build.call_count, 1)
+            self.assertIs(app.session_state["morphology_profile_state"]["model"], original)
             next(b for b in app.button if b.label == "Build / refresh graph").click().run()
+            self.assertFalse(app.exception)
+            applied = app.session_state["morphology_profile_state"]["model"]
+            self.assertEqual(applied["meta"]["fields"], ["concentration"])
+            self.assertEqual(applied["meta"]["neighbors"], 1)
+            self.assertEqual(build.call_count, 2)
             self.assertEqual(load.call_count, 1)
+            app.toggle(key="show_morphology_graph").set_value(False).run()
+            app.toggle(key="show_morphology_graph").set_value(True).run()
+            self.assertEqual(app.multiselect(key="morphology_graph_fields").value, ["concentration"])
+            self.assertEqual(app.number_input(key="morphology_graph_neighbors").value, 1)
+            self.assertEqual(build.call_count, 2)
             app.selectbox[0].set_value(2).run()
             next(b for b in app.button if b.label == "Analyse").click().run()
             self.assertEqual(app.session_state["graph_requested"], 2)
             app.session_state.fixture = pd.DataFrame({'object_id': ['1', '2'], 'cluster': [0, 1]})
             app.run()
-            next(b for b in app.button if b.label == "Build / refresh graph").click().run()
+            self.assertFalse(app.exception)
             self.assertEqual(load.call_count, 2)
+            self.assertEqual(build.call_count, 3)
+            self.assertEqual(app.multiselect(key="morphology_graph_fields").value, list(cluster_graph_ui.MORPHOLOGY_GRAPH_FIELDS))
+            self.assertEqual(app.number_input(key="morphology_graph_neighbors").value, 2)
+
+    def test_canonical_cutouts_are_automatic_and_missing_images_keep_the_node(self):
+        app = AppTest.from_string(GRAPH_UI_APP)
+        app.session_state["canonical_rows"] = True
+        with patch.object(cluster_graph_ui, "source_signature", return_value={"generation": 1}), \
+                patch.object(cluster_graph_ui, "load_physical_measurements", return_value=graph_ui_measurements()), \
+                patch.object(cluster_graph_ui, "object_image_path", side_effect=["first.jpg", OSError(), None]), \
+                patch.object(cluster_graph_ui, "thumbnail_image_src", return_value="first-image") as thumbnail, \
+                patch.object(cluster_graph_ui, "build_morphology_graph_figure", wraps=build_morphology_graph_figure) as figure:
+            app.run()
+            app.toggle(key="show_morphology_graph").set_value(True).run()
+            self.assertFalse(app.exception)
+            self.assertEqual(len(app.checkbox), 0)
+            thumbnail.assert_called_once_with("first.jpg")
+            self.assertEqual(figure.call_args.args[1], {0: "first-image"})
+            self.assertEqual(figure.call_args.args[0]["nodes"].cluster.tolist(), [0, 1, 2])
+
+    def test_reprioritized_previews_use_applied_parameters_without_reloading(self):
+        app = AppTest.from_string(GRAPH_UI_APP)
+        with patch.object(cluster_graph_ui, "source_signature", return_value={"generation": 1}), \
+                patch.object(cluster_graph_ui, "load_physical_measurements", return_value=graph_ui_measurements()) as load:
+            app.run()
+            app.toggle(key="show_morphology_graph").set_value(True).run()
+            app.multiselect(key="morphology_graph_fields").set_value(["concentration"]).run()
+            app.number_input(key="morphology_graph_neighbors").set_value(1).run()
+            app.session_state["visible_ids"] = [1, 2, 3]
+            app.run()
+            self.assertFalse(app.exception)
+            model = app.session_state["morphology_profile_state"]["model"]
+            self.assertEqual(model["nodes"].cluster.tolist(), [1, 2, 3])
+            self.assertEqual(model["meta"]["fields"], list(cluster_graph_ui.MORPHOLOGY_GRAPH_FIELDS))
+            self.assertEqual(model["meta"]["neighbors"], 2)
+            self.assertEqual(load.call_count, 1)
+
+    def test_empty_properties_and_failed_refresh_preserve_the_applied_graph(self):
+        app = AppTest.from_string(GRAPH_UI_APP)
+        with patch.object(cluster_graph_ui, "source_signature", return_value={"generation": 1}) as source, \
+                patch.object(cluster_graph_ui, "load_physical_measurements", return_value=graph_ui_measurements()):
+            app.run()
+            app.toggle(key="show_morphology_graph").set_value(True).run()
+            original = app.session_state["morphology_profile_state"]["model"]
+            app.multiselect(key="morphology_graph_fields").set_value([]).run()
+            next(b for b in app.button if b.label == "Build / refresh graph").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(len(app.info), 1)
+            self.assertIs(app.session_state["morphology_profile_state"]["model"], original)
+            self.assertEqual(source.call_count, 1)
+            app.multiselect(key="morphology_graph_fields").set_value(["concentration"]).run()
+            source.side_effect = TimeoutError
+            next(b for b in app.button if b.label == "Build / refresh graph").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(len(app.warning), 1)
+            self.assertIs(app.session_state["morphology_profile_state"]["model"], original)
 
     def test_cache_invalidates_on_source_version_change(self):
         membership = pd.DataFrame({"object_id": ["1"], "cluster": [0]})
@@ -226,16 +333,18 @@ st.session_state['graph_requested'] = render_morphology_graph(st.session_state.f
             self.assertEqual(load.call_count, 2)
 
     def test_catalogue_failure_leaves_app_usable(self):
-        app = AppTest.from_string("""
-import pandas as pd
-from euclid_umap_explorer.cluster_graph_ui import render_morphology_graph
-render_morphology_graph(pd.DataFrame({'object_id': ['1'], 'cluster': [0]}), {}, {}, 'Enrichment')
-""")
-        with patch.object(cluster_graph_ui, "source_signature", side_effect=TimeoutError), \
+        app = AppTest.from_string(GRAPH_UI_APP)
+        with patch.object(cluster_graph_ui, "source_signature", side_effect=TimeoutError) as source, \
                 patch.object(cluster_graph_ui, "load_physical_measurements") as load:
             app.run()
             app.toggle(key="show_morphology_graph").set_value(True).run()
+            self.assertFalse(app.exception)
+            self.assertEqual(len(app.warning), 1)
+            self.assertEqual(source.call_count, 1)
+            app.number_input(key="morphology_graph_neighbors").set_value(1).run()
+            self.assertEqual(source.call_count, 1)
             next(b for b in app.button if b.label == "Build / refresh graph").click().run()
             self.assertFalse(app.exception)
             self.assertEqual(len(app.warning), 1)
+            self.assertEqual(source.call_count, 2)
             load.assert_not_called()

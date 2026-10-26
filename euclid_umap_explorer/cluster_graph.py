@@ -172,6 +172,7 @@ def build_morphology_graph(
 
 def build_morphology_graph_figure(model: dict, thumbnails: Mapping[int, str] | None = None):
     import plotly.graph_objects as go
+    from plotly.colors import sample_colorscale
 
     nodes, edges, positions = model["nodes"], model["edges"], model["positions"]
     figure = go.Figure()
@@ -191,11 +192,17 @@ def build_morphology_graph_figure(model: dict, thumbnails: Mapping[int, str] | N
     ids = nodes.cluster.astype(int).tolist()
     n_objects = nodes.n_objects.to_numpy(dtype=float)
     sizes = 14 + 6 * np.log1p(n_objects) / max(float(np.log1p(n_objects).max()), 1.0)
+    enrichment = nodes.enrichment.to_numpy(dtype=float)
+    colour_min, colour_max = float(enrichment.min()), float(enrichment.max())
+    if colour_min == colour_max:
+        colour_min, colour_max = colour_min - .5, colour_max + .5
+    colours = sample_colorscale("Viridis", (enrichment - colour_min) / (colour_max - colour_min))
+    colour_by_cluster = dict(zip(ids, colours))
     node_text = []
     for row in nodes.to_dict("records"):
         properties = "<br>".join(
-            f"{PHYSICAL_ANALYSIS_FIELDS[field]}: {row[f'{field}_median']:.3g} "
-            f"({row[f'{field}_coverage']:.0%} valid)" for field in model["meta"]["fields"]
+            f"{PHYSICAL_ANALYSIS_FIELDS[field]}: {row[f'{field}_median']:.3g}"
+            for field in model["meta"]["fields"]
         )
         node_text.append(f"Cluster {int(row['cluster'])}<br>Objects: {int(row['n_objects']):,}"
                          f"<br>Labelled candidates: {int(row['n_lenses']):,}"
@@ -205,7 +212,8 @@ def build_morphology_graph_figure(model: dict, thumbnails: Mapping[int, str] | N
         mode="markers+text", text=[str(key) for key in ids], textposition="bottom center",
         textfont={"size": 11}, customdata=[[key] for key in ids], hovertext=node_text,
         hovertemplate="%{hovertext}<extra></extra>",
-        marker={"size": sizes, "color": nodes.enrichment.tolist(), "colorscale": "Viridis",
+        marker={"size": sizes, "color": enrichment, "colorscale": "Viridis",
+                "cmin": colour_min, "cmax": colour_max,
                 "showscale": True, "colorbar": {"title": "Enrichment (x)", "thickness": 10,
                                                "orientation": "h", "len": .8,
                                                "x": .5, "xanchor": "center", "y": -.02},
@@ -213,9 +221,15 @@ def build_morphology_graph_figure(model: dict, thumbnails: Mapping[int, str] | N
     ))
     for key, source in (thumbnails or {}).items():
         if key in positions:
+            x, y = positions[key]
             figure.add_layout_image(dict(source=source, x=positions[key][0], y=positions[key][1],
                                          xref="x", yref="y", xanchor="center", yanchor="middle",
                                          sizex=.09, sizey=.09, sizing="contain", layer="above"))
+            figure.add_shape(
+                type="rect", x0=x - .045, x1=x + .045, y0=y - .045, y1=y + .045,
+                line={"color": colour_by_cluster[key], "width": 3},
+                fillcolor="rgba(0,0,0,0)", layer="above",
+            )
     figure.update_layout(
         height=550, margin={"l": 5, "r": 5, "t": 15, "b": 60},
         xaxis={"visible": False, "range": [-1.2, 1.2], "fixedrange": False},

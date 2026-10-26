@@ -42,8 +42,16 @@ def load_morphology_profiles(
 def render_morphology_graph(
     clustered_df: pd.DataFrame, view_model: dict, params: dict, priority: str,
 ) -> int | None:
-    if not st.toggle("Morphological graph", key="show_morphology_graph", value=False):
+    if not st.toggle("Show morphological graph", key="show_morphology_graph", value=False):
         return None
+    state = st.session_state.get("morphology_profile_state")
+    if state is None or state["data"] is not clustered_df:
+        state = {"data": clustered_df, "membership": membership_signature(clustered_df)}
+        st.session_state["morphology_profile_state"] = state
+        for key in ("morphology_graph_fields", "morphology_graph_neighbors"):
+            st.session_state.pop(key, None)
+    visible_ids = [preview["cluster_id"] for preview in view_model["clusters"]]
+    visible_summary = view_model["cluster_download_df"].set_index("cluster").loc[visible_ids].reset_index()
     render_help_label("Cluster profiles", GRAPH_HELP)
     with st.container(
         horizontal=True, vertical_alignment="center", width=1000, wrap=False,
@@ -52,7 +60,8 @@ def render_morphology_graph(
         st.markdown("Profile properties", width="content")
         fields = st.multiselect(
             "Profile properties", list(PHYSICAL_ANALYSIS_FIELDS),
-            default=list(MORPHOLOGY_GRAPH_FIELDS), format_func=PHYSICAL_ANALYSIS_FIELDS.get,
+            default=list(state.get("fields", MORPHOLOGY_GRAPH_FIELDS)),
+            format_func=PHYSICAL_ANALYSIS_FIELDS.get,
             key="morphology_graph_fields", label_visibility="collapsed",
         )
     with st.container(
@@ -62,41 +71,41 @@ def render_morphology_graph(
         with st.container(horizontal=True, vertical_alignment="center", width="content"):
             st.markdown("Nearest profiles per cluster", width="content")
             neighbors = st.number_input(
-                "Nearest profiles per cluster", min_value=1, max_value=4, value=2, step=1,
+                "Nearest profiles per cluster", min_value=1, max_value=4,
+                value=state.get("neighbors", 2), step=1,
                 key="morphology_graph_neighbors", label_visibility="collapsed", width=120,
             )
-        show_cutouts = st.checkbox(
-            "Show canonical cutouts", key="morphology_graph_cutouts",
-            help="Same PCA representatives as the previews.",
-        )
         refresh_graph = st.button("Build / refresh graph", icon=":material/hub:")
-    state = st.session_state.get("morphology_profile_state")
-    if state is None or state["data"] is not clustered_df:
-        state = {"data": clustered_df, "membership": membership_signature(clustered_df)}
-        st.session_state["morphology_profile_state"] = state
-    if refresh_graph:
-        try:
-            with st.spinner("Loading catalogue profiles..."):
-                version = source_signature(PHYSICAL_MEASUREMENTS_PATH)
-                profiles = load_morphology_profiles(
-                    PHYSICAL_MEASUREMENTS_PATH, json.dumps(version, sort_keys=True),
-                    state["membership"], clustered_df[["object_id", "cluster"]],
+    if refresh_graph or not state.get("initial_build_attempted"):
+        state["initial_build_attempted"] = True
+        if not fields:
+            st.info("Select at least one profile property.")
+        else:
+            try:
+                with st.spinner("Loading catalogue profiles..."):
+                    version = source_signature(PHYSICAL_MEASUREMENTS_PATH)
+                    profiles = load_morphology_profiles(
+                        PHYSICAL_MEASUREMENTS_PATH, json.dumps(version, sort_keys=True),
+                        state["membership"], clustered_df[["object_id", "cluster"]],
+                    )
+                    model = build_morphology_graph(profiles, visible_summary, fields, neighbors=neighbors)
+                # Keep the last applied graph and its parameters together until a build succeeds.
+                state.update(
+                    profiles=profiles, source=version, model=model, visible_ids=visible_ids,
+                    fields=tuple(fields), neighbors=neighbors,
+                    loaded_at=datetime.now(timezone.utc).isoformat(),
                 )
-            state.update(
-                profiles=profiles, source=version,
-                loaded_at=datetime.now(timezone.utc).isoformat(),
-            )
-        except Exception as exc:
-            log_app_event("morphology_graph_load_failed", error_type=type(exc).__name__)
-            st.warning("Could not load catalogue profiles. Existing cluster results are unchanged.")
-    if "profiles" not in state:
+            except Exception as exc:
+                log_app_event("morphology_graph_load_failed", error_type=type(exc).__name__)
+                st.warning("Could not load catalogue profiles. Existing cluster results are unchanged.")
+    if "model" not in state:
         return None
-    if not fields:
-        st.info("Select at least one profile property.")
-        return None
-    visible_ids = [model["cluster_id"] for model in view_model["clusters"]]
-    visible_summary = view_model["cluster_download_df"].set_index("cluster").loc[visible_ids].reset_index()
-    model = build_morphology_graph(state["profiles"], visible_summary, fields, neighbors=neighbors)
+    if state["visible_ids"] != visible_ids:
+        state["model"] = build_morphology_graph(
+            state["profiles"], visible_summary, state["fields"], neighbors=state["neighbors"],
+        )
+        state["visible_ids"] = visible_ids
+    model = state["model"]
     st.caption(
         f"Profiles: {len(model['nodes'])} / {len(visible_ids)} preview clusters. "
         "Colour: enrichment. Size: number of objects."
@@ -113,17 +122,16 @@ def render_morphology_graph(
     selected = None
     if model["meta"]["status"] == "ready":
         thumbnails = {}
-        if show_cutouts:
-            for preview in view_model["clusters"]:
-                row = preview["canonical_row"]
-                if row is None or preview["cluster_id"] not in model["positions"]:
-                    continue
-                try:
-                    path = object_image_path(row)
-                    if path:
-                        thumbnails[preview["cluster_id"]] = thumbnail_image_src(path)
-                except OSError:
-                    pass
+        for preview in view_model["clusters"]:
+            row = preview["canonical_row"]
+            if row is None or preview["cluster_id"] not in model["positions"]:
+                continue
+            try:
+                path = object_image_path(row)
+                if path:
+                    thumbnails[preview["cluster_id"]] = thumbnail_image_src(path)
+            except OSError:
+                pass
         key = f"morphology_graph_{state['membership']}_{membership_layout_key(model)}"
         st.markdown(
             f"<style>.st-key-{key} .imagelayer image {{pointer-events: none;}}</style>",
