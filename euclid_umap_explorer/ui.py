@@ -184,9 +184,11 @@ def clear_selected_cluster_analysis(*, clear_selection: bool) -> None:
     for key in CLUSTER_DERIVED_STATE_KEYS:
         st.session_state.pop(key, None)
     for key in list(st.session_state):
-        if key.startswith("pca_filter_") or key.startswith("physical_filter_"):
+        if key.startswith(("pca_filter_", "physical_filter_", "object_multivariate_")):
             st.session_state.pop(key, None)
     st.session_state["pca_filter_count"] = 0
+    # Assign rather than pop so Streamlit also resets the mounted toggle.
+    st.session_state["show_object_multivariate"] = False
     if clear_selection:
         st.session_state.pop("analysis_cluster_id", None)
 
@@ -1149,11 +1151,9 @@ This analysis uses Euclid Q1 catalogue products available at:
             mime="text/csv",
         )
         if cluster_summary_expanded:
-            multivariate_requested_cluster = render_cluster_multivariate(
+            render_cluster_multivariate(
                 clustered_df, cluster_summary_view_model,
             )
-            if multivariate_requested_cluster is not None:
-                select_cluster_for_analysis(multivariate_requested_cluster)
             graph_requested_cluster = render_morphology_graph(
                 clustered_df, cluster_summary_view_model,
             )

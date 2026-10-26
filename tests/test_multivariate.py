@@ -42,9 +42,10 @@ if 'fixture' not in st.session_state:
 objects, measurements = st.session_state.fixture, st.session_state.measurements
 summary = pd.DataFrame({'cluster': [0, 1], 'n_objects': [2, 2], 'n_lenses': [1, 1],
                         'lens_rate': [.5, .5], 'enrichment': [1., 1.], 'label_entropy_bits': [1., 1.]})
-st.session_state.requested = render_cluster_multivariate(objects, {
-    'cluster_download_df': summary, 'clusters': [{'cluster_id': 0}],
-})
+if st.session_state.get('render_cluster_view', True):
+    st.session_state.requested = render_cluster_multivariate(objects, {
+        'cluster_download_df': summary, 'clusters': [{'cluster_id': 0}],
+    })
 render_object_multivariate(objects, objects.iloc[:1], measurements)
 """
 
@@ -190,25 +191,60 @@ class MultivariateUITests(unittest.TestCase):
             self.assertFalse(app.exception)
             self.assertEqual(app.info[0].value, "Select at least two properties.")
 
-    def test_table_click_is_explicit_and_same_cluster_can_be_reselected(self):
+    def test_cluster_measurements_table_does_not_select_a_cluster(self):
         app = AppTest.from_string(UI_APP)
         objects, physical = fixture()
         selection = SimpleNamespace(rows=[0])
         with patch.object(multivariate_ui, "source_signature", return_value={"generation": 1}), \
                 patch.object(multivariate_ui, "load_morphology_profiles", return_value=build_cluster_profiles(objects, physical)), \
                 patch.object(multivariate_ui, "parallel_component", return_value=lambda **kwargs: {"brush": {}}), \
-                patch.object(multivariate_ui.st, "dataframe", return_value=SimpleNamespace(selection=selection)):
+                patch.object(multivariate_ui.st, "dataframe", return_value=SimpleNamespace(selection=selection)) as table:
             app.run()
             app.toggle(key="show_cluster_multivariate").set_value(True).run()
-            self.assertEqual(app.session_state.requested, 0)
-            app.run()
             self.assertIsNone(app.session_state.requested)
-            selection.rows = []
+            self.assertEqual(table.call_args.kwargs["on_select"], "ignore")
+            for rows in ([], [0], [1]):
+                selection.rows = rows
+                app.run()
+                self.assertFalse(app.exception)
+                self.assertIsNone(app.session_state.requested)
+                self.assertEqual(table.call_args.kwargs["on_select"], "ignore")
+
+    def test_cluster_toggle_and_chart_stay_synced_after_view_is_hidden(self):
+        app = AppTest.from_string(UI_APP)
+        objects, physical = fixture()
+        with patch.object(multivariate_ui, "source_signature", return_value={"generation": 1}), \
+                patch.object(multivariate_ui, "load_morphology_profiles", return_value=build_cluster_profiles(objects, physical)) as load, \
+                patch.object(multivariate_ui, "parallel_component", return_value=lambda **kwargs: {"brush": {}}) as component:
             app.run()
-            selection.rows = [0]
+            app.toggle(key="show_cluster_multivariate").set_value(True).run()
+            self.assertFalse(app.exception)
+            for _ in range(2):
+                app.session_state["render_cluster_view"] = False
+                app.run()
+                self.assertFalse(app.exception)
+                self.assertTrue(app.session_state["show_cluster_multivariate"])
+                self.assertFalse(any(t.key == "show_cluster_multivariate" for t in app.toggle))
+                app.session_state["render_cluster_view"] = True
+                app.run()
+                self.assertFalse(app.exception)
+                self.assertTrue(app.toggle(key="show_cluster_multivariate").value)
+                self.assertTrue(app.toggle(key="show_cluster_multivariate").proto.set_value)
+                self.assertEqual(len(app.dataframe), 1)
+            self.assertEqual(load.call_count, 1)
+            component.reset_mock()
+            app.toggle(key="show_cluster_multivariate").set_value(False).run()
+            self.assertFalse(app.exception)
+            self.assertEqual(len(app.dataframe), 0)
+            component.assert_not_called()
+            app.session_state["render_cluster_view"] = False
+            app.run()
+            app.session_state["render_cluster_view"] = True
             app.run()
             self.assertFalse(app.exception)
-            self.assertEqual(app.session_state.requested, 0)
+            self.assertFalse(app.toggle(key="show_cluster_multivariate").value)
+            self.assertEqual(len(app.dataframe), 0)
+            component.assert_not_called()
 
     def test_object_table_opens_exact_identifier_without_numeric_rounding(self):
         app = AppTest.from_string(UI_APP)

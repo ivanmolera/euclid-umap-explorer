@@ -83,13 +83,16 @@ class AnalysisUITests(unittest.TestCase):
             for name in (
                 "render_cluster_preview_card", "render_cluster_visual_summary_view_model",
                 "render_selected_cluster_pca_characterization", "render_selected_cluster_physical_characterization",
-                "render_morphology_graph", "render_cluster_multivariate", "render_object_multivariate",
+                "render_morphology_graph", "render_cluster_multivariate",
             ):
                 stack.enter_context(patch.object(ui, name, return_value=None))
             fit = stack.enter_context(patch.object(ui, "run_birch_clustering"))
 
             app.run(timeout=30)
             self.assertFalse(app.exception)
+            app.toggle(key="show_object_multivariate").set_value(True).run(timeout=30)
+            self.assertFalse(app.exception)
+            self.assertTrue(any("Object measurements" in m.value for m in app.markdown))
             for _ in range(2):
                 next(b for b in app.button if b.label == "Change cluster").click().run(timeout=30)
                 self.assertFalse(app.exception)
@@ -97,13 +100,22 @@ class AnalysisUITests(unittest.TestCase):
                 self.assertTrue(next(e for e in app.expander if e.label == "Clustering summary").proto.expanded)
                 self.assertEqual(app.session_state["analysis_cluster_id"], 356)
                 self.assertEqual(app.session_state["pca_filter_0_value"], 4.)
+                self.assertTrue(app.toggle(key="show_object_multivariate").value)
 
+            app.session_state["object_multivariate_reset_generation"] = 7
+            app.session_state["object_multivariate_handled_selection"] = ("old-table", "356000")
             selected_rows[:] = [1]
             app.run(timeout=30)
             self.assertFalse(app.exception)
             self.assertEqual(app.session_state["analysis_cluster_id"], 380)
             self.assertFalse(app.session_state["cluster_summary_expanded"])
             self.assertEqual(app.session_state["pca_filter_count"], 0)
+            self.assertFalse(app.toggle(key="show_object_multivariate").value)
+            self.assertTrue(app.toggle(key="show_object_multivariate").proto.set_value)
+            self.assertFalse(app.toggle(key="show_object_multivariate").proto.value)
+            self.assertFalse(any("Object measurements" in m.value for m in app.markdown))
+            self.assertNotIn("object_multivariate_reset_generation", app.session_state)
+            self.assertNotIn("object_multivariate_handled_selection", app.session_state)
             next(b for b in app.button if b.label == "Change cluster").click().run(timeout=30)
             self.assertFalse(app.exception)
             self.assertTrue(app.session_state["cluster_summary_expanded"])

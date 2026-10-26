@@ -94,7 +94,7 @@ def _parallel_view(frame: pd.DataFrame, *, prefix: str, clusters: bool, dataset_
     table_key = f"{key}_table_{selection_key}"
     event = st.dataframe(
         display, hide_index=True, width="stretch", height=230, key=table_key,
-        on_select="rerun", selection_mode="single-row",
+        on_select="ignore" if clusters else "rerun", selection_mode="single-row",
         column_config={
             **{field: st.column_config.NumberColumn(label, format="%.3g") for field, label in PHYSICAL_ANALYSIS_FIELDS.items()},
             "object_id": st.column_config.TextColumn("Object ID"), "label": "Label",
@@ -105,21 +105,26 @@ def _parallel_view(frame: pd.DataFrame, *, prefix: str, clusters: bool, dataset_
     )
     if len(selected) > len(display):
         st.caption(f"Table: first {len(display):,} of {len(selected):,} selected profiles.")
+    if clusters:
+        return None
     rows = event.selection.rows
     if not rows or not 0 <= rows[0] < len(display):
         st.session_state.pop(f"{prefix}_handled_selection", None)
         return None
     chosen = display.iloc[rows[0]][identifier]
-    selection = (table_key, int(chosen) if clusters else str(chosen))
+    selection = (table_key, str(chosen))
     if st.session_state.get(f"{prefix}_handled_selection") == selection:
         return None
     st.session_state[f"{prefix}_handled_selection"] = selection
     return selected.loc[selected[identifier] == chosen].iloc[[0]]
 
 
-def render_cluster_multivariate(clustered_df: pd.DataFrame, view_model: dict) -> int | None:
-    if not st.toggle("Show cluster multivariate analysis", key="show_cluster_multivariate", value=False):
-        return None
+def render_cluster_multivariate(clustered_df: pd.DataFrame, view_model: dict) -> None:
+    if not st.toggle(
+        "Show cluster multivariate analysis", key="show_cluster_multivariate", value=False,
+        persist_state="session",
+    ):
+        return
     render_help_label("Cluster medians", CLUSTER_HELP)
     state = st.session_state.get("multivariate_profile_state")
     if state is None or state["data"] is not clustered_df:
@@ -149,8 +154,7 @@ def render_cluster_multivariate(clustered_df: pd.DataFrame, view_model: dict) ->
         visible = [preview["cluster_id"] for preview in view_model["clusters"]]
         summary = summary.loc[summary.cluster.isin(visible)]
     frame = cluster_parallel_frame(state["profiles"], summary)
-    selected = _parallel_view(frame, prefix="cluster_multivariate", clusters=True, dataset_key=str(id(clustered_df)))
-    return int(selected.cluster.iloc[0]) if selected is not None else None
+    _parallel_view(frame, prefix="cluster_multivariate", clusters=True, dataset_key=str(id(clustered_df)))
 
 
 def render_object_multivariate(
