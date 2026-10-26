@@ -32,6 +32,7 @@ class HelpTooltipTests(unittest.TestCase):
             (".concept-popover", "font-weight: 400;"),
             (".concept-popover strong", "font-weight: 700;"),
             (".lens-grade-help__description", "font-weight: 400;"),
+            (".lens-grade-help__section + .lens-grade-help__section", "margin-top: 0.7rem;"),
             (".concept-popover__steps li + li", "margin-top: 0.5rem;"),
         ):
             with self.subTest(selector=selector):
@@ -116,6 +117,19 @@ class HelpTooltipTests(unittest.TestCase):
             components.render_lens_grade_help_label("Lens grades", config.LENS_GRADE_HELP, {})
         self.assertIn(html.escape(config.LENS_GRADE_HELP_NOTE), render.call_args.args[0])
         self.assertNotIn("expert score >", render.call_args.args[0])
+
+    def test_lens_grade_intro_has_the_same_spacing_as_other_sections(self):
+        with patch.object(components.st, "markdown") as render:
+            components.render_lens_grade_help_label("Lens grades", config.LENS_GRADE_HELP, {})
+        markup = render.call_args.args[0]
+        self.assertIn(
+            '<div class="lens-grade-help__section">'
+            '<div class="lens-grade-help__description">'
+            f'{html.escape(config.LENS_GRADE_HELP_NOTE)}</div></div>'
+            '<div class="lens-grade-help__section">'
+            '<div class="lens-grade-help__description"><strong>Grade A:</strong>',
+            markup,
+        )
 
     def test_extremes_use_within_cluster_standardization_and_can_change_after_filters(self):
         data = pd.DataFrame({"object_id": list("abcdef"), "is_lens": False,

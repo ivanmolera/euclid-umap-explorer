@@ -1649,8 +1649,9 @@ def render_lens_grade_help_label(
     grade_example_paths: Mapping[str, Sequence[str | Path]],
 ) -> None:
     sections = [
+        '<div class="lens-grade-help__section">'
         '<div class="lens-grade-help__description">'
-        f'{html.escape(LENS_GRADE_HELP_NOTE)}</div>'
+        f'{html.escape(LENS_GRADE_HELP_NOTE)}</div></div>'
     ]
     for grade, description in grade_descriptions.items():
         thumbnail_grid = _tooltip_thumbnail_grid(
