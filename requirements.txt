@@ -14,3 +14,4 @@ gcsfs>=2024.6,<2026
 astropy>=6,<8
 astroquery>=0.4.11,<0.5
 requests>=2.32,<3
+networkx>=3.2,<4

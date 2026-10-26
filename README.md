@@ -65,9 +65,9 @@ This workflow supports scientific triage: it narrows large Euclid catalogues to 
 
 ## Benchmark-Informed Defaults
 
-The default parameters were selected from the ESCOPE stability benchmark to balance hidden-label recovery, candidate enrichment, and reproducibility:
+BIRCH UI presets depend on the selected catalogue; UMAP retains the stability-benchmark defaults:
 
-- **BIRCH**: straight-line-artifact-filtered catalogue, all 40 PCA components, standard feature scaling, `threshold=6.2`, `branching_factor=50`, and `batch_size=25000`.
+- **BIRCH**: all 40 standardized PCA components and `batch_size=25000`. The artifact-filtered catalogue starts at `threshold=5.5`, `branching_factor=42`; the complete catalogue retains `6.2/50`. Custom inputs are remembered separately for each catalogue.
 - **Unsupervised UMAP**: the selected PCA components with standard scaling, `n_neighbors=10`, `min_dist=0.0`, Euclidean distance, and `random_state=42`.
 - **Semi-supervised UMAP**: the selected PCA components with standard scaling, `n_neighbors=10`, `min_dist=0.15`, and UI-adjustable `target_weight` (`0.5` by default), using Euclidean input distance, categorical target distance, and `random_state=42`.
 
@@ -75,7 +75,19 @@ The initial BIRCH stage is strictly unsupervised: candidate labels are neither u
 
 Physical measurements are joined by exact `object_id` only after BIRCH has been fitted. They can characterize clusters and subclusters, constrain the object set passed to UMAP, and enrich exported tables, but they do not alter the global morphology-based clustering.
 
-No downstream cluster is selected automatically. The clustering summary is ranked by labelled-candidate count, then candidate density and cluster size; the first 20 entries receive visual previews, while every cluster remains selectable from the complete summary table.
+The filtered preset ranked first in the 651-configuration descriptive enrichment sweep with support of at least 100 objects and 50 A/B/C references per cluster. It tied other settings at two clusters with at least 50x enrichment and won the grade-count tie-breaks; this is not a universal optimum or independent discovery validation. CLI/API defaults remain `6.2/50` for compatibility.
+
+No downstream cluster is selected automatically. The summary initially ranks by labelled-candidate count, then density, then cluster size. An alternative ranks by enrichment, then labelled-candidate count, then size. All three criteria descend, with cluster ID ascending as a final tie-break. The selected order applies to the table, CSV, and first 20 visual previews, without refitting BIRCH or adding support cuts. Every cluster remains selectable from the complete table.
+
+The summary table, cluster previews, selected-cluster view, and clustering CSV include `label_entropy_bits`: binary Shannon entropy of the selected-reference fraction `p = n_lenses / n_objects`, computed as `-p log2(p) - (1-p) log2(1-p)` with `0 log2(0) = 0`. It describes the original cluster before downstream filters. Its tooltip explains that both entirely labelled and entirely Unknown clusters have entropy zero, while a 50/50 mixture has one bit. Unknown objects are not confirmed non-lenses, and reference candidates are not all confirmed lenses. Entropy is a deterministic transform of the labelled fraction, not an independent validation measure or a measure of morphological compactness; it does not change clustering, ranking, or parameter selection.
+
+## Cluster Profile Graph
+
+The optional graph in the clustering summary relates the same first 20 previews using full-cluster catalogue medians. Defaults are concentration, asymmetry, smoothness, Gini, M20, and Sersic index; redshift and stellar mass are also available. Documented quality flags are applied, and each selected property needs at least 80% valid coverage in a cluster. Incomplete profiles are listed and excluded, not imputed.
+
+Properties are standardized across all complete cluster profiles in the run, with equal weight and constant dimensions removed. Links are the undirected union of the nearest two profiles per displayed cluster (adjustable from one to four), using Euclidean distance in this standardized space. Reordering previews does not refit the scale. Enrichment colours nodes and object counts set their size; labels never enter distances. Screen distances from the seeded layout are not physical/profile distances. Optional cutouts are the same PCA representatives as the previews, not objects with all median properties.
+
+Loading is explicit and cached for one hour, keyed by the physical source generation (or local file metadata) and a full object-ID/membership hash. A source refresh checks that provenance again. Clicking a node or using the graph-cluster selector opens its analysis. The ZIP download includes displayed profiles, all reference profiles, edges, missing-data diagnostics, layout coordinates, scaling parameters, input provenance, and software versions.
 
 ## Features
 

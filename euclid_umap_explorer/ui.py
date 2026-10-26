@@ -7,6 +7,9 @@ import pandas as pd
 import streamlit as st
 
 from .analysis import (
+    CLUSTER_PRIORITY_DESCRIPTIONS,
+    CLUSTER_PRIORITY_ORDERS,
+    DEFAULT_CLUSTER_PRIORITY,
     DEFAULT_PCA_SELECTION_PRESET,
     PCA_SELECTION_PRESETS,
     add_cluster_extreme_roles,
@@ -17,6 +20,7 @@ from .analysis import (
     normalize_pca_filters,
     pca_filter_signature,
     pca_features_for_preset,
+    prioritize_cluster_summary,
     sample_for_display,
     umap_point_labels,
 )
@@ -71,6 +75,8 @@ from .config import (
     ENABLE_EXCLUDED_ARTIFACT_ASSIGNMENT_UI,
     EUCLID_FAVICON_PATH,
     EUCLID_LOGO_PATH,
+    FILTERED_BIRCH_BRANCHING_FACTOR,
+    FILTERED_BIRCH_THRESHOLD,
     LENS_GRADE_EXAMPLE_PATHS,
     LENS_GRADE_HELP,
     LENS_GRADE_OPTIONS,
@@ -92,6 +98,7 @@ from .downloads import (
     umap_download_df,
 )
 from .euclid_search import is_valid_search_object_id, selected_point_index
+from .cluster_graph_ui import render_morphology_graph
 from .runtime import AlgorithmTimeoutError, format_duration, log_app_event
 from .storage import path_exists, prepare_catalog_cache
 from .physical import (
@@ -121,6 +128,23 @@ from .umap import (
 def request_umap_computation() -> None:
     st.session_state["umap_requested"] = True
     st.session_state["umap_running"] = True
+
+
+def synchronize_birch_defaults(filtered: bool) -> None:
+    defaults = (
+        (FILTERED_BIRCH_THRESHOLD, FILTERED_BIRCH_BRANCHING_FACTOR)
+        if filtered else (DEFAULT_BIRCH_THRESHOLD, DEFAULT_BIRCH_BRANCHING_FACTOR)
+    )
+    previous = st.session_state.get("birch_default_catalogue")
+    if previous is not None and previous != filtered:
+        st.session_state[f"birch_inputs_{previous}"] = (
+            st.session_state["birch_threshold"], st.session_state["birch_branching_factor"]
+        )
+    if previous != filtered:
+        threshold, branching = st.session_state.get(f"birch_inputs_{filtered}", defaults)
+        st.session_state["birch_threshold"] = threshold
+        st.session_state["birch_branching_factor"] = branching
+    st.session_state["birch_default_catalogue"] = filtered
 
 
 def request_subclustering() -> None:
@@ -181,7 +205,6 @@ def process_pending_cluster_selection() -> None:
 
 def select_cluster_for_analysis(cluster_id: int) -> None:
     st.session_state["pending_analysis_cluster_id"] = int(cluster_id)
-    st.session_state["cluster_summary_expanded"] = False
     st.rerun()
 
 
@@ -805,6 +828,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         selected_lens_grades = normalize_lens_grades(selected_lens_grades)
 
         st.header("Unsupervised clustering")
+        synchronize_birch_defaults(straight_line_filter_enabled)
         birch_expanded = not st.session_state.get("cluster_ready") and not st.session_state.get(
             "cluster_requested"
         )
@@ -818,7 +842,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             threshold = st.number_input(
                 "threshold",
                 min_value=0.1,
-                value=DEFAULT_BIRCH_THRESHOLD,
+                key="birch_threshold",
                 step=0.1,
                 label_visibility="collapsed",
             )
@@ -826,7 +850,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             branching_factor = st.number_input(
                 "branching_factor",
                 min_value=2,
-                value=DEFAULT_BIRCH_BRANCHING_FACTOR,
+                key="birch_branching_factor",
                 step=1,
                 label_visibility="collapsed",
             )
@@ -1035,6 +1059,8 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.warning("Select at least one PCA component to build UMAP.")
         st.stop()
 
+    summary_priority = st.session_state.get("cluster_summary_priority", DEFAULT_CLUSTER_PRIORITY)
+    cluster_summary_df = prioritize_cluster_summary(cluster_summary_df, summary_priority)
     current_summary_signature = cluster_summary_signature(
         clustered_df,
         cluster_summary_df,
@@ -1057,9 +1083,14 @@ This analysis uses Euclid Q1 catalogue products available at:
     preview_requested_cluster = None
     with st.expander(
         "Clustering summary",
-        expanded=cluster_summary_expanded,
+        expanded=False,
+        key="cluster_summary_expanded",
+        on_change="rerun",
     ):
         render_execution_time(clustered_df.attrs.get("processing_seconds"))
+        st.selectbox(
+            "Prioritize by", list(CLUSTER_PRIORITY_ORDERS), key="cluster_summary_priority",
+        )
         cluster_download_df = cluster_summary_view_model["cluster_download_df"]
         summary_display = cluster_download_df.copy()
         summary_display["lens_rate_%"] = summary_display["lens_rate"] * 100
@@ -1078,6 +1109,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         ].reset_index(drop=True)
         st.caption(
             "Select any table row or use **Analyse this cluster** in a visual preview."
+            f" Initial priority: {CLUSTER_PRIORITY_DESCRIPTIONS[summary_priority]} (descending)."
         )
         summary_table_display = summary_table.style.format(
             {
@@ -1090,7 +1122,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             summary_table_display,
             use_container_width=True,
             hide_index=True,
-            key=f"cluster_summary_table_{id(clustered_df)}",
+            key=f"cluster_summary_table_{id(clustered_df)}_{summary_priority}",
             on_select="rerun",
             selection_mode="single-row",
             column_config={
@@ -1100,7 +1132,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             },
         )
         selected_rows = tuple(int(row) for row in table_event.selection.rows)
-        table_selection_key = f"cluster_summary_table_selection_{id(clustered_df)}"
+        table_selection_key = f"cluster_summary_table_selection_{id(clustered_df)}_{summary_priority}"
         previous_rows = tuple(st.session_state.get(table_selection_key, ()))
         table_requested_cluster = None
         if selected_rows != previous_rows:
@@ -1116,6 +1148,11 @@ This analysis uses Euclid Q1 catalogue products available at:
             mime="text/csv",
         )
         if cluster_summary_expanded:
+            graph_requested_cluster = render_morphology_graph(
+                clustered_df, cluster_summary_view_model, params, summary_priority,
+            )
+            if graph_requested_cluster is not None:
+                select_cluster_for_analysis(graph_requested_cluster)
             preview_requested_cluster = render_cluster_visual_summary_view_model(
                 cluster_summary_view_model
             )

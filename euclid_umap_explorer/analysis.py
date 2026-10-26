@@ -67,6 +67,23 @@ PCA_PRESET_FEATURES = {
     "Lens-displaced PCA components": PCA_LENS_DISPLACED_COMPONENTS,
 }
 
+CLUSTER_PRIORITY_ORDERS = {
+    "Labelled-candidate count": ("n_lenses", "lens_rate", "n_objects"),
+    "Enrichment": ("enrichment", "n_lenses", "n_objects"),
+}
+DEFAULT_CLUSTER_PRIORITY = "Labelled-candidate count"
+CLUSTER_PRIORITY_DESCRIPTIONS = {
+    "Labelled-candidate count": "labelled-candidate count, then density, then cluster size",
+    "Enrichment": "enrichment, then labelled-candidate count, then cluster size",
+}
+
+
+def prioritize_cluster_summary(
+    summary: pd.DataFrame, order: str = DEFAULT_CLUSTER_PRIORITY,
+) -> pd.DataFrame:
+    columns = [*CLUSTER_PRIORITY_ORDERS[order], "cluster"]
+    return summary.sort_values(columns, ascending=[False, False, False, True]).reset_index(drop=True)
+
 
 def binary_label_entropy(
     labelled_fraction: float | pd.Series | np.ndarray,
@@ -100,11 +117,7 @@ def build_cluster_summary(clustered_df: pd.DataFrame) -> pd.DataFrame:
         summary_df["lens_rate"] / global_lens_rate if global_lens_rate else 0.0
     )
     summary_df["label_entropy_bits"] = binary_label_entropy(summary_df["lens_rate"])
-    summary_df = summary_df.sort_values(
-        ["n_lenses", "lens_rate", "n_objects", "cluster"],
-        ascending=[False, False, False, True],
-    )
-    return summary_df
+    return prioritize_cluster_summary(summary_df)
 
 
 def format_cluster_option(row: pd.Series) -> str:
