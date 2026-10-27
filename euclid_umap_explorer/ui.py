@@ -98,6 +98,7 @@ from .downloads import (
 )
 from .euclid_search import is_valid_search_object_id, selected_point_index
 from .cluster_graph_ui import render_morphology_graph
+from .cluster_diagnostics_ui import render_cluster_diagnostics, summary_with_canonical_scores
 from .multivariate_ui import render_cluster_multivariate, render_object_multivariate
 from .runtime import AlgorithmTimeoutError, format_duration, log_app_event
 from .storage import path_exists, prepare_catalog_cache
@@ -184,7 +185,7 @@ def clear_selected_cluster_analysis(*, clear_selection: bool) -> None:
     for key in CLUSTER_DERIVED_STATE_KEYS:
         st.session_state.pop(key, None)
     for key in list(st.session_state):
-        if key.startswith(("pca_filter_", "physical_filter_", "object_multivariate_")):
+        if key.startswith(("pca_filter_", "physical_filter_", "object_multivariate_", "subcluster_diagnostics_")):
             st.session_state.pop(key, None)
     st.session_state["pca_filter_count"] = 0
     # Assign rather than pop so Streamlit also resets the mounted toggle.
@@ -1094,7 +1095,9 @@ This analysis uses Euclid Q1 catalogue products available at:
         on_change="rerun",
     ):
         render_execution_time(clustered_df.attrs.get("processing_seconds"))
-        cluster_download_df = cluster_summary_view_model["cluster_download_df"]
+        cluster_download_df = summary_with_canonical_scores(
+            cluster_summary_view_model["cluster_download_df"], clustered_df, pca_columns,
+        )
         summary_display = cluster_download_df.copy()
         summary_display["lens_rate_%"] = summary_display["lens_rate"] * 100
         summary_display["enrichment_x"] = summary_display["enrichment"]
@@ -1106,6 +1109,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 "lens_rate_%",
                 "enrichment_x",
                 "label_entropy_bits",
+                "canonical_score",
                 "canonical",
                 "anomalous",
             ]
@@ -1132,6 +1136,10 @@ This analysis uses Euclid Q1 catalogue products available at:
                 "label_entropy_bits": st.column_config.NumberColumn(
                     "Entropy",
                 ),
+                "canonical_score": st.column_config.NumberColumn(
+                    "Canonical score", format="%.0f",
+                    help="Uncalibrated canonical-image evidence (0-100). Missing values are unscored or not evaluable.",
+                ),
             },
         )
         selected_rows = tuple(int(row) for row in table_event.selection.rows)
@@ -1151,6 +1159,10 @@ This analysis uses Euclid Q1 catalogue products available at:
             mime="text/csv",
         )
         if cluster_summary_expanded:
+            render_cluster_diagnostics(
+                clustered_df, pca_columns,
+                preview_ids=[preview["cluster_id"] for preview in cluster_summary_view_model["clusters"]],
+            )
             render_cluster_multivariate(
                 clustered_df, cluster_summary_view_model,
             )
@@ -1630,6 +1642,11 @@ This analysis uses Euclid Q1 catalogue products available at:
                     subclustered_df,
                     physical_cluster_df,
                     selected_cluster,
+                )
+                render_cluster_diagnostics(
+                    subclustered_df, pca_columns, reference=clustered_df,
+                    group_column="hierarchical_subcluster", prefix="subcluster_diagnostics",
+                    scope_label=f"UMAP subclusters of cluster {selected_cluster}",
                 )
 
         render_cluster_umap_interaction(
