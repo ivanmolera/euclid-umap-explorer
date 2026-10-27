@@ -316,6 +316,7 @@ class ClusterDiagnosticUITests(unittest.TestCase):
 
     def test_main_summary_receives_scores_immediately_without_changing_priority(self):
         from euclid_umap_explorer import ui as main_ui
+        from euclid_umap_explorer import canonical_scores
 
         catalogue = fixture().assign(feat_pca_1=np.where(np.arange(20) % 5 == 2, 100., 0.))
         image_bytes = png(test_images()[0])
@@ -332,27 +333,25 @@ class ClusterDiagnosticUITests(unittest.TestCase):
                 patch.object(main_ui, "render_cluster_visual_summary_view_model", return_value=None), \
                 patch.object(main_ui, "render_morphology_graph", return_value=None), \
                 patch.object(main_ui, "run_birch_clustering") as fit, \
-                patch.object(ui, "_load_canonical_evidence", return_value=evidence), \
-                patch.object(ui, "load_image_bytes", return_value=image_bytes):
+                patch.object(canonical_scores, "load_canonical_evidence", return_value=evidence) as load:
             app.run(timeout=30)
             self.assertFalse(app.exception)
-            app.multiselect(key="selected_pca_components").set_value(FEATURES[:1]).run(timeout=30)
             before = app.dataframe[0].value
-            self.assertTrue(before.canonical_score.isna().all())
-            app.toggle(key="cluster_diagnostics_show").set_value(True).run()
-            app.number_input(key="cluster_diagnostics_min").set_value(1)
-            app.button(key="cluster_diagnostics_run").click().run(timeout=30)
+            self.assertEqual(before.canonical_score.tolist(), [evidence["score"]] * 4)
+            self.assertEqual(load.call_count, 4)
+            self.assertFalse(any(t.label == "Show cluster diagnostics" for t in app.toggle))
+            row = before.loc[before.cluster.eq(2)].iloc[0]
+            self.assertEqual((row.n_grade_a, row.n_grade_b, row.n_grade_c), (1, 1, 0))
+            app.run(timeout=30)
+            self.assertEqual(load.call_count, 4)
+            app.multiselect(key="selected_pca_components").set_value(FEATURES[:1]).run(timeout=30)
             self.assertFalse(app.exception)
             after = app.dataframe[0].value
             self.assertEqual(after.canonical_score.tolist(), [evidence["score"]] * 4)
             self.assertEqual(after.cluster.tolist(), before.cluster.tolist())
-            self.assertEqual(after.canonical.tolist(), before.canonical.tolist())
-            self.assertEqual(app.session_state["cluster_diagnostics_state"]["canonical_features"], tuple(FEATURES[:1]))
-            app.toggle(key="cluster_diagnostics_show").set_value(False).run()
-            self.assertFalse(app.exception)
-            self.assertEqual(app.dataframe[0].value.canonical_score.tolist(), after.canonical_score.tolist())
-            app.multiselect(key="selected_pca_components").set_value(FEATURES).run(timeout=30)
-            self.assertTrue(app.dataframe[0].value.canonical_score.isna().all())
+            self.assertTrue(after.canonical.ne(before.canonical).all())
+            self.assertEqual(load.call_count, 8)
+            self.assertEqual(app.session_state[canonical_scores.STATE_KEY]["canonical_features"], tuple(FEATURES[:1]))
             fit.assert_not_called()
 
 

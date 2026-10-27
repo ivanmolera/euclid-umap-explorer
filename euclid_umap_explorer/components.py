@@ -26,6 +26,7 @@ from .catalogs import (
     load_physical_measurement_object,
     normalize_object_ids,
 )
+from .canonical_scores import canonical_detail_html, canonical_score_label, preview_canonical_evidence, score_help_html
 from .config import (
     ANALYSIS_FLOW_STEPS,
     CLUSTER_EXTREME_HELP,
@@ -791,6 +792,12 @@ def show_thumbnail(
         if grade in {"A", "B", "C"}:
             modal_caption = f"{caption} - Grade {grade}"
     escaped_modal_caption = html.escape(modal_caption)
+    canonical_evidence = preview_canonical_evidence(row) if caption == "Canonical" else None
+    score_caption = (
+        '<div class="thumb-caption canonical-score">'
+        + score_help_html(f"Score: {canonical_score_label(canonical_evidence)}") + "</div>"
+        if canonical_evidence is not None else ""
+    )
     escaped_object_id = html.escape(str(object_id))
     escaped_id_str = html.escape(str(id_str))
     id_str_html = (
@@ -804,11 +811,14 @@ def show_thumbnail(
             <img src="{image_src}" width="{SUMMARY_THUMBNAIL_WIDTH}" height="{SUMMARY_THUMBNAIL_WIDTH}" />
         </a>
         <div class="thumb-caption">{escaped_caption}</div>
+        {score_caption}
     """
     image_html = (
         f'<img class="thumb-modal-image" src="{image_src}" alt="{escaped_caption}" />'
         if image_src else '<div class="thumb-modal-meta">No image available.</div>'
     )
+    if canonical_evidence is not None:
+        image_html = canonical_detail_html(canonical_evidence, image_src)
     open_attribute = ' data-open="true"' if open_modal else ""
 
     st.html(
@@ -831,6 +841,16 @@ def show_thumbnail(
         }}
         #{modal_id}[data-open="false"] {{
             display: none;
+        }}
+        #{modal_id}[popover] {{
+            border: 0;
+            box-sizing: border-box;
+            color: #f8fafc;
+            height: 100dvh;
+            margin: 0;
+            max-height: none;
+            max-width: none;
+            width: 100vw;
         }}
         #{modal_id} .thumb-modal-panel {{
             background: #0f1117;
@@ -901,6 +921,44 @@ def show_thumbnail(
             object-fit: contain;
             width: min(400px, calc(100vw - 6rem - 2px));
         }}
+        #{modal_id} .canonical-analysis {{
+            width: min(900px, calc(100vw - 6rem - 2px));
+        }}
+        #{modal_id} .canonical-image-pair {{
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem;
+        }}
+        #{modal_id} .canonical-image-pair figure {{ margin: 0; min-width: 0; }}
+        #{modal_id} .canonical-image-pair figcaption {{
+            color: #f8fafc;
+            font-size: 0.85rem;
+            margin-bottom: 0.35rem;
+        }}
+        #{modal_id} .canonical-image-pair img {{ display: block; width: 100%; height: auto; }}
+        #{modal_id} .canonical-note {{
+            color: #cbd5e1;
+            font-size: 0.78rem;
+            line-height: 1.4;
+            margin: 0.75rem 0;
+        }}
+        #{modal_id} .canonical-region-table {{ overflow-x: auto; max-width: 100%; }}
+        #{modal_id} .canonical-region-table table {{
+            border-collapse: collapse;
+            color: #f8fafc;
+            font-size: 0.78rem;
+            width: 100%;
+        }}
+        #{modal_id} .canonical-region-table th,
+        #{modal_id} .canonical-region-table td {{
+            border: 1px solid #343943;
+            padding: 0.35rem 0.5rem;
+            text-align: right;
+            white-space: nowrap;
+        }}
+        @media (max-width: 640px) {{
+            #{modal_id} .canonical-image-pair {{ grid-template-columns: minmax(0, 1fr); }}
+        }}
         .thumb-link img {{
             cursor: pointer;
             display: block;
@@ -939,6 +997,9 @@ def show_thumbnail(
         <script>
         if (!window.__escopeThumbnailModalBound) {{
             const closeModal = (modal) => {{
+                if (typeof modal.hidePopover === "function" && modal.matches(":popover-open")) {{
+                    modal.hidePopover();
+                }}
                 modal.dataset.open = "false";
                 if (window.location.hash === "#" + modal.id) {{
                     history.replaceState(null, "", window.location.pathname + window.location.search);
@@ -951,6 +1012,10 @@ def show_thumbnail(
                     if (modal) {{
                         event.preventDefault();
                         modal.dataset.open = "true";
+                        if (modal.querySelector(".canonical-analysis") && typeof modal.showPopover === "function") {{
+                            modal.setAttribute("popover", "manual");
+                            modal.showPopover();
+                        }}
                     }}
                     return;
                 }}

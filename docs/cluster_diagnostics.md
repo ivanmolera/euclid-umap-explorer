@@ -1,17 +1,28 @@
-# Cluster Diagnostic Matrix
+# Canonical Image Scores
 
-This opt-in exploratory panel compares automatic evidence in a canonical morphology
-cutout with the concentration of reference candidates in that group. It is available
-in the BIRCH summary and separately for UMAP hierarchical subclusters. Selecting a
-diagnostic point changes only the displayed canonical image, not the cluster being
-analysed, its membership, PCA, UMAP or the main summary metrics.
+After BIRCH, ESCOPE automatically scores the canonical objects of the first 20
+cluster previews. No diagnostic switch or run button is needed. The clustering
+summary shows their `Canonical score`, and each canonical thumbnail shows its
+score below the cutout. Other clusters are not scored automatically. Missing or
+unevaluable images stay blank in the summary and show N/A in the preview.
 
-The clustering summary includes a sortable `Canonical score` column and exports
-the score and its status in the clustering CSV. It shows scores already computed
-in the current session for the same catalogue and PCA features, including earlier
-diagnostic cohorts. Missing or unevaluable cutouts stay blank, not zero. Computing
-a cohort refreshes that summary immediately; hiding the diagnostic panel does not
-remove the computed scores. A new clustering result invalidates them.
+Clicking a canonical opens the existing cutout modal with the original and
+annotated images, contributing-region measurements, score contributions and a
+help tooltip. The ID copy control and Aladin link are preserved. Other cutout
+modals are unchanged. Scores are reused on reruns and modal opening; changing
+the catalogue or representative PCA selection invalidates them.
+
+The summary also includes A/B/C columns counting each grade among the current
+run's labelled reference candidates. These columns and scores are exported in
+the clustering CSV. The initial cluster priority is unchanged.
+
+The full cluster diagnostic matrix and its switch are currently hidden, including
+the subcluster panel. Their numerical functions remain available for future
+exploratory comparisons; the correlation, sampling and independent-validation
+sections below describe that retained functionality, not visible UI controls.
+
+The clustering summary includes the score status in its CSV so a genuinely zero
+score is distinguishable from an unscored or unevaluable image.
 
 ## Image Score
 

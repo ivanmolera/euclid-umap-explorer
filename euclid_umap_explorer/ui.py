@@ -99,7 +99,7 @@ from .downloads import (
 )
 from .euclid_search import is_valid_search_object_id, selected_point_index
 from .cluster_graph_ui import render_morphology_graph
-from .cluster_diagnostics_ui import render_cluster_diagnostics, summary_with_canonical_scores
+from .canonical_scores import CANONICAL_SCORE_HELP, ensure_preview_canonical_scores, summary_with_preview_scores
 from .multivariate_ui import render_cluster_multivariate, render_object_multivariate
 from .runtime import AlgorithmTimeoutError, format_duration, log_app_event
 from .storage import path_exists, prepare_catalog_cache
@@ -1085,6 +1085,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         st.session_state["cluster_summary_view_signature"] = current_summary_signature
     cluster_summary_view_model = st.session_state["cluster_summary_view_model"]
     summary_canonical_features = summary_features_for_visuals(pca_columns, selected_features)
+    ensure_preview_canonical_scores(cluster_summary_view_model, clustered_df, summary_canonical_features)
 
     cluster_summary_expanded = bool(
         st.session_state.get("cluster_summary_expanded", False)
@@ -1097,9 +1098,8 @@ This analysis uses Euclid Q1 catalogue products available at:
         on_change="rerun",
     ):
         render_execution_time(clustered_df.attrs.get("processing_seconds"))
-        cluster_download_df = summary_with_canonical_scores(
-            cluster_summary_view_model["cluster_download_df"], clustered_df, pca_columns,
-            canonical_features=summary_canonical_features,
+        cluster_download_df = summary_with_preview_scores(
+            cluster_summary_view_model["cluster_download_df"], clustered_df, summary_canonical_features,
         )
         summary_display = cluster_download_df.copy()
         summary_display["lens_rate_%"] = summary_display["lens_rate"] * 100
@@ -1109,6 +1109,9 @@ This analysis uses Euclid Q1 catalogue products available at:
                 "cluster",
                 "n_objects",
                 "n_lenses",
+                "n_grade_a",
+                "n_grade_b",
+                "n_grade_c",
                 "lens_rate_%",
                 "enrichment_x",
                 "label_entropy_bits",
@@ -1136,12 +1139,15 @@ This analysis uses Euclid Q1 catalogue products available at:
             on_select="rerun",
             selection_mode="single-row",
             column_config={
+                "n_grade_a": st.column_config.NumberColumn("A"),
+                "n_grade_b": st.column_config.NumberColumn("B"),
+                "n_grade_c": st.column_config.NumberColumn("C"),
                 "label_entropy_bits": st.column_config.NumberColumn(
                     "Entropy",
                 ),
                 "canonical_score": st.column_config.NumberColumn(
                     "Canonical score", format="%.0f",
-                    help="Uncalibrated canonical-image evidence (0-100). Missing values are unscored or not evaluable.",
+                    help=CANONICAL_SCORE_HELP,
                 ),
             },
         )
@@ -1162,11 +1168,6 @@ This analysis uses Euclid Q1 catalogue products available at:
             mime="text/csv",
         )
         if cluster_summary_expanded:
-            render_cluster_diagnostics(
-                clustered_df, pca_columns,
-                preview_ids=[preview["cluster_id"] for preview in cluster_summary_view_model["clusters"]],
-                canonical_features=summary_canonical_features,
-            )
             render_cluster_multivariate(
                 clustered_df, cluster_summary_view_model,
             )
@@ -1647,13 +1648,6 @@ This analysis uses Euclid Q1 catalogue products available at:
                     physical_cluster_df,
                     selected_cluster,
                 )
-                render_cluster_diagnostics(
-                    subclustered_df, pca_columns, reference=clustered_df,
-                    group_column="hierarchical_subcluster", prefix="subcluster_diagnostics",
-                    scope_label=f"UMAP subclusters of cluster {selected_cluster}",
-                    canonical_features=summary_canonical_features,
-                )
-
         render_cluster_umap_interaction(
             fig,
             embedding_df,

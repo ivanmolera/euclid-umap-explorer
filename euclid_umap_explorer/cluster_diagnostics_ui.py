@@ -18,8 +18,9 @@ from .cluster_diagnostics import (
     read_validation_labels, select_diagnostic_cohort,
 )
 from .components import render_help_label
-from .images import load_image_bytes, object_image_path
-from .lens_plausibility import DETECTOR_CONFIG, DETECTOR_VERSION, score_image_bytes
+from .canonical_scores import CANONICAL_SCORE_HELP, cached_visual_evidence, load_canonical_evidence as _load_canonical_evidence
+from .images import load_image_bytes
+from .lens_plausibility import DETECTOR_CONFIG, DETECTOR_VERSION
 from .runtime import log_app_event
 
 
@@ -28,34 +29,12 @@ DIAGNOSTIC_HELP = (
     "reference candidates, not confirmed lenses. Low scores do not exclude lenses. "
     "Correlations are exploratory; they do not validate PCA or prove discoveries."
 )
-SCORE_HELP = (
-    "Fixed notebook detector: up to 65 points for the best region, 20 for a second, "
-    "and 15 for their geometry. No catalogue grades enter the score. "
-    "JPEG contrast, centring, neighbours and artifacts can change it. "
-    "The cyan circle is a median marked radius, not an Einstein radius."
-)
+SCORE_HELP = CANONICAL_SCORE_HELP
 DISPERSION_HELP = (
     "RMS distance per PCA coordinate from each group's mean, after standardizing "
     "with the complete catalogue reference population. Lower means more compact. "
     "Bubble area scales with Unknown count, with a minimum visible size; crosses have zero Unknown."
 )
-
-
-@st.cache_data(show_spinner=False, max_entries=256)
-def cached_visual_evidence(image_bytes: bytes, detector_version: str) -> dict:
-    if detector_version != DETECTOR_VERSION:
-        raise ValueError("Detector version mismatch.")
-    return score_image_bytes(image_bytes)
-
-
-def _load_canonical_evidence(row):
-    path = object_image_path(row)
-    if path is None:
-        return {"status": "missing_cutout", "score": None}
-    image_bytes = load_image_bytes(path)
-    evidence = cached_visual_evidence(image_bytes, DETECTOR_VERSION)
-    return {**evidence, "image_path": path,
-            "image_sha256": hashlib.sha256(image_bytes).hexdigest()}
 
 
 def _run_scores(cohort, canonicals):
