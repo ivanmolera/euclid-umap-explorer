@@ -127,6 +127,7 @@ def _export_diagnostics(frame, state, *, grades, exclude_canonical, score_thresh
         "membership_features_labels_sha256": state["signature"],
         "reference_features_labels_sha256": state["reference_signature"],
         "features": state["features"], "selection": state["settings"],
+        "canonical_features": state["canonical_features"],
         "reference_grades": list(grades) if grades is not None else "selected run grades",
         "exclude_canonical": exclude_canonical,
         "reference_definition": "Current clustering catalogue; if excluded, omit this group's canonical from group and catalogue counts",
@@ -206,26 +207,35 @@ def _render_detail(frame, evidence, prefix):
         )
 
 
-def summary_with_canonical_scores(summary, data, features):
+def summary_with_canonical_scores(summary, data, features, canonical_features=None):
     state = st.session_state.get("cluster_diagnostics_state", {})
-    matching = state.get("_data") is data and state.get("features") == tuple(features)
+    canonical_features = tuple(features if canonical_features is None else canonical_features)
+    matching = (state.get("_data") is data and state.get("features") == tuple(features)
+                and state.get("canonical_features") == canonical_features)
     return add_canonical_scores(summary, state.get("evidence", {}) if matching else {})
 
 
 def render_cluster_diagnostics(data, features, *, reference=None, group_column="cluster",
-                               prefix="cluster_diagnostics", scope_label="BIRCH clusters", preview_ids=None):
+                               prefix="cluster_diagnostics", scope_label="BIRCH clusters", preview_ids=None,
+                               canonical_features=None):
     if not st.toggle("Show cluster diagnostics", key=f"{prefix}_show", value=False, persist_state="session"):
         return
     reference = data if reference is None else reference
     features = tuple(feature for feature in features if feature.startswith("feat_pca_"))
+    canonical_features = tuple(features if canonical_features is None else canonical_features)
     render_help_label("Cluster diagnostic matrix", DIAGNOSTIC_HELP)
     state_key = f"{prefix}_state"
     state = st.session_state.get(state_key)
-    if state is None or state["_data"] is not data or state["_reference"] is not reference or state["features"] != features:
+    if (state is None or state["_data"] is not data or state["_reference"] is not reference
+            or state["features"] != features or state.get("canonical_features") != canonical_features):
         try:
             with st.spinner("Preparing canonical profiles..."):
-                profiles, canonicals = build_diagnostic_profiles(data, features, reference=reference, group_column=group_column)
+                profiles, canonicals = build_diagnostic_profiles(
+                    data, features, reference=reference, group_column=group_column,
+                    canonical_features=canonical_features,
+                )
             state = {"_data": data, "_reference": reference, "features": features,
+                     "canonical_features": canonical_features,
                      "profiles": profiles, "canonicals": canonicals,
                      "signature": diagnostic_signature(data, features, group_column),
                      "reference_signature": diagnostic_signature(reference, features),

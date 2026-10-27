@@ -32,13 +32,16 @@ def _reference_mask(data, grades=None):
     return flags
 
 
-def build_diagnostic_profiles(data, features, *, reference=None, group_column="cluster"):
+def build_diagnostic_profiles(data, features, *, reference=None, group_column="cluster", canonical_features=None):
     """Canonical selection is identical to previews and never uses the grades."""
     features = list(features)
     if not features or len(set(features)) != len(features) or any(
         not field.startswith("feat_pca_") for field in features
     ):
         raise ValueError("Use unique catalogue PCA features.")
+    canonical_features = list(features if canonical_features is None else canonical_features)
+    if not canonical_features or len(set(canonical_features)) != len(canonical_features) or not set(canonical_features).issubset(features):
+        raise ValueError("Canonical PCA features must be a nonempty subset of catalogue PCA features.")
     required = ["object_id", "id_str", "is_lens", group_column, *features]
     if any(column not in data for column in required):
         raise ValueError("Missing diagnostic input columns.")
@@ -63,9 +66,10 @@ def build_diagnostic_profiles(data, features, *, reference=None, group_column="c
         group_id = int(group_id)
         members = members.reset_index(drop=True)
         clean = members[np.isfinite(members[features].to_numpy(dtype=float)).all(axis=1)]
+        canonical_clean = members[np.isfinite(members[canonical_features].to_numpy(dtype=float)).all(axis=1)]
         canonical = None
-        if len(clean) >= 2:
-            marked = add_cluster_extreme_roles(clean, features)
+        if len(canonical_clean) >= 2:
+            marked = add_cluster_extreme_roles(canonical_clean, canonical_features)
             canonical = marked.loc[marked.is_canonical].iloc[0].copy()
             canonicals[group_id] = canonical
         rms = np.nan

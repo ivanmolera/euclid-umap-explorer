@@ -144,6 +144,7 @@ class ClusterDiagnosticTests(unittest.TestCase):
         pd.testing.assert_frame_equal(profiles, original)
         with patch.object(ui.st, "session_state", {"cluster_diagnostics_state": {
             "_data": original, "features": tuple(FEATURES), "evidence": evidence,
+            "canonical_features": tuple(FEATURES),
         }}):
             self.assertEqual(ui.summary_with_canonical_scores(profiles, original, FEATURES).canonical_score.iloc[1], 89.)
             self.assertTrue(ui.summary_with_canonical_scores(profiles, original.copy(), FEATURES).canonical_score.isna().all())
@@ -154,6 +155,18 @@ class ClusterDiagnosticTests(unittest.TestCase):
         full, _ = build_diagnostic_profiles(data, FEATURES)
         subset, _ = build_diagnostic_profiles(data[data.cluster.eq(2)], FEATURES, reference=data)
         self.assertAlmostEqual(subset.pca_rms.iloc[0], full.loc[full.cluster.eq(2), "pca_rms"].iloc[0])
+
+    def test_preview_pca_selection_changes_canonical_but_not_full_pca_dispersion(self):
+        data = fixture().assign(feat_pca_1=np.where(np.arange(20) % 5 == 2, 100., 0.))
+        full, _ = build_diagnostic_profiles(data, FEATURES)
+        selected, canonical = build_diagnostic_profiles(data, FEATURES, canonical_features=FEATURES[:1])
+        self.assertTrue(full.canonical.ne(selected.canonical).all())
+        np.testing.assert_allclose(full.pca_rms, selected.pca_rms)
+        for group_id, row in canonical.items():
+            expected = add_cluster_extreme_roles(data[data.cluster.eq(group_id)], FEATURES[:1])
+            self.assertEqual(row.object_id, expected.loc[expected.is_canonical].iloc[0].object_id)
+        with self.assertRaises(ValueError):
+            build_diagnostic_profiles(data, FEATURES, canonical_features=["feat_pca_39"])
 
     def test_full_and_leave_canonical_out_reference_counts(self):
         data = fixture()
@@ -304,7 +317,7 @@ class ClusterDiagnosticUITests(unittest.TestCase):
     def test_main_summary_receives_scores_immediately_without_changing_priority(self):
         from euclid_umap_explorer import ui as main_ui
 
-        catalogue = fixture()
+        catalogue = fixture().assign(feat_pca_1=np.where(np.arange(20) % 5 == 2, 100., 0.))
         image_bytes = png(test_images()[0])
         evidence = {**score_image_bytes(image_bytes), "image_path": "fixture.png"}
         app = AppTest.from_string("from euclid_umap_explorer.ui import main\nmain()")
@@ -323,6 +336,7 @@ class ClusterDiagnosticUITests(unittest.TestCase):
                 patch.object(ui, "load_image_bytes", return_value=image_bytes):
             app.run(timeout=30)
             self.assertFalse(app.exception)
+            app.multiselect(key="selected_pca_components").set_value(FEATURES[:1]).run(timeout=30)
             before = app.dataframe[0].value
             self.assertTrue(before.canonical_score.isna().all())
             app.toggle(key="cluster_diagnostics_show").set_value(True).run()
@@ -333,9 +347,12 @@ class ClusterDiagnosticUITests(unittest.TestCase):
             self.assertEqual(after.canonical_score.tolist(), [evidence["score"]] * 4)
             self.assertEqual(after.cluster.tolist(), before.cluster.tolist())
             self.assertEqual(after.canonical.tolist(), before.canonical.tolist())
+            self.assertEqual(app.session_state["cluster_diagnostics_state"]["canonical_features"], tuple(FEATURES[:1]))
             app.toggle(key="cluster_diagnostics_show").set_value(False).run()
             self.assertFalse(app.exception)
             self.assertEqual(app.dataframe[0].value.canonical_score.tolist(), after.canonical_score.tolist())
+            app.multiselect(key="selected_pca_components").set_value(FEATURES).run(timeout=30)
+            self.assertTrue(app.dataframe[0].value.canonical_score.isna().all())
             fit.assert_not_called()
 
 

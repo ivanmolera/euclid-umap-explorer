@@ -52,6 +52,7 @@ from .components import (
     show_object_details,
     show_selected_object_tables,
     show_thumbnail_group,
+    summary_features_for_visuals,
 )
 from .config import (
     APP_TITLE,
@@ -1083,6 +1084,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         )
         st.session_state["cluster_summary_view_signature"] = current_summary_signature
     cluster_summary_view_model = st.session_state["cluster_summary_view_model"]
+    summary_canonical_features = summary_features_for_visuals(pca_columns, selected_features)
 
     cluster_summary_expanded = bool(
         st.session_state.get("cluster_summary_expanded", False)
@@ -1097,6 +1099,7 @@ This analysis uses Euclid Q1 catalogue products available at:
         render_execution_time(clustered_df.attrs.get("processing_seconds"))
         cluster_download_df = summary_with_canonical_scores(
             cluster_summary_view_model["cluster_download_df"], clustered_df, pca_columns,
+            canonical_features=summary_canonical_features,
         )
         summary_display = cluster_download_df.copy()
         summary_display["lens_rate_%"] = summary_display["lens_rate"] * 100
@@ -1162,6 +1165,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             render_cluster_diagnostics(
                 clustered_df, pca_columns,
                 preview_ids=[preview["cluster_id"] for preview in cluster_summary_view_model["clusters"]],
+                canonical_features=summary_canonical_features,
             )
             render_cluster_multivariate(
                 clustered_df, cluster_summary_view_model,
@@ -1647,6 +1651,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                     subclustered_df, pca_columns, reference=clustered_df,
                     group_column="hierarchical_subcluster", prefix="subcluster_diagnostics",
                     scope_label=f"UMAP subclusters of cluster {selected_cluster}",
+                    canonical_features=summary_canonical_features,
                 )
 
         render_cluster_umap_interaction(

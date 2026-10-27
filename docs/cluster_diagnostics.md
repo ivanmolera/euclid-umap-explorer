@@ -39,7 +39,10 @@ Region measurements and score contributions are included for inspection.
 ## Groups and Sampling
 
 The canonical is the same actual member used by the existing preview: the member
-nearest the centroid after within-group PCA standardization. It is not a synthetic
+nearest the centroid after within-group standardization of the selected preview
+PCA components. These can be fewer than the 40 used for dispersion. Changing this
+selection invalidates diagnostic profiles and scores in the summary. Both feature
+lists are recorded in the manifest. It is not a synthetic
 centroid image and cannot establish the purity of the remaining members.
 
 The default cohort uses only a minimum group size (100 objects) and a seeded
