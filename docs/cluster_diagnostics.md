@@ -1,20 +1,51 @@
 # Canonical Image Scores
 
-After BIRCH, ESCOPE automatically scores the canonical objects of the first 20
-cluster previews. No diagnostic switch or run button is needed. The clustering
-summary shows their `Canonical score`, and each canonical thumbnail shows its
-score below the cutout. Other clusters are not scored automatically. Missing or
+After BIRCH, ESCOPE automatically scores the canonical object of every generated
+cluster, including singleton clusters. No diagnostic switch or run button is
+needed. The clustering summary shows `Canonical score`, and each canonical
+thumbnail shows its score below the cutout. Missing or
 unevaluable images stay blank in the summary and show N/A in the preview.
 
 Clicking a canonical opens the existing cutout modal with the original and
 annotated images, contributing-region measurements, score contributions and a
 help tooltip. The ID copy control and Aladin link are preserved. Other cutout
 modals are unchanged. Scores are reused on reruns and modal opening; changing
-the catalogue or representative PCA selection invalidates them.
+the catalogue or representative PCA selection selects the corresponding scores.
+Compact results are persisted by cutout generation (or local file size/mtime),
+detector configuration/version and OpenCV/NumPy/Pillow versions. GCS results live
+under `analysis_cache/canonical_scores/v1/` in the cutout bucket; override with
+`EUCLID_CANONICAL_CACHE_BASE`. Eight workers load and score without accessing
+Streamlit state. Only 32 visible-preview image details are retained per session.
+Unavailable images stay N/A and can be retried; failed cache access is reported.
 
 The summary also includes A/B/C columns counting each grade among the current
 run's labelled reference candidates. These columns and scores are exported in
-the clustering CSV. The initial cluster priority is unchanged.
+the clustering CSV, together with image paths/hashes, detector version, canonical
+PCA features and the active priority thresholds.
+
+## Inspection Priority
+
+The default order has three groups, without removing any cluster:
+
+1. **Reference-supported:** at least 100 objects, 25 selected ABC labels and one
+   selected A/B candidate. Sort by A+B enrichment, A count, then canonical score,
+   descending.
+2. **Morphology exploration:** at least 100 objects, fewer than 25 selected ABC
+   labels and score at least 70. Sort by score, then A+B enrichment and A count,
+   descending. This route does not require known lens candidates.
+3. **Other:** all remaining clusters; sort by A+B enrichment, A count and score.
+
+Ties use object count descending, then cluster ID ascending. The minimum size,
+ABC count and exploratory score are adjustable in Review priority without
+rerunning BIRCH or image scoring. The table, CSV, first 20 previews, graph and
+first-20 multivariate cohort all use the same initial ordering. Clicking a table
+header can still sort its displayed rows.
+
+A+B enrichment is `[(A_k+B_k)/N_k] / [(A+B)/N]`, using only the grades selected
+for the current run. It has its own column, separate from ABC enrichment. With
+no selected A/B references its value is undefined. There is no upper limit on
+labelled fraction. Thresholds are operational choices, not validated decisions;
+these groups do not confirm lenses or assign confidence to Unknown members.
 
 The full cluster diagnostic matrix and its switch are currently hidden, including
 the subcluster panel. Their numerical functions remain available for future

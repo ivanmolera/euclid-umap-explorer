@@ -10,26 +10,36 @@ from euclid_umap_explorer.lens_plausibility import score_image_bytes
 
 
 class CanonicalPreviewScoresTests(unittest.TestCase):
-    def test_scores_only_first_twenty_once_and_invalidates_changed_catalogue(self):
-        data = pd.concat([fixture()] * 2, ignore_index=True)
-        model = {"clusters": [{"canonical_row": row} for _, row in data.iloc[:22].iterrows()]}
+    def test_scores_all_clusters_once_and_invalidates_changed_catalogue(self):
+        data = pd.concat([fixture(), fixture().assign(object_id=lambda frame: frame.object_id + "1")], ignore_index=True)
+        model = {"cluster_download_df": pd.DataFrame({"canonical": data.object_id.iloc[:22]})}
         state = {}
         with patch.object(scores.st, "session_state", state), \
-                patch.object(scores, "load_canonical_evidence", return_value={"score": 86, "status": "exploratory_visual_only"}) as load:
+                patch.object(scores, "score_filesystem"), \
+                patch.object(scores, "score_canonical_row", return_value=({"score": 86, "status": "exploratory_visual_only", "overlay_png": b"large"}, False)) as load:
             scores.ensure_preview_canonical_scores(model, data, FEATURES)
-            self.assertEqual(load.call_count, 20)
+            self.assertEqual(load.call_count, 22)
+            self.assertEqual(len(state[scores.STATE_KEY]["evidence"]), 22)
+            self.assertTrue(all("overlay_png" not in value for value in state[scores.STATE_KEY]["evidence"].values()))
             scores.ensure_preview_canonical_scores(model, data, FEATURES)
-            self.assertEqual(load.call_count, 20)
+            self.assertEqual(load.call_count, 22)
             scores.ensure_preview_canonical_scores(model, data.copy(), FEATURES)
-            self.assertEqual(load.call_count, 40)
+            self.assertEqual(load.call_count, 44)
 
     def test_failed_images_and_zero_scores_are_distinct_in_summary(self):
         data = fixture()
         profiles, canonical = build_diagnostic_profiles(data, FEATURES)
-        model = {"clusters": [{"canonical_row": canonical[k]} for k in canonical]}
-        entries = [dict(score=0, status="exploratory_visual_only"), OSError("missing"),
-                   dict(score=86, status="exploratory_visual_only"), dict(score=50, status="exploratory_visual_only")]
-        with patch.object(scores.st, "session_state", {}), patch.object(scores, "load_canonical_evidence", side_effect=entries):
+        model = {"cluster_download_df": profiles}
+        entries = {str(row.object_id): value for row, value in zip(canonical.values(), [
+            dict(score=0, status="exploratory_visual_only"), OSError("missing"),
+            dict(score=86, status="exploratory_visual_only"), dict(score=50, status="exploratory_visual_only")])}
+        def score_row(store, row):
+            result = entries[str(row.object_id)]
+            if isinstance(result, Exception):
+                raise result
+            return result, False
+        with patch.object(scores.st, "session_state", {}), patch.object(scores, "score_filesystem"), \
+                patch.object(scores, "score_canonical_row", side_effect=score_row):
             scores.ensure_preview_canonical_scores(model, data, FEATURES)
             summary = scores.summary_with_preview_scores(profiles, data, FEATURES)
             self.assertEqual(summary.canonical_score.iloc[0], 0)

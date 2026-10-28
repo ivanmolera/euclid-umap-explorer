@@ -35,9 +35,9 @@ def normalize_filename_object_id(object_id: object) -> str:
         return f"NEG{value[1:]}"
     return value.replace("-", "NEG")
 
-def morphology_cutout_path(id_str: object, object_id: object = None) -> str | None:
+def morphology_cutout_candidates(id_str: object, object_id: object = None) -> list[str]:
     if pd.isna(id_str):
-        return None
+        return []
 
     parts = str(id_str).strip().split("_")
     if len(parts) == 2:
@@ -47,17 +47,23 @@ def morphology_cutout_path(id_str: object, object_id: object = None) -> str | No
         tile_index = parts[-2]
         object_id_part = parts[-1]
     else:
-        return None
+        return []
 
     candidate_object_ids = [object_id_part]
     if object_id is not None and not pd.isna(object_id):
         candidate_object_ids.append(object_id)
 
+    paths = []
     for candidate_object_id in dict.fromkeys(
         normalize_filename_object_id(candidate) for candidate in candidate_object_ids
     ):
         filename = f"{tile_index}_{candidate_object_id}_gz_arcsinh_vis_only.jpg"
-        path = join_data_path(CUTOUT_BASE, tile_index, filename)
+        paths.append(join_data_path(CUTOUT_BASE, tile_index, filename))
+    return paths
+
+
+def morphology_cutout_path(id_str: object, object_id: object = None) -> str | None:
+    for path in morphology_cutout_candidates(id_str, object_id):
         if image_path_exists(path):
             return path
 

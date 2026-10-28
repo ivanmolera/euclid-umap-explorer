@@ -257,7 +257,7 @@ def analyze_image(rgb, center_override=None, cfg=None):
     }
 
 
-def score_image_bytes(image_bytes: bytes) -> dict:
+def score_image_bytes(image_bytes: bytes, *, include_overlay: bool = True) -> dict:
     """Return compact diagnostics; never replace a failed image with score zero."""
     with Image.open(BytesIO(image_bytes)) as image:
         if image.width * image.height > 10_000_000:
@@ -273,7 +273,7 @@ def score_image_bytes(image_bytes: bytes) -> dict:
     ]
     output["artifact_lines"] = result.get("artifact_lines", [])
     output["image_width"], output["image_height"] = rgb.shape[1], rgb.shape[0]
-    if "overlay" in result:
+    if include_overlay and "overlay" in result:
         buffer = BytesIO()
         Image.fromarray(result["overlay"]).save(buffer, format="PNG")
         output["overlay_png"] = buffer.getvalue()

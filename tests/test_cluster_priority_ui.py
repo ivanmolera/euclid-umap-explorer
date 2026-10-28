@@ -45,6 +45,7 @@ class ClusterPriorityTests(unittest.TestCase):
         self.assertEqual(app.number_input(key="birch_branching_factor").value, 50)
 
     def test_summary_keeps_initial_priority_without_selector_or_reclustering(self):
+        from euclid_umap_explorer import canonical_scores
         catalogue = pd.DataFrame([
             {"object_id": str(cluster * 1000 + i), "cluster": cluster,
              "is_lens": i < 20 - cluster // 2, "lens_grade": "A" if i < 20 - cluster // 2 else "",
@@ -63,23 +64,27 @@ class ClusterPriorityTests(unittest.TestCase):
         with patch.object(ui, "path_exists", return_value=True), \
                 patch.object(ui, "render_cluster_visual_summary_view_model", return_value=None), \
                 patch.object(ui, "render_morphology_graph", return_value=None) as graph, \
+                patch.object(canonical_scores, "score_filesystem"), \
+                patch.object(canonical_scores, "score_canonical_row", return_value=({"score": 90, "status": "exploratory_visual_only"}, False)) as score, \
                 patch.object(ui, "run_birch_clustering") as fit:
             app.run(timeout=30)
             self.assertFalse(app.exception)
             first = app.session_state["cluster_summary_view_model"]
-            self.assertEqual({m["cluster_id"] for m in first["clusters"]}, set(range(20)))
-            self.assertEqual(first["clusters"][0]["cluster_id"], 1)
+            self.assertEqual(len(first["clusters"]), 20)
+            self.assertEqual(first["clusters"][0]["cluster_id"], 0)
             self.assertFalse(any(s.label == "Prioritize by" for s in app.selectbox))
-            self.assertEqual(app.dataframe[0].value.cluster.iloc[0], 1)
-            self.assertTrue(any(c.value == (
-                "Select any table row or use **Analyse this cluster** in a visual preview. "
-                "Initial priority: labelled-candidate count, then density, then cluster size (descending)."
-            ) for c in app.caption))
+            self.assertEqual(app.dataframe[0].value.cluster.iloc[0], 0)
+            self.assertTrue(any("Initial priority: reference-supported clusters by A+B enrichment" in c.value for c in app.caption))
+            self.assertEqual(score.call_count, 22)
             app.run(timeout=30)
             self.assertFalse(app.exception)
             second = app.session_state["cluster_summary_view_model"]
             self.assertEqual(second["cluster_download_df"].cluster.tolist(), first["cluster_download_df"].cluster.tolist())
-            self.assertEqual(app.dataframe[0].value.cluster.iloc[0], 1)
+            self.assertEqual(app.dataframe[0].value.cluster.iloc[0], 0)
+            app.number_input(key="review_min_objects").set_value(1).run(timeout=30)
+            self.assertFalse(app.exception)
+            self.assertEqual(score.call_count, 22)
+            second = app.session_state["cluster_summary_view_model"]
             self.assertEqual([m["cluster_id"] for m in graph.call_args.args[1]["clusters"]],
                              second["cluster_download_df"].head(20).cluster.tolist())
             self.assertEqual(len(graph.call_args.args), 2)

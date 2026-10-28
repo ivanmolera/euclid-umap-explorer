@@ -88,7 +88,7 @@ class HelpTooltipTests(unittest.TestCase):
                 components.render_help_label(label, text)
                 self.assertIn(html.escape(text), render.call_args.args[0])
 
-    def test_flow_help_matches_count_first_summary_order_and_export_limit(self):
+    def test_flow_help_matches_review_priority_and_export_limit(self):
         rows = []
         for cluster, size, labelled in ((0, 100, 20), (1, 5, 4), (2, 50, 20)):
             rows.extend({"cluster": cluster, "object_id": f"{cluster}_{i}",
@@ -103,7 +103,8 @@ class HelpTooltipTests(unittest.TestCase):
         self.assertNotIn("<br>", markup)
         for step in config.ANALYSIS_FLOW_STEPS:
             self.assertIn(f"<li>{html.escape(step)}</li>", markup)
-        self.assertIn("labelled-candidate count, then labelled fraction", markup)
+        self.assertIn("A+B enrichment, A count and canonical score", markup)
+        self.assertIn("morphology exploration by score", markup)
         self.assertIn(f"{config.DOWNLOAD_MAX_UMAP_ROWS:,} rows", markup)
         self.assertNotIn("Export Unknown objects close", markup)
 

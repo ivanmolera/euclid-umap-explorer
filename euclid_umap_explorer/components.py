@@ -1111,6 +1111,9 @@ def cluster_extreme_rows(
     anomaly_rows = marked[marked["is_anomaly"]]
     canonical_row = canonical_rows.iloc[0] if not canonical_rows.empty else None
     anomaly_row = anomaly_rows.iloc[0] if not anomaly_rows.empty else None
+    if canonical_row is None and len(cluster_df) == 1 and np.isfinite(cluster_df[summary_features].to_numpy(dtype=float)).all():
+        # A singleton has a representative but no distinct anomalous member.
+        canonical_row = cluster_df.iloc[0]
     return canonical_row, anomaly_row
 
 def cluster_visual_rows(
@@ -1965,6 +1968,17 @@ def build_cluster_summary_view_model(
         "clusters": visual_clusters,
         "total_clusters": len(cluster_download_rows),
     }
+
+
+def ranked_cluster_summary_view_model(base, ranked_summary, data, canonical_features):
+    groups = data.groupby("cluster", sort=False)
+    existing = {item["cluster_id"]: item for item in base["clusters"]}
+    previews = []
+    for _, row in ranked_summary.head(SUMMARY_VISUAL_CLUSTER_LIMIT).iterrows():
+        cluster_id = int(row.cluster)
+        previews.append(existing[cluster_id] if cluster_id in existing else
+                        build_cluster_preview_model(groups.get_group(cluster_id), row, canonical_features))
+    return {**base, "cluster_download_df": ranked_summary, "clusters": previews}
 
 
 def cluster_preview_object_ids(cluster_models: Sequence[Mapping[str, object]]) -> tuple[str, ...]:

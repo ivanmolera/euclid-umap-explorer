@@ -1,9 +1,12 @@
-"""Automatic preview scores and the canonical cutout's modal diagnostics."""
+"""Scores for every cluster, with bounded image details for visible previews."""
 from __future__ import annotations
 
 import base64
 import hashlib
 import html
+import json
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 
 import pandas as pd
@@ -11,10 +14,12 @@ import streamlit as st
 from PIL import Image
 
 from .cluster_diagnostics import add_canonical_scores
-from .config import SUMMARY_VISUAL_CLUSTER_LIMIT
-from .images import load_image_bytes, object_image_path
+from .canonical_cache import CanonicalScoreStore, detector_fingerprint
+from .config import MAX_ALGORITHM_SECONDS
+from .images import load_image_bytes, morphology_cutout_candidates, object_image_path
 from .lens_plausibility import DETECTOR_VERSION, score_image_bytes
 from .runtime import log_app_event
+from .storage import is_gcs_path
 
 
 CANONICAL_SCORE_HELP = (
@@ -26,6 +31,18 @@ CANONICAL_SCORE_HELP = (
     "A low score does not exclude a lens. The cyan circle is not an Einstein radius."
 )
 STATE_KEY = "canonical_preview_scores"
+DETAIL_STATE_KEY = "canonical_image_details"
+
+
+@st.cache_resource(show_spinner=False)
+def score_filesystem():
+    import gcsfs
+
+    return gcsfs.GCSFileSystem(requests_timeout=30, timeout=30, skip_instance_cache=True)
+
+
+def score_canonical_row(store, row):
+    return store.score_candidates(morphology_cutout_candidates(row.get("id_str"), row.object_id))
 
 
 @st.cache_data(show_spinner=False, max_entries=256)
@@ -48,35 +65,89 @@ def load_canonical_evidence(row):
 
 
 def ensure_preview_canonical_scores(view_model, data, canonical_features):
-    rows = [item["canonical_row"] for item in view_model["clusters"][:SUMMARY_VISUAL_CLUSTER_LIMIT]
-            if item["canonical_row"] is not None]
-    ids = tuple(str(row.object_id) for row in rows)
+    """Score all summary representatives; workers never access Streamlit state."""
+    ids = tuple(dict.fromkeys(str(value) for value in view_model["cluster_download_df"].canonical if str(value)))
     features = tuple(canonical_features)
     state = st.session_state.get(STATE_KEY)
     if (state is not None and state["_data"] is data and state["canonical_features"] == features
             and state["ids"] == ids and state["detector_version"] == DETECTOR_VERSION):
         return
+    rows_by_id = data.set_index(data.object_id.astype(str), drop=False)
+    rows = [rows_by_id.loc[object_id] for object_id in ids]
+    candidates = [path for row in rows for path in morphology_cutout_candidates(row.get("id_str"), row.object_id)]
+    store = CanonicalScoreStore(filesystem=score_filesystem() if any(is_gcs_path(p) for p in candidates) else None)
     evidence = {}
-    with st.spinner("Scoring canonical cutouts..."):
-        for row in rows:
+    state = {"_data": data, "canonical_features": features, "ids": ids,
+             "detector_version": DETECTOR_VERSION, "evidence": evidence}
+    st.session_state[STATE_KEY] = state
+    st.session_state[DETAIL_STATE_KEY] = {}
+    progress = st.progress(0., text=f"Canonical scores: 0 / {len(rows)}")
+    started = updated = time.monotonic()
+    hits = 0
+    pool = ThreadPoolExecutor(max_workers=8)
+    futures = {pool.submit(score_canonical_row, store, row): str(row.object_id) for row in rows}
+    try:
+        for future in as_completed(futures, timeout=MAX_ALGORITHM_SECONDS):
+            object_id = futures[future]
             try:
-                evidence[str(row.object_id)] = load_canonical_evidence(row)
+                item, cached = future.result()
+                # Persist only compact metadata, never thousands of original/annotated images.
+                evidence[object_id] = {k: v for k, v in item.items() if k not in ("original_bytes", "overlay_png")}
+                hits += int(cached)
             except Exception as exc:
-                log_app_event("canonical_preview_failed", error_type=type(exc).__name__)
-                evidence[str(row.object_id)] = {"status": "image_error", "score": None}
-    st.session_state[STATE_KEY] = {"_data": data, "canonical_features": features,
-                                  "ids": ids, "detector_version": DETECTOR_VERSION,
-                                  "evidence": evidence}
+                log_app_event("canonical_score_failed", error_type=type(exc).__name__)
+                evidence[object_id] = {"status": "image_error", "score": None}
+            now = time.monotonic()
+            if len(evidence) == len(rows) or now - updated > .5:
+                progress.progress(len(evidence) / max(len(rows), 1), text=f"Canonical scores: {len(evidence)} / {len(rows)}")
+                updated = now
+    except TimeoutError:
+        st.warning("Canonical scoring timed out. Completed scores are cached; retry to finish the remaining cutouts.")
+    finally:
+        for future in futures:
+            future.cancel()
+        pool.shutdown(wait=True, cancel_futures=True)
+        progress.empty()
+    for object_id in ids:
+        evidence.setdefault(object_id, {"status": "timeout", "score": None})
+    state["cache_hits"] = hits
+    state["elapsed_seconds"] = time.monotonic() - started
+    state["cache_issue"] = store.cache_issue
+    log_app_event("canonical_scores_complete", count=len(evidence), cache_hits=hits,
+                  elapsed_seconds=round(state["elapsed_seconds"], 2), cache_issue=store.cache_issue)
 
 
 def preview_canonical_evidence(row):
-    return st.session_state.get(STATE_KEY, {}).get("evidence", {}).get(str(row.object_id))
+    item = st.session_state.get(STATE_KEY, {}).get("evidence", {}).get(str(row.object_id))
+    if item is None:
+        return None
+    details = st.session_state.setdefault(DETAIL_STATE_KEY, {})
+    key = (str(row.object_id), item.get("image_sha256"))
+    if key not in details:
+        try:
+            detail = load_canonical_evidence(row)
+            if item.get("image_sha256") and detail.get("image_sha256") != item["image_sha256"]:
+                return {**item, "regions": []}
+            details[key] = detail
+            while len(details) > 32:
+                details.pop(next(iter(details)))
+        except Exception:
+            return item
+    return details[key]
 
 
 def summary_with_preview_scores(summary, data, canonical_features):
     state = st.session_state.get(STATE_KEY, {})
     matches = state.get("_data") is data and state.get("canonical_features") == tuple(canonical_features)
     result = add_canonical_scores(summary, state.get("evidence", {}) if matches else {})
+    evidence = state.get("evidence", {}) if matches else {}
+    for field in ("image_path", "image_sha256"):
+        result[f"canonical_{field}"] = [evidence.get(str(value), {}).get(field, "") for value in result.canonical]
+    result["canonical_detector_version"] = DETECTOR_VERSION
+    result["canonical_detector_fingerprint"] = json.dumps(detector_fingerprint(), sort_keys=True)
+    result["canonical_source_signature"] = [json.dumps(evidence.get(str(value), {}).get("source_signature", {}), sort_keys=True)
+                                             for value in result.canonical]
+    result["canonical_pca_features"] = json.dumps(list(canonical_features))
     labelled = data.loc[data.is_lens.fillna(False).astype(bool)]
     grades = labelled.get("lens_grade", pd.Series("", index=labelled.index))
     for grade in "ABC":

@@ -126,7 +126,7 @@ def add_canonical_scores(summary, evidence):
         item = evidence.get(str(canonical), {})
         score = item.get("score")
         scores.append(float(score) if score is not None else np.nan)
-        statuses.append(item.get("status", "not_scored"))
+        statuses.append(item.get("status", "not_scored" if canonical else "no_canonical"))
     result["canonical_score"] = scores
     result["canonical_score_status"] = statuses
     return result

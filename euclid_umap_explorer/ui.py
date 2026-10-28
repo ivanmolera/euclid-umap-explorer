@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 from .analysis import (
-    CLUSTER_PRIORITY_DESCRIPTIONS,
     DEFAULT_CLUSTER_PRIORITY,
     DEFAULT_PCA_SELECTION_PRESET,
     PCA_SELECTION_PRESETS,
@@ -30,6 +30,7 @@ from .components import (
     apply_pending_recommended_pca_filter,
     apply_pending_recommended_physical_filter,
     build_cluster_summary_view_model,
+    ranked_cluster_summary_view_model,
     build_selected_cluster_view_model,
     close_processing_overlay,
     cluster_summary_signature,
@@ -99,7 +100,9 @@ from .downloads import (
 )
 from .euclid_search import is_valid_search_object_id, selected_point_index
 from .cluster_graph_ui import render_morphology_graph
-from .canonical_scores import CANONICAL_SCORE_HELP, ensure_preview_canonical_scores, summary_with_preview_scores
+from .canonical_scores import (CANONICAL_SCORE_HELP, STATE_KEY as CANONICAL_STATE_KEY,
+                               ensure_preview_canonical_scores, summary_with_preview_scores)
+from .review_priority import AB_ENRICHMENT_HELP, REVIEW_PRIORITY_HELP, prioritize_for_review
 from .multivariate_ui import render_cluster_multivariate, render_object_multivariate
 from .runtime import AlgorithmTimeoutError, format_duration, log_app_event
 from .storage import path_exists, prepare_catalog_cache
@@ -1076,16 +1079,16 @@ This analysis uses Euclid Q1 catalogue products available at:
         selected_features,
     )
     if st.session_state.get("cluster_summary_view_signature") != current_summary_signature:
-        st.session_state["cluster_summary_view_model"] = build_cluster_summary_view_model(
+        st.session_state["cluster_summary_base_view_model"] = build_cluster_summary_view_model(
             clustered_df,
             cluster_summary_df,
             pca_columns,
             selected_features,
         )
         st.session_state["cluster_summary_view_signature"] = current_summary_signature
-    cluster_summary_view_model = st.session_state["cluster_summary_view_model"]
+    base_summary_view_model = st.session_state["cluster_summary_base_view_model"]
     summary_canonical_features = summary_features_for_visuals(pca_columns, selected_features)
-    ensure_preview_canonical_scores(cluster_summary_view_model, clustered_df, summary_canonical_features)
+    ensure_preview_canonical_scores(base_summary_view_model, clustered_df, summary_canonical_features)
 
     cluster_summary_expanded = bool(
         st.session_state.get("cluster_summary_expanded", False)
@@ -1098,15 +1101,44 @@ This analysis uses Euclid Q1 catalogue products available at:
         on_change="rerun",
     ):
         render_execution_time(clustered_df.attrs.get("processing_seconds"))
+        with st.expander("Review priority", expanded=False):
+            object_col, label_col, score_col = st.columns(3)
+            min_objects = object_col.number_input("Minimum objects", min_value=1, value=100, key="review_min_objects")
+            min_labels = label_col.number_input("Minimum ABC labels", min_value=1, value=25, key="review_min_labels")
+            exploration_score = score_col.number_input("Exploration score", min_value=0, max_value=100,
+                                                       value=70, key="review_exploration_score", help=REVIEW_PRIORITY_HELP)
+        score_state = st.session_state[CANONICAL_STATE_KEY]
+        failures = sum(item.get("status") in ("timeout", "image_error", "missing_cutout")
+                       for item in score_state["evidence"].values())
+        if failures:
+            st.warning(f"{failures} canonical cutouts could not be scored. Their scores remain N/A.")
+            if st.button("Retry unavailable canonical scores"):
+                del st.session_state[CANONICAL_STATE_KEY]
+                st.rerun()
+        if score_state.get("cache_issue"):
+            st.warning("Some canonical scores could not be read from or saved to persistent cache; session results remain available.")
         cluster_download_df = summary_with_preview_scores(
-            cluster_summary_view_model["cluster_download_df"], clustered_df, summary_canonical_features,
+            base_summary_view_model["cluster_download_df"], clustered_df, summary_canonical_features,
         )
+        cluster_download_df = prioritize_for_review(cluster_download_df, min_objects=min_objects,
+                                                    min_labels=min_labels, exploration_score=exploration_score)
+        if cluster_download_df.enrichment_ab.isna().all():
+            st.caption("No selected A/B references: A+B enrichment is unavailable.")
+        review_signature = (current_summary_signature, id(score_state), min_objects, min_labels, exploration_score)
+        if st.session_state.get("cluster_review_signature") != review_signature:
+            st.session_state["cluster_summary_view_model"] = ranked_cluster_summary_view_model(
+                base_summary_view_model, cluster_download_df, clustered_df, summary_canonical_features,
+            )
+            st.session_state["cluster_review_signature"] = review_signature
+        cluster_summary_view_model = st.session_state["cluster_summary_view_model"]
+        table_revision = hashlib.sha256(repr(review_signature).encode()).hexdigest()[:16]
         summary_display = cluster_download_df.copy()
         summary_display["lens_rate_%"] = summary_display["lens_rate"] * 100
         summary_display["enrichment_x"] = summary_display["enrichment"]
         summary_table = summary_display[
             [
                 "cluster",
+                "review_priority",
                 "n_objects",
                 "n_lenses",
                 "n_grade_a",
@@ -1114,6 +1146,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 "n_grade_c",
                 "lens_rate_%",
                 "enrichment_x",
+                "enrichment_ab",
                 "label_entropy_bits",
                 "canonical_score",
                 "canonical",
@@ -1122,12 +1155,14 @@ This analysis uses Euclid Q1 catalogue products available at:
         ].reset_index(drop=True)
         st.caption(
             "Select any table row or use **Analyse this cluster** in a visual preview."
-            f" Initial priority: {CLUSTER_PRIORITY_DESCRIPTIONS[summary_priority]} (descending)."
+            " Initial priority: reference-supported clusters by A+B enrichment, then A count, then canonical score"
+            " (descending); followed by morphology exploration, ordered by canonical score."
         )
         summary_table_display = summary_table.style.format(
             {
                 "lens_rate_%": lambda value: format_decimal_comma(value, 2),
                 "enrichment_x": lambda value: format_decimal_comma(value, 2),
+                "enrichment_ab": lambda value: format_decimal_comma(value, 2),
                 "label_entropy_bits": lambda value: format_decimal_comma(value, 3),
             }
         )
@@ -1135,10 +1170,12 @@ This analysis uses Euclid Q1 catalogue products available at:
             summary_table_display,
             use_container_width=True,
             hide_index=True,
-            key=f"cluster_summary_table_{id(clustered_df)}_{summary_priority}",
+            key=f"cluster_summary_table_{id(clustered_df)}_{table_revision}",
             on_select="rerun",
             selection_mode="single-row",
             column_config={
+                "review_priority": st.column_config.TextColumn("Priority", help=REVIEW_PRIORITY_HELP),
+                "enrichment_ab": st.column_config.NumberColumn("A+B enrichment (x)", help=AB_ENRICHMENT_HELP),
                 "n_grade_a": st.column_config.NumberColumn("A"),
                 "n_grade_b": st.column_config.NumberColumn("B"),
                 "n_grade_c": st.column_config.NumberColumn("C"),
@@ -1152,7 +1189,7 @@ This analysis uses Euclid Q1 catalogue products available at:
             },
         )
         selected_rows = tuple(int(row) for row in table_event.selection.rows)
-        table_selection_key = f"cluster_summary_table_selection_{id(clustered_df)}_{summary_priority}"
+        table_selection_key = f"cluster_summary_table_selection_{id(clustered_df)}_{table_revision}"
         previous_rows = tuple(st.session_state.get(table_selection_key, ()))
         table_requested_cluster = None
         if selected_rows != previous_rows:

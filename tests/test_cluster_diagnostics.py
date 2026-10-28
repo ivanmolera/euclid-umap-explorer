@@ -314,7 +314,7 @@ class ClusterDiagnosticUITests(unittest.TestCase):
         self.assertIn("subcluster_diagnostics_state", app.session_state)
         self.assertNotIn("cluster_diagnostics_state", app.session_state)
 
-    def test_main_summary_receives_scores_immediately_without_changing_priority(self):
+    def test_main_summary_receives_all_scores_and_reuses_them_on_reruns(self):
         from euclid_umap_explorer import ui as main_ui
         from euclid_umap_explorer import canonical_scores
 
@@ -333,7 +333,8 @@ class ClusterDiagnosticUITests(unittest.TestCase):
                 patch.object(main_ui, "render_cluster_visual_summary_view_model", return_value=None), \
                 patch.object(main_ui, "render_morphology_graph", return_value=None), \
                 patch.object(main_ui, "run_birch_clustering") as fit, \
-                patch.object(canonical_scores, "load_canonical_evidence", return_value=evidence) as load:
+                patch.object(canonical_scores, "score_filesystem"), \
+                patch.object(canonical_scores, "score_canonical_row", return_value=(evidence, False)) as load:
             app.run(timeout=30)
             self.assertFalse(app.exception)
             before = app.dataframe[0].value
