@@ -20,7 +20,7 @@ class SidebarBrandingTests(unittest.TestCase):
         with Image.open(EUCLID_LOGO_PATH) as logo:
             self.assertEqual(logo.format, "PNG")
 
-    def test_sidebar_restores_text_title_and_original_logo_preserving_favicon(self):
+    def test_sidebar_shows_hyphenated_acronym_preserving_logo_and_favicon(self):
         app = AppTest.from_string(
             "from euclid_umap_explorer.ui import main\nmain()",
             default_timeout=30,
@@ -38,7 +38,7 @@ class SidebarBrandingTests(unittest.TestCase):
         )
         self.assertEqual(len(app.sidebar.get("image")), 1)
         self.assertTrue(any(
-            ">ESCOPE</div>" in element.value for element in app.sidebar.markdown
+            ">E-SCOPE</div>" in element.value for element in app.sidebar.markdown
         ))
         self.assertIn(
             f"Version {APP_VERSION}", [element.value for element in app.sidebar.caption]

@@ -779,7 +779,7 @@ def main() -> None:
                 line-height: 1.1;
                 margin: 0.1rem 0 0.6rem;
                 text-align: center;
-            ">ESCOPE</div>
+            ">E-SCOPE</div>
             """,
             unsafe_allow_html=True,
         )
