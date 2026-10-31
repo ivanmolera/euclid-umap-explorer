@@ -2559,6 +2559,10 @@ def render_euclid_object_search(object_id: str) -> None:
                     "No precomputed JPEG cutout was found for this object. "
                     "No FITS file was downloaded."
                 )
+                st.markdown(
+                    aladin_icon_link(aladin_url(ra_degrees, dec_degrees)),
+                    unsafe_allow_html=True,
+                )
 
         with summary_col:
             object_summary_title = "**Object summary**"

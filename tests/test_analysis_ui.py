@@ -339,6 +339,64 @@ render_euclid_object_search('-625302350493849139')
         self.assertEqual(render_table.call_args_list[3].kwargs["height"], "stretch")
         self.assertIn("flux_detection_total", set(app.dataframe[3].value["field"]))
 
+    def test_object_search_keeps_aladin_without_cutout_or_morphology(self):
+        object_id = "-610719047485205149"
+        ra, dec = 61.071904762034976, -48.52051493789015
+        result = {
+            "object_id": object_id,
+            "object_summary": {
+                "object_id": object_id,
+                "right_ascension": ra, "declination": dec,
+            },
+            "mosaic_summary": {"tile_index": 102021014, "instrument_name": "VIS"},
+            "cutout_path": None,
+        }
+        lens_summary = {"is_lens_candidate": "No", "lens_candidate_grade": ""}
+        for cached in (False, True):
+            for has_morphology in (False, True):
+                with self.subTest(cached=cached, has_morphology=has_morphology):
+                    morphology = pd.DataFrame([{
+                        "object_id": object_id, "right_ascension": 100., "declination": 30.,
+                    }]) if has_morphology else pd.DataFrame()
+                    app = AppTest.from_string(f"""
+from euclid_umap_explorer.components import render_euclid_object_search
+render_euclid_object_search({object_id!r})
+""")
+                    if cached:
+                        app.session_state["euclid_search_result"] = {
+                            "requested_object_id": object_id, "result": result,
+                            "morphology_df": morphology, "physical_df": pd.DataFrame(),
+                            "lens_candidate_summary": lens_summary,
+                        }
+                    with ExitStack() as stack:
+                        stack.enter_context(patch.object(components, "ENABLE_SLED_CHECK", False))
+                        fetch = stack.enter_context(patch.object(
+                            components, "fetch_euclid_object_summary", return_value=result,
+                        ))
+                        stack.enter_context(patch.object(
+                            components, "load_morphology_object", return_value=morphology,
+                        ))
+                        stack.enter_context(patch.object(
+                            components, "object_physical_measurements", return_value=pd.DataFrame(),
+                        ))
+                        stack.enter_context(patch.object(
+                            components, "object_lens_candidate_summary", return_value=lens_summary,
+                        ))
+                        image = stack.enter_context(patch.object(components, "show_detectable_image"))
+                        app.run()
+                    self.assertFalse(app.exception)
+                    links = [m for m in app.markdown if 'class="aladin-icon-link"' in m.value]
+                    self.assertEqual(len(links), 1)
+                    self.assertEqual(links[0].value, components.aladin_icon_link(components.aladin_url(ra, dec)))
+                    self.assertTrue(links[0].proto.allow_html)
+                    self.assertTrue(any("No precomputed JPEG" in info.value for info in app.info))
+                    self.assertEqual(app.metric[0].value, object_id)
+                    image.assert_not_called()
+                    if cached:
+                        fetch.assert_not_called()
+                    else:
+                        fetch.assert_called_once_with(object_id)
+
 
 if __name__ == "__main__":
     unittest.main()
