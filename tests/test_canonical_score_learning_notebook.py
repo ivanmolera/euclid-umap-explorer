@@ -5,6 +5,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SOURCE = Path(__file__).resolve().parents[1] / 'notebooks/escope_canonical_score_learning_colab.py'
@@ -58,6 +59,90 @@ class NotebookSourceTests(unittest.TestCase):
         self.assertIn('manual_float_score', source)
         self.assertIn('no precision', source)
         self.assertIn('no es un umbral fisico', source)
+
+
+class RuntimeSetupTests(unittest.TestCase):
+    def setUp(self):
+        source = next(cell['source'] for cell in notebook_cells()
+                      if 'def runtime_dependency_plan' in cell['source'])
+        nodes = [node for node in ast.parse(source).body
+                 if isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef))]
+        self.nb = types.ModuleType('runtime_setup')
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), str(SOURCE), 'exec'), self.nb.__dict__)
+        self.installed = {'numpy': '2.0.2', 'pandas': '2.2.3', 'python-dateutil': '2.9.0.post0',
+                          'torch': '2.8.0+cu126', 'scikit-learn': '1.6.1', 'pyarrow': '18.0.0',
+                          'matplotlib': '3.10.0', 'opencv-python': '4.10.0.84'}
+        self.requirements = {'google-colab': ['pandas==2.2.3'],
+                             'numba': ['numpy>=1.24,<2.3'],
+                             'holidays': ['python-dateutil>=2.9.0.post0,<3'],
+                             'betterproto': ['python-dateutil>=2.8,<3.0'],
+                             'google-cloud-bigquery': ['python-dateutil>=2.8.2,<3.0'],
+                             'ibis-framework': ['python-dateutil>=2.8.2,<3'],
+                             'bigframes': ['python-dateutil>=2.8.2,<3']}
+
+    def test_compatible_colab_needs_no_installs_and_preserves_cuda_build(self):
+        missing, constraints = self.nb.runtime_dependency_plan(self.installed, self.requirements)
+        self.assertEqual(missing, [])
+        self.assertIn('pandas==2.2.3', constraints)
+        self.assertIn('numpy==2.0.2', constraints)
+        self.assertIn('python-dateutil==2.9.0.post0', constraints)
+        self.assertIn('torch==2.8.0+cu126', constraints)
+
+    def test_reported_conflicts_stop_before_any_install(self):
+        broken = {**self.installed, 'numpy': '2.5.4', 'pandas': '2.3.3', 'python-dateutil': '4.0.0'}
+        with self.assertRaises(RuntimeError) as error:
+            self.nb.runtime_dependency_plan(broken, self.requirements)
+        for owner in self.requirements:
+            self.assertIn(owner, str(error.exception))
+        self.assertIn('runtime Colab limpio', str(error.exception))
+
+    def test_only_missing_extra_is_requested_without_upgrading_core(self):
+        installed = {key: value for key, value in self.installed.items() if key != 'pyarrow'}
+        missing, constraints = self.nb.runtime_dependency_plan(installed, self.requirements)
+        self.assertEqual(missing, ['pyarrow>=15'])
+        self.assertIn('numpy==2.0.2', constraints)
+        self.assertFalse(any('torch' in requirement for requirement in missing))
+
+    def test_optional_requirements_and_python_markers_are_respected(self):
+        requirements = {'example': ['numpy<1; extra == "unused"', 'pandas<1; python_version < "3.0"']}
+        self.assertEqual(self.nb.runtime_dependency_plan(self.installed, requirements)[0], [])
+
+    def test_loaded_numpy_version_must_match_disk(self):
+        with self.assertRaisesRegex(RuntimeError, 'reinicia la sesion'):
+            self.nb.runtime_dependency_plan(self.installed, self.requirements, {'numpy': '2.5.4'})
+
+    def distributions(self, installed):
+        return [types.SimpleNamespace(metadata={'Name': key}, version=value,
+                                      requires=self.requirements.get(key, []))
+                for key, value in {**installed, 'google-colab': '1.0.0', 'numba': '0.61.2',
+                                   'holidays': '0.107'}.items()]
+
+    def test_setup_checks_imports_but_never_calls_pip_on_compatible_runtime(self):
+        with patch.object(self.nb.metadata, 'distributions', return_value=self.distributions(self.installed)), \
+                patch.object(self.nb, 'sys', types.SimpleNamespace(executable='/python', modules={})), \
+                patch.object(self.nb.subprocess, 'check_call') as command:
+            self.nb.prepare_notebook_runtime()
+        command.assert_called_once()
+        self.assertEqual(command.call_args.args[0][:2], ['/python', '-c'])
+        self.assertIn('torch.tensor([1.0]).numpy()', command.call_args.args[0][2])
+
+    def test_missing_install_uses_constraints_and_requires_restart(self):
+        installed = {key: value for key, value in self.installed.items() if key != 'pyarrow'}
+        captured = []
+
+        def run(command):
+            captured.append(command)
+            self.assertIn('pandas==2.2.3', Path(command[command.index('--constraint') + 1]).read_text())
+
+        with patch.object(self.nb.metadata, 'distributions', return_value=self.distributions(installed)), \
+                patch.object(self.nb, 'sys', types.SimpleNamespace(executable='/python', modules={})), \
+                patch.object(self.nb.subprocess, 'check_call', side_effect=run):
+            with self.assertRaisesRegex(RuntimeError, 'Reinicia la sesion'):
+                self.nb.prepare_notebook_runtime()
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0][:4], ['/python', '-m', 'pip', 'install'])
+        self.assertEqual(captured[0][-1], 'pyarrow>=15')
+        self.assertNotIn('--upgrade', captured[0])
 
 
 @unittest.skipUnless(HAS_TORCH, 'Optional notebook tests require torch; not a production dependency.')

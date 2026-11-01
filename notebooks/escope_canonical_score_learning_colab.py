@@ -18,8 +18,96 @@
 # negativos. El piloto usa aprendizaje positivo-no etiquetado (PU), bajo
 # supuestos explicitos, no una probabilidad calibrada de lente.
 
+# %% [markdown]
+# ## Entorno Colab: ejecutar antes de los imports
+# Se reutiliza el stack instalado, incluido PyTorch con su version CUDA.
+# No se actualizan NumPy, pandas ni python-dateutil. Solo se instalan librerias
+# ausentes, con restricciones que conservan las versiones ya disponibles.
+#
+# Si has ejecutado una celda de instalacion antigua y aparecen conflictos,
+# usa **Entorno de ejecucion > Desconectar y eliminar entorno de ejecucion**
+# (Runtime > Disconnect and delete runtime), abre esta version del notebook
+# y comienza desde esta celda. Guarda antes los resultados locales necesarios;
+# los archivos de Drive no se eliminan. Reiniciar Python por si solo no deshace
+# paquetes incompatibles instalados en la maquina virtual.
+# [Referencia Colab](https://research.google.com/colaboratory/faq.html).
+# Si esta celda instala alguna libreria, pedira reiniciar la sesion antes de
+# continuar. No reejecutes la antigua celda de pip sobre el entorno nuevo.
+
 # %%
-get_ipython().run_line_magic('pip', "install -q 'numpy<2' 'pandas>=2.2,<3' 'scikit-learn>=1.4,<2' 'torch>=2.2,<3' 'opencv-python-headless==4.10.0.84' 'pyarrow>=15' matplotlib")
+from importlib import metadata
+import subprocess
+import sys
+import tempfile
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+from packaging.version import Version
+
+
+def runtime_dependency_plan(installed, requirements, loaded=None):
+    installed = {canonicalize_name(name): value for name, value in installed.items()}
+    protected = ('numpy', 'pandas', 'python-dateutil', 'torch', 'torchvision', 'torchaudio',
+                 'scipy', 'scikit-learn', 'pyarrow', 'matplotlib', 'opencv-python',
+                 'opencv-contrib-python', 'opencv-python-headless')
+    conflicts = []
+    # Inspect requirements targeting the scientific stack, not unrelated Colab packages.
+    for owner, declarations in requirements.items():
+        for declaration in declarations:
+            requirement = Requirement(declaration)
+            name = canonicalize_name(requirement.name)
+            if requirement.marker and not requirement.marker.evaluate({'extra': ''}):
+                continue
+            if name in protected and name in installed and not requirement.specifier.contains(installed[name]):
+                conflicts.append(f'{owner} requiere {requirement}; instalado {installed[name]}')
+    for name, version in (loaded or {}).items():
+        name = canonicalize_name(name)
+        if name in installed and Version(str(version)) != Version(installed[name]):
+            conflicts.append(f'{name} cargado={version}, instalado={installed[name]}; reinicia la sesion')
+    for specification in ('numpy>=1.26', 'pandas>=2.2,<3', 'python-dateutil>=2.8.2,<3', 'torch>=2.2'):
+        requirement = Requirement(specification)
+        if requirement.name not in installed or not requirement.specifier.contains(installed[requirement.name]):
+            conflicts.append(f'El runtime debe proporcionar {specification}')
+    if conflicts:
+        raise RuntimeError('Entorno incompatible. Usa un runtime Colab limpio.\n' + '\n'.join(conflicts))
+    missing = []
+    for specification in ('scikit-learn>=1.4,<2', 'pyarrow>=15', 'matplotlib>=3.7'):
+        requirement = Requirement(specification)
+        if requirement.name not in installed:
+            missing.append(specification)
+        elif not requirement.specifier.contains(installed[requirement.name]):
+            raise RuntimeError(f'Runtime antiguo: se necesita {specification}. Usa un runtime actualizado.')
+    if not any(name in installed for name in ('opencv-python', 'opencv-contrib-python', 'opencv-python-headless')):
+        missing.append('opencv-python-headless==4.10.0.84')
+    constraints = [f'{name}=={installed[name]}' for name in protected if name in installed]
+    return missing, constraints
+
+
+def prepare_notebook_runtime():
+    distributions = list(metadata.distributions())
+    installed = {canonicalize_name(dist.metadata['Name']): dist.version for dist in distributions
+                 if dist.metadata.get('Name')}
+    requirements = {dist.metadata['Name']: dist.requires or [] for dist in distributions
+                    if dist.metadata.get('Name')}
+    loaded = {name: sys.modules[module].__version__ for name, module in (
+        ('numpy', 'numpy'), ('pandas', 'pandas'), ('python-dateutil', 'dateutil'), ('torch', 'torch'))
+        if module in sys.modules and hasattr(sys.modules[module], '__version__')}
+    missing, constraints = runtime_dependency_plan(installed, requirements, loaded)
+    if missing:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt') as constraint_file:
+            constraint_file.write('\n'.join(constraints) + '\n')
+            constraint_file.flush()
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install',
+                                   '--constraint', constraint_file.name, *missing])
+        raise RuntimeError('Dependencias instaladas. Reinicia la sesion y vuelve a ejecutar desde esta celda.')
+    # Check compiled imports in a fresh process before loading them in the kernel.
+    subprocess.check_call([sys.executable, '-c',
+        'import numpy, pandas, dateutil, sklearn, pyarrow, matplotlib, cv2, torch; '
+        'torch.tensor([1.0]).numpy(); print("Imports y puente PyTorch-NumPy: OK")'])
+    print('Versiones conservadas:', {name: installed[name] for name in
+                                    ('numpy', 'pandas', 'python-dateutil', 'torch')})
+
+
+prepare_notebook_runtime()
 
 # %%
 from pathlib import Path
@@ -202,7 +290,7 @@ display(cases.groupby(['grade', 'primary_pool', 'near_control']).size().rename('
 # puntuadas por el detector original, con padding enmascarado, y la concordancia
 # geometrica entre ellas. Puede reordenar esas seis regiones, pero no recuperar
 # arcos rechazados o ausentes: esto afina la combinacion, no el segmentador.
-# El cache incluye el hash de los bytes y del detector, no solo object_id.
+# El cache incluye los bytes, el detector y las versiones de NumPy/OpenCV.
 
 # %%
 def extract_record(rgb, detector_module):
@@ -219,7 +307,9 @@ def extract_record(rgb, detector_module):
 
 
 def extract_cases(cases, base, output, detector_module):
-    cache = Path(output) / ('features_' + DETECTOR_SHA256[:12])
+    fingerprint = json.dumps({'detector': DETECTOR_SHA256, 'numpy': np.__version__,
+                              'opencv': cv2.__version__}, sort_keys=True)
+    cache = Path(output) / ('features_' + hashlib.sha256(fingerprint.encode()).hexdigest()[:16])
     cache.mkdir(exist_ok=True, parents=True)
     records, rows, regions = [], [], []
     for i, row in enumerate(cases.to_dict('records')):
