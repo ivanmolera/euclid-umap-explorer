@@ -111,6 +111,32 @@ class RuntimeSetupTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'reinicia la sesion'):
             self.nb.runtime_dependency_plan(self.installed, self.requirements, {'numpy': '2.5.4'})
 
+    def test_numpy_downgrade_recommends_only_a_compatible_loaded_version(self):
+        requirements = {**self.requirements, 'jax': ['numpy>=2.1'],
+                        'opencv-python-headless': ['numpy>=2'], 'tifffile': ['numpy>=2.1']}
+        installed = {**self.installed, 'numpy': '1.26.4'}
+        with self.assertRaises(RuntimeError) as error:
+            self.nb.runtime_dependency_plan(installed, requirements, {'numpy': '2.1.3'})
+        message = str(error.exception)
+        self.assertIn('%pip install --only-binary=:all: --no-deps "numpy==2.1.3"', message)
+        self.assertIn('REINICIA LA SESION', message)
+        self.assertIn('No continues con los imports', message)
+
+    def test_recovery_does_not_recommend_an_incompatible_loaded_numpy(self):
+        for loaded, requirements in (
+            ('2.5.4', self.requirements),
+            ('1.26.4', {'jax': ['numpy>=2.1']}),
+        ):
+            with self.subTest(loaded=loaded), self.assertRaises(RuntimeError) as error:
+                self.nb.runtime_dependency_plan(self.installed, requirements, {'numpy': loaded})
+            self.assertNotIn('%pip install', str(error.exception))
+
+    def test_no_numpy_recovery_is_guessed_without_a_loaded_version(self):
+        with self.assertRaises(RuntimeError) as error:
+            self.nb.runtime_dependency_plan({**self.installed, 'numpy': '1.26.4'},
+                                            {'jax': ['numpy>=2.1']})
+        self.assertNotIn('%pip install', str(error.exception))
+
     def distributions(self, installed):
         return [types.SimpleNamespace(metadata={'Name': key}, version=value,
                                       requires=self.requirements.get(key, []))

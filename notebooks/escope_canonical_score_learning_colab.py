@@ -33,6 +33,16 @@
 # [Referencia Colab](https://research.google.com/colaboratory/faq.html).
 # Si esta celda instala alguna libreria, pedira reiniciar la sesion antes de
 # continuar. No reejecutes la antigua celda de pip sobre el entorno nuevo.
+#
+# Recuperacion dirigida del error `numpy cargado=2.1.3, instalado=1.26.4`:
+# si no quieres eliminar el runtime, ejecuta una sola vez en otra celda:
+# ```python
+# %pip install --only-binary=:all: --no-deps "numpy==2.1.3"
+# ```
+# Despues usa **Reiniciar sesion**, vuelve a esta celda y ejecuta desde arriba.
+# No sigas con los imports antes del reinicio. Esto restaura solo NumPy; no
+# modifica PyTorch/CUDA. Para otros conflictos, sigue el diagnostico de la
+# celda: solo recomienda restaurar la version cargada si cumple los requisitos.
 
 # %%
 from importlib import metadata
@@ -50,6 +60,7 @@ def runtime_dependency_plan(installed, requirements, loaded=None):
                  'scipy', 'scikit-learn', 'pyarrow', 'matplotlib', 'opencv-python',
                  'opencv-contrib-python', 'opencv-python-headless')
     conflicts = []
+    numpy_requirements = [Requirement('numpy>=1.26')]
     # Inspect requirements targeting the scientific stack, not unrelated Colab packages.
     for owner, declarations in requirements.items():
         for declaration in declarations:
@@ -57,6 +68,8 @@ def runtime_dependency_plan(installed, requirements, loaded=None):
             name = canonicalize_name(requirement.name)
             if requirement.marker and not requirement.marker.evaluate({'extra': ''}):
                 continue
+            if name == 'numpy':
+                numpy_requirements.append(requirement)
             if name in protected and name in installed and not requirement.specifier.contains(installed[name]):
                 conflicts.append(f'{owner} requiere {requirement}; instalado {installed[name]}')
     for name, version in (loaded or {}).items():
@@ -68,7 +81,22 @@ def runtime_dependency_plan(installed, requirements, loaded=None):
         if requirement.name not in installed or not requirement.specifier.contains(installed[requirement.name]):
             conflicts.append(f'El runtime debe proporcionar {specification}')
     if conflicts:
-        raise RuntimeError('Entorno incompatible. Usa un runtime Colab limpio.\n' + '\n'.join(conflicts))
+        recovery = ''
+        loaded_numpy = (loaded or {}).get('numpy')
+        if loaded_numpy is not None:
+            candidate = str(Version(str(loaded_numpy)))
+            if installed.get('numpy') != candidate and all(
+                    requirement.specifier.contains(candidate) for requirement in numpy_requirements):
+                recovery = (
+                    '\n\nPara restaurar solo NumPy a la version cargada compatible, '
+                    'ejecuta UNA VEZ en otra celda:\n'
+                    f'%pip install --only-binary=:all: --no-deps "numpy=={candidate}"\n'
+                    'Despues REINICIA LA SESION y vuelve a ejecutar desde la primera celda. '
+                    'No continues con los imports antes de reiniciar ni reejecutes la celda antigua con numpy<2. '
+                    'Otros conflictos, si existen, requieren revision independiente.'
+                )
+        raise RuntimeError('Entorno incompatible. Usa un runtime Colab limpio.\n'
+                           + '\n'.join(conflicts) + recovery)
     missing = []
     for specification in ('scikit-learn>=1.4,<2', 'pyarrow>=15', 'matplotlib>=3.7'):
         requirement = Requirement(specification)
