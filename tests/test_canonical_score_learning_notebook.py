@@ -1,11 +1,13 @@
 import ast
 import importlib.util
 import json
+import os
+import sys
 import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 SOURCE = Path(__file__).resolve().parents[1] / 'notebooks/escope_canonical_score_learning_colab.py'
@@ -17,7 +19,8 @@ def notebook_cells():
     current = None
     for line in SOURCE.read_text().splitlines(keepends=True):
         if line.startswith('# %%'):
-            current = {'cell_type': 'markdown' if '[markdown]' in line else 'code', 'source': ''}
+            current = {'cell_type': 'markdown' if '[markdown]' in line else 'code',
+                       'isolated': '[escope]' in line, 'source': ''}
             cells.append(current)
         elif current is not None:
             if current['cell_type'] == 'markdown':
@@ -45,7 +48,8 @@ class NotebookSourceTests(unittest.TestCase):
         self.assertEqual(len(notebook['cells']), len(expected))
         for cell, actual in zip(expected, notebook['cells']):
             self.assertEqual(cell['cell_type'], actual['cell_type'])
-            self.assertEqual(cell['source'], ''.join(actual['source']))
+            expected_source = ('%%escope\n' if cell['isolated'] else '') + cell['source']
+            self.assertEqual(expected_source, ''.join(actual['source']))
             if cell['cell_type'] == 'code':
                 compile(cell['source'], str(SOURCE), 'exec')
                 self.assertIsNone(actual['execution_count'])
@@ -64,111 +68,142 @@ class NotebookSourceTests(unittest.TestCase):
 class RuntimeSetupTests(unittest.TestCase):
     def setUp(self):
         source = next(cell['source'] for cell in notebook_cells()
-                      if 'def runtime_dependency_plan' in cell['source'])
+                      if 'def create_notebook_environment' in cell['source'])
         nodes = [node for node in ast.parse(source).body
-                 if isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef))]
+                 if isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.ClassDef))]
         self.nb = types.ModuleType('runtime_setup')
         exec(compile(ast.Module(body=nodes, type_ignores=[]), str(SOURCE), 'exec'), self.nb.__dict__)
-        self.installed = {'numpy': '2.0.2', 'pandas': '2.2.3', 'python-dateutil': '2.9.0.post0',
-                          'torch': '2.8.0+cu126', 'scikit-learn': '1.6.1', 'pyarrow': '18.0.0',
-                          'matplotlib': '3.10.0', 'opencv-python': '4.10.0.84'}
-        self.requirements = {'google-colab': ['pandas==2.2.3'],
-                             'numba': ['numpy>=1.24,<2.3'],
-                             'holidays': ['python-dateutil>=2.9.0.post0,<3'],
-                             'betterproto': ['python-dateutil>=2.8,<3.0'],
-                             'google-cloud-bigquery': ['python-dateutil>=2.8.2,<3.0'],
-                             'ibis-framework': ['python-dateutil>=2.8.2,<3'],
-                             'bigframes': ['python-dateutil>=2.8.2,<3']}
 
-    def test_compatible_colab_needs_no_installs_and_preserves_cuda_build(self):
-        missing, constraints = self.nb.runtime_dependency_plan(self.installed, self.requirements)
-        self.assertEqual(missing, [])
-        self.assertIn('pandas==2.2.3', constraints)
-        self.assertIn('numpy==2.0.2', constraints)
-        self.assertIn('python-dateutil==2.9.0.post0', constraints)
-        self.assertIn('torch==2.8.0+cu126', constraints)
+    def test_all_numeric_cells_use_the_isolated_kernel(self):
+        numerical = {'numpy', 'pandas', 'torch', 'cv2', 'matplotlib', 'sklearn', 'pyarrow'}
+        for cell in notebook_cells():
+            if cell['cell_type'] != 'code':
+                continue
+            for node in ast.walk(ast.parse(cell['source'])):
+                names = [alias.name.split('.')[0] for alias in node.names] if isinstance(node, ast.Import) else (
+                    [node.module.split('.')[0]] if isinstance(node, ast.ImportFrom) and node.module else [])
+                if numerical.intersection(names):
+                    self.assertTrue(cell['isolated'])
+        self.assertNotIn('def runtime_dependency_plan', SOURCE.read_text())
 
-    def test_reported_conflicts_stop_before_any_install(self):
-        broken = {**self.installed, 'numpy': '2.5.4', 'pandas': '2.3.3', 'python-dateutil': '4.0.0'}
-        with self.assertRaises(RuntimeError) as error:
-            self.nb.runtime_dependency_plan(broken, self.requirements)
-        for owner in self.requirements:
-            self.assertIn(owner, str(error.exception))
-        self.assertIn('runtime Colab limpio', str(error.exception))
+    def test_only_private_environment_receives_numeric_installs(self):
+        python = '/content/private-env/bin/python'
+        commands = self.nb.notebook_install_commands(python, linux=True)
+        self.assertEqual(len(commands), 2)
+        for command in commands:
+            self.assertEqual(command[:5], [python, '-I', '-m', 'pip', '--isolated'])
+        self.assertIn('https://download.pytorch.org/whl/cpu', commands[0])
+        self.assertIn('--no-deps', commands[0])
+        self.assertIn('numpy==2.2.6', commands[1])
+        self.assertIn('pandas==2.2.3', commands[1])
+        self.assertIn('torch==2.7.1', commands[1])
+        self.assertEqual(len(self.nb.notebook_install_commands(python, linux=False)), 1)
 
-    def test_only_missing_extra_is_requested_without_upgrading_core(self):
-        installed = {key: value for key, value in self.installed.items() if key != 'pyarrow'}
-        missing, constraints = self.nb.runtime_dependency_plan(installed, self.requirements)
-        self.assertEqual(missing, ['pyarrow>=15'])
-        self.assertIn('numpy==2.0.2', constraints)
-        self.assertFalse(any('torch' in requirement for requirement in missing))
+    def test_environment_removes_injected_package_paths(self):
+        with patch.dict(os.environ, {'PYTHONPATH': '/broken/packages', 'PYTHONHOME': '/wrong',
+                                    'PIP_TARGET': '/global/site-packages', 'PIP_USER': '1',
+                                    'VIRTUAL_ENV': '/parent-env', 'KEEP_ME': 'unchanged'}):
+            environment = self.nb.isolated_environment()
+        for name in ('PYTHONPATH', 'PYTHONHOME', 'PIP_TARGET', 'PIP_USER', 'VIRTUAL_ENV'):
+            self.assertNotIn(name, environment)
+        self.assertEqual(environment['PYTHONNOUSERSITE'], '1')
+        self.assertEqual(environment['KEEP_ME'], 'unchanged')
 
-    def test_optional_requirements_and_python_markers_are_respected(self):
-        requirements = {'example': ['numpy<1; extra == "unused"', 'pandas<1; python_version < "3.0"']}
-        self.assertEqual(self.nb.runtime_dependency_plan(self.installed, requirements)[0], [])
+    def test_broken_parent_numpy_is_ignored_and_ready_environment_is_reused(self):
+        calls = []
 
-    def test_loaded_numpy_version_must_match_disk(self):
-        with self.assertRaisesRegex(RuntimeError, 'reinicia la sesion'):
-            self.nb.runtime_dependency_plan(self.installed, self.requirements, {'numpy': '2.5.4'})
+        def run(command, **kwargs):
+            calls.append(command)
+            if command[2:4] == ['-m', 'venv']:
+                Path(command[-1]).mkdir(parents=True)
 
-    def test_numpy_downgrade_recommends_only_a_compatible_loaded_version(self):
-        requirements = {**self.requirements, 'jax': ['numpy>=2.1'],
-                        'opencv-python-headless': ['numpy>=2'], 'tifffile': ['numpy>=2.1']}
-        installed = {**self.installed, 'numpy': '1.26.4'}
-        with self.assertRaises(RuntimeError) as error:
-            self.nb.runtime_dependency_plan(installed, requirements, {'numpy': '2.1.3'})
-        message = str(error.exception)
-        self.assertIn('%pip install --only-binary=:all: --no-deps "numpy==2.1.3"', message)
-        self.assertIn('REINICIA LA SESION', message)
-        self.assertIn('No continues con los imports', message)
+        with tempfile.TemporaryDirectory() as root, \
+                patch.dict(sys.modules, {'numpy': types.SimpleNamespace(__version__='2.4.6')}), \
+                patch.object(self.nb.subprocess, 'check_call', side_effect=run), \
+                patch.object(self.nb.subprocess, 'check_output', return_value='{"numpy": "2.2.6"}') as probe:
+            python = self.nb.create_notebook_environment(root, '/parent/python')
+            self.assertTrue((python.parent.parent / 'escope-ready.json').exists())
+            first_count = len(calls)
+            self.assertEqual(self.nb.create_notebook_environment(root, '/parent/python'), python)
+            self.assertEqual(calls[first_count:], [[str(python), '-I', '-m', 'pip', '--isolated', 'check']])
+            self.assertEqual(sys.modules['numpy'].__version__, '2.4.6')
+            self.assertIn('assert sys.prefix != sys.base_prefix', probe.call_args.args[0][-1])
+        for command in calls:
+            if 'install' in command:
+                self.assertEqual(command[0], str(python))
 
-    def test_recovery_does_not_recommend_an_incompatible_loaded_numpy(self):
-        for loaded, requirements in (
-            ('2.5.4', self.requirements),
-            ('1.26.4', {'jax': ['numpy>=2.1']}),
-        ):
-            with self.subTest(loaded=loaded), self.assertRaises(RuntimeError) as error:
-                self.nb.runtime_dependency_plan(self.installed, requirements, {'numpy': loaded})
-            self.assertNotIn('%pip install', str(error.exception))
+    def test_colab_without_ensurepip_bootstraps_virtualenv_without_global_install(self):
+        calls = []
 
-    def test_no_numpy_recovery_is_guessed_without_a_loaded_version(self):
-        with self.assertRaises(RuntimeError) as error:
-            self.nb.runtime_dependency_plan({**self.installed, 'numpy': '1.26.4'},
-                                            {'jax': ['numpy>=2.1']})
-        self.assertNotIn('%pip install', str(error.exception))
+        def run(command, **kwargs):
+            calls.append(command)
+            if command[2:4] == ['-m', 'venv']:
+                Path(command[-1]).mkdir(parents=True)
+                raise self.nb.subprocess.CalledProcessError(1, command)
 
-    def distributions(self, installed):
-        return [types.SimpleNamespace(metadata={'Name': key}, version=value,
-                                      requires=self.requirements.get(key, []))
-                for key, value in {**installed, 'google-colab': '1.0.0', 'numba': '0.61.2',
-                                   'holidays': '0.107'}.items()]
+        with tempfile.TemporaryDirectory() as root, \
+                patch.object(self.nb.subprocess, 'check_call', side_effect=run), \
+                patch.object(self.nb.subprocess, 'check_output', return_value='{}'):
+            self.nb.create_notebook_environment(root, '/parent/python')
+        bootstrap = next(command for command in calls if 'virtualenv==20.35.4' in command)
+        self.assertIn('--target', bootstrap)
+        self.assertIn('--ignore-installed', bootstrap)
+        self.assertTrue(any('from virtualenv import cli_run' in command[-1] for command in calls))
 
-    def test_setup_checks_imports_but_never_calls_pip_on_compatible_runtime(self):
-        with patch.object(self.nb.metadata, 'distributions', return_value=self.distributions(self.installed)), \
-                patch.object(self.nb, 'sys', types.SimpleNamespace(executable='/python', modules={})), \
-                patch.object(self.nb.subprocess, 'check_call') as command:
+    def test_failed_import_probe_never_marks_environment_ready(self):
+        def run(command, **kwargs):
+            if command[2:4] == ['-m', 'venv']:
+                Path(command[-1]).mkdir(parents=True)
+
+        with tempfile.TemporaryDirectory() as root, \
+                patch.object(self.nb.subprocess, 'check_call', side_effect=run), \
+                patch.object(self.nb.subprocess, 'check_output', side_effect=RuntimeError('compiled import failed')):
+            with self.assertRaisesRegex(RuntimeError, 'compiled import failed'):
+                self.nb.create_notebook_environment(root, '/parent/python')
+            self.assertEqual(list(Path(root).rglob('escope-ready.json')), [])
+
+    def session(self, reply):
+        session = object.__new__(self.nb.IsolatedNotebookSession)
+        session.manager = Mock()
+        session.manager.is_alive.return_value = True
+        session.client = Mock()
+        session.client.execute_interactive.return_value = {'content': reply}
+        return session
+
+    def test_execution_forwards_rich_outputs_and_propagates_worker_errors(self):
+        session = self.session({'status': 'ok'})
+        hook = Mock()
+        session.execute('display(table); plt.show()', output_hook=hook)
+        self.assertFalse(session.client.execute_interactive.call_args.kwargs['allow_stdin'])
+        self.assertIs(session.client.execute_interactive.call_args.kwargs['output_hook'], hook)
+        session = self.session({'status': 'error', 'ename': 'ValueError', 'evalue': 'missing data'})
+        with self.assertRaisesRegex(RuntimeError, 'ValueError: missing data'):
+            session.execute('bad()')
+
+    def test_rich_output_forwarding_does_not_depend_on_private_kernel_sockets(self):
+        display = types.ModuleType('IPython.display')
+        display.display, display.update_display, display.clear_output = Mock(), Mock(), Mock()
+        data = {'text/html': '<table><tr><td>2700244936644435563</td></tr></table>'}
+        with patch.dict(sys.modules, {'IPython.display': display}):
+            self.nb.forward_notebook_output({'header': {'msg_type': 'display_data'},
+                                            'content': {'data': data, 'metadata': {}}})
+            self.nb.forward_notebook_output({'header': {'msg_type': 'clear_output'},
+                                            'content': {'wait': True}})
+        display.display.assert_called_once_with(data, metadata={}, raw=True)
+        display.clear_output.assert_called_once_with(wait=True)
+
+    def test_interrupt_stops_worker_and_restarting_first_cell_closes_previous_worker(self):
+        session = self.session({'status': 'ok'})
+        session.client.execute_interactive.side_effect = KeyboardInterrupt
+        with self.assertRaises(KeyboardInterrupt):
+            session.execute('long_calculation()')
+        session.manager.interrupt_kernel.assert_called_once()
+        self.nb._escope_session = session
+        with patch.object(self.nb, 'create_notebook_environment', return_value='/env/bin/python'), \
+                patch.object(self.nb, 'IsolatedNotebookSession') as constructor:
             self.nb.prepare_notebook_runtime()
-        command.assert_called_once()
-        self.assertEqual(command.call_args.args[0][:2], ['/python', '-c'])
-        self.assertIn('torch.tensor([1.0]).numpy()', command.call_args.args[0][2])
-
-    def test_missing_install_uses_constraints_and_requires_restart(self):
-        installed = {key: value for key, value in self.installed.items() if key != 'pyarrow'}
-        captured = []
-
-        def run(command):
-            captured.append(command)
-            self.assertIn('pandas==2.2.3', Path(command[command.index('--constraint') + 1]).read_text())
-
-        with patch.object(self.nb.metadata, 'distributions', return_value=self.distributions(installed)), \
-                patch.object(self.nb, 'sys', types.SimpleNamespace(executable='/python', modules={})), \
-                patch.object(self.nb.subprocess, 'check_call', side_effect=run):
-            with self.assertRaisesRegex(RuntimeError, 'Reinicia la sesion'):
-                self.nb.prepare_notebook_runtime()
-        self.assertEqual(len(captured), 1)
-        self.assertEqual(captured[0][:4], ['/python', '-m', 'pip', 'install'])
-        self.assertEqual(captured[0][-1], 'pyarrow>=15')
-        self.assertNotIn('--upgrade', captured[0])
+        session.client.stop_channels.assert_called_once()
+        constructor.assert_called_once_with('/env/bin/python')
 
 
 @unittest.skipUnless(HAS_TORCH, 'Optional notebook tests require torch; not a production dependency.')

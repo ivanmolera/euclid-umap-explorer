@@ -19,125 +19,199 @@
 # supuestos explicitos, no una probabilidad calibrada de lente.
 
 # %% [markdown]
-# ## Entorno Colab: ejecutar antes de los imports
-# Se reutiliza el stack instalado, incluido PyTorch con su version CUDA.
-# No se actualizan NumPy, pandas ni python-dateutil. Solo se instalan librerias
-# ausentes, con restricciones que conservan las versiones ya disponibles.
+# ## Entorno independiente: ejecutar desde esta version del notebook
+# Ejecuta las celdas en orden. La primera instalacion puede tardar unos minutos.
+# El analisis usa un entorno virtual y un proceso Python independientes: no
+# cambia los paquetes de Colab ni necesita reparar o reiniciar su NumPy.
+# Las celdas `%%escope` comparten variables entre si y muestran aqui sus tablas,
+# graficos y errores. Conserva esa primera linea cuando edites una celda.
 #
-# Si has ejecutado una celda de instalacion antigua y aparecen conflictos,
-# usa **Entorno de ejecucion > Desconectar y eliminar entorno de ejecucion**
-# (Runtime > Disconnect and delete runtime), abre esta version del notebook
-# y comienza desde esta celda. Guarda antes los resultados locales necesarios;
-# los archivos de Drive no se eliminan. Reiniciar Python por si solo no deshace
-# paquetes incompatibles instalados en la maquina virtual.
-# [Referencia Colab](https://research.google.com/colaboratory/faq.html).
-# Si esta celda instala alguna libreria, pedira reiniciar la sesion antes de
-# continuar. No reejecutes la antigua celda de pip sobre el entorno nuevo.
-#
-# Recuperacion dirigida del error `numpy cargado=2.1.3, instalado=1.26.4`:
-# si no quieres eliminar el runtime, ejecuta una sola vez en otra celda:
-# ```python
-# %pip install --only-binary=:all: --no-deps "numpy==2.1.3"
-# ```
-# Despues usa **Reiniciar sesion**, vuelve a esta celda y ejecuta desde arriba.
-# No sigas con los imports antes del reinicio. Esto restaura solo NumPy; no
-# modifica PyTorch/CUDA. Para otros conflictos, sigue el diagnostico de la
-# celda: solo recomienda restaurar la version cargada si cumple los requisitos.
+# Esta red tiene pocos pesos y se entrena en CPU. No hace falta activar GPU:
+# el PyTorch/CUDA del runtime principal no se modifica. La prueba siguiente
+# comprueba el entorno antes de montar Drive o leer los catalogos privados.
+# El aislamiento usa [venv](https://docs.python.org/3/library/venv.html) y
+# [Jupyter Client](https://jupyter-client.readthedocs.io/en/stable/api/jupyter_client.blocking.html).
 
 # %%
-from importlib import metadata
+import atexit
+import contextlib
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
 import subprocess
 import sys
 import tempfile
-from packaging.requirements import Requirement
-from packaging.utils import canonicalize_name
-from packaging.version import Version
+import uuid
 
 
-def runtime_dependency_plan(installed, requirements, loaded=None):
-    installed = {canonicalize_name(name): value for name, value in installed.items()}
-    protected = ('numpy', 'pandas', 'python-dateutil', 'torch', 'torchvision', 'torchaudio',
-                 'scipy', 'scikit-learn', 'pyarrow', 'matplotlib', 'opencv-python',
-                 'opencv-contrib-python', 'opencv-python-headless')
-    conflicts = []
-    numpy_requirements = [Requirement('numpy>=1.26')]
-    # Inspect requirements targeting the scientific stack, not unrelated Colab packages.
-    for owner, declarations in requirements.items():
-        for declaration in declarations:
-            requirement = Requirement(declaration)
-            name = canonicalize_name(requirement.name)
-            if requirement.marker and not requirement.marker.evaluate({'extra': ''}):
-                continue
-            if name == 'numpy':
-                numpy_requirements.append(requirement)
-            if name in protected and name in installed and not requirement.specifier.contains(installed[name]):
-                conflicts.append(f'{owner} requiere {requirement}; instalado {installed[name]}')
-    for name, version in (loaded or {}).items():
-        name = canonicalize_name(name)
-        if name in installed and Version(str(version)) != Version(installed[name]):
-            conflicts.append(f'{name} cargado={version}, instalado={installed[name]}; reinicia la sesion')
-    for specification in ('numpy>=1.26', 'pandas>=2.2,<3', 'python-dateutil>=2.8.2,<3', 'torch>=2.2'):
-        requirement = Requirement(specification)
-        if requirement.name not in installed or not requirement.specifier.contains(installed[requirement.name]):
-            conflicts.append(f'El runtime debe proporcionar {specification}')
-    if conflicts:
-        recovery = ''
-        loaded_numpy = (loaded or {}).get('numpy')
-        if loaded_numpy is not None:
-            candidate = str(Version(str(loaded_numpy)))
-            if installed.get('numpy') != candidate and all(
-                    requirement.specifier.contains(candidate) for requirement in numpy_requirements):
-                recovery = (
-                    '\n\nPara restaurar solo NumPy a la version cargada compatible, '
-                    'ejecuta UNA VEZ en otra celda:\n'
-                    f'%pip install --only-binary=:all: --no-deps "numpy=={candidate}"\n'
-                    'Despues REINICIA LA SESION y vuelve a ejecutar desde la primera celda. '
-                    'No continues con los imports antes de reiniciar ni reejecutes la celda antigua con numpy<2. '
-                    'Otros conflictos, si existen, requieren revision independiente.'
-                )
-        raise RuntimeError('Entorno incompatible. Usa un runtime Colab limpio.\n'
-                           + '\n'.join(conflicts) + recovery)
-    missing = []
-    for specification in ('scikit-learn>=1.4,<2', 'pyarrow>=15', 'matplotlib>=3.7'):
-        requirement = Requirement(specification)
-        if requirement.name not in installed:
-            missing.append(specification)
-        elif not requirement.specifier.contains(installed[requirement.name]):
-            raise RuntimeError(f'Runtime antiguo: se necesita {specification}. Usa un runtime actualizado.')
-    if not any(name in installed for name in ('opencv-python', 'opencv-contrib-python', 'opencv-python-headless')):
-        missing.append('opencv-python-headless==4.10.0.84')
-    constraints = [f'{name}=={installed[name]}' for name in protected if name in installed]
-    return missing, constraints
+def notebook_requirements():
+    return ('numpy==2.2.6', 'pandas==2.2.3', 'python-dateutil==2.9.0.post0',
+            'scipy==1.15.3', 'scikit-learn==1.6.1', 'pyarrow==19.0.1',
+            'matplotlib==3.10.1', 'opencv-python-headless==4.11.0.86',
+            'Pillow==11.2.1', 'torch==2.7.1', 'ipykernel==6.30.1')
 
 
-def prepare_notebook_runtime():
-    distributions = list(metadata.distributions())
-    installed = {canonicalize_name(dist.metadata['Name']): dist.version for dist in distributions
-                 if dist.metadata.get('Name')}
-    requirements = {dist.metadata['Name']: dist.requires or [] for dist in distributions
-                    if dist.metadata.get('Name')}
-    loaded = {name: sys.modules[module].__version__ for name, module in (
-        ('numpy', 'numpy'), ('pandas', 'pandas'), ('python-dateutil', 'dateutil'), ('torch', 'torch'))
-        if module in sys.modules and hasattr(sys.modules[module], '__version__')}
-    missing, constraints = runtime_dependency_plan(installed, requirements, loaded)
-    if missing:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt') as constraint_file:
-            constraint_file.write('\n'.join(constraints) + '\n')
-            constraint_file.flush()
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install',
-                                   '--constraint', constraint_file.name, *missing])
-        raise RuntimeError('Dependencias instaladas. Reinicia la sesion y vuelve a ejecutar desde esta celda.')
-    # Check compiled imports in a fresh process before loading them in the kernel.
-    subprocess.check_call([sys.executable, '-c',
-        'import numpy, pandas, dateutil, sklearn, pyarrow, matplotlib, cv2, torch; '
-        'torch.tensor([1.0]).numpy(); print("Imports y puente PyTorch-NumPy: OK")'])
-    print('Versiones conservadas:', {name: installed[name] for name in
-                                    ('numpy', 'pandas', 'python-dateutil', 'torch')})
+def isolated_environment():
+    environment = os.environ.copy()
+    for name in ('PYTHONPATH', 'PYTHONHOME', 'PIP_TARGET', 'PIP_PREFIX', 'PIP_USER',
+                 'PIP_EXTRA_INDEX_URL', 'VIRTUAL_ENV'):
+        environment.pop(name, None)
+    environment['PYTHONNOUSERSITE'] = '1'
+    return environment
 
 
-prepare_notebook_runtime()
+def notebook_install_commands(python, *, linux=None):
+    command = [str(python), '-I', '-m', 'pip', '--isolated', 'install',
+               '--disable-pip-version-check', '--only-binary=:all:', '--quiet']
+    commands = []
+    linux = platform.system() == 'Linux' if linux is None else linux
+    if linux:
+        commands.append(command + ['--no-deps', '--index-url',
+                                   'https://download.pytorch.org/whl/cpu', 'torch==2.7.1'])
+    commands.append(command + ['--index-url', 'https://pypi.org/simple', *notebook_requirements()])
+    return commands
 
-# %%
+
+def create_notebook_environment(root=None, executable=None):
+    executable = executable or sys.executable
+    root = Path(root) if root is not None else (
+        Path('/content') if Path('/content').is_dir() else Path(tempfile.gettempdir()))
+    fingerprint = hashlib.sha256(json.dumps([sys.version_info[:2], notebook_requirements()]).encode()).hexdigest()[:16]
+    folder = root / f'escope-canonical-env-{fingerprint}'
+    python = folder / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+    ready = folder / 'escope-ready.json'
+    environment = isolated_environment()
+    if not ready.is_file():
+        print('Creando entorno independiente. Los paquetes de Colab no se modifican.', flush=True)
+        try:
+            subprocess.check_call([executable, '-I', '-m', 'venv', str(folder)], env=environment,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except subprocess.CalledProcessError:
+            # Some Colab images omit ensurepip; virtualenv seeds its own bundled pip.
+            print('Sin ensurepip: preparando virtualenv privado automaticamente.', flush=True)
+            bootstrap = root / 'escope-virtualenv-bootstrap'
+            subprocess.check_call([executable, '-I', '-m', 'pip', '--isolated', 'install',
+                                   '--disable-pip-version-check', '--quiet', '--ignore-installed', '--target', str(bootstrap),
+                                   '--index-url', 'https://pypi.org/simple', 'virtualenv==20.35.4'], env=environment)
+            code = ('import sys; sys.path.insert(0, ' + repr(str(bootstrap)) + '); '
+                    'from virtualenv import cli_run; cli_run(' +
+                    repr(['--no-download', '--no-periodic-update', str(folder)]) + ')')
+            subprocess.check_call([executable, '-I', '-c', code], env=environment)
+        print('Instalando el stack del notebook en su entorno privado (solo la primera vez).', flush=True)
+        for command in notebook_install_commands(python):
+            subprocess.check_call(command, env=environment)
+    subprocess.check_call([str(python), '-I', '-m', 'pip', '--isolated', 'check'], env=environment)
+    check = (
+        'import json, sys, numpy, pandas, dateutil, scipy, sklearn, pyarrow, matplotlib, cv2, torch; '
+        'assert sys.prefix != sys.base_prefix; '
+        'assert torch.tensor([1.0]).numpy().tolist() == [1.0]; '
+        'print(json.dumps({"python": sys.version.split()[0], "numpy": numpy.__version__, '
+        '"pandas": pandas.__version__, "torch": torch.__version__, "opencv": cv2.__version__}))'
+    )
+    versions = json.loads(subprocess.check_output([str(python), '-I', '-c', check],
+                                                env=environment, text=True))
+    ready.write_text(json.dumps(versions, indent=2))
+    print('Imports y puente PyTorch-NumPy: OK.', versions, flush=True)
+    return python
+
+
+def forward_notebook_output(message):
+    from IPython.display import clear_output, display, update_display
+
+    kind, content = message['header']['msg_type'], message['content']
+    if kind == 'stream':
+        stream = sys.stderr if content['name'] == 'stderr' else sys.stdout
+        stream.write(content['text'])
+        stream.flush()
+    elif kind in ('display_data', 'execute_result', 'update_display_data'):
+        options = {'metadata': content.get('metadata', {}), 'raw': True}
+        display_id = content.get('transient', {}).get('display_id')
+        if display_id:
+            options['display_id'] = display_id
+        publish = update_display if kind == 'update_display_data' and display_id else display
+        publish(content['data'], **options)
+    elif kind == 'clear_output':
+        clear_output(wait=content.get('wait', False))
+    elif kind == 'error':
+        sys.stderr.write('\n'.join(content['traceback']) + '\n')
+
+
+class IsolatedNotebookSession:
+    def __init__(self, python):
+        from jupyter_client import KernelManager
+        from jupyter_client.kernelspec import KernelSpecManager
+
+        python = Path(python)
+        folder = python.parent.parent
+        kernels = folder / 'share/jupyter/kernels'
+        specification = kernels / 'escope-canonical'
+        specification.mkdir(parents=True, exist_ok=True)
+        (specification / 'kernel.json').write_text(json.dumps({
+            'argv': [str(python), '-I', '-m', 'ipykernel_launcher', '-f', '{connection_file}'],
+            'display_name': 'ESCOPE canonical score (isolated)', 'language': 'python'}))
+        environment = isolated_environment()
+        for name, leaf in (('IPYTHONDIR', 'ipython'), ('JUPYTER_CONFIG_DIR', 'jupyter-config'),
+                           ('MPLCONFIGDIR', 'matplotlib')):
+            environment[name] = str(folder / leaf)
+        self.manager = KernelManager(kernel_name='escope-canonical',
+            connection_file=str(folder / f'kernel-{uuid.uuid4().hex}.json'),
+            kernel_spec_manager=KernelSpecManager(kernel_dirs=[str(kernels)], ensure_native_kernel=False))
+        self.client = None
+        try:
+            with (folder / 'kernel.log').open('a') as log:
+                self.manager.start_kernel(env=environment, stdout=log, stderr=subprocess.STDOUT)
+            self.client = self.manager.blocking_client()
+            self.client.start_channels()
+            self.client.wait_for_ready(timeout=120)
+        except BaseException:
+            self.close()
+            raise
+        atexit.register(self.close)
+
+    def execute(self, code, *, timeout=7200, output_hook=None):
+        if not self.manager.is_alive():
+            raise RuntimeError('El proceso de analisis se ha cerrado. Vuelve a ejecutar desde la primera celda.')
+        try:
+            reply = self.client.execute_interactive(code, store_history=False, allow_stdin=False,
+                timeout=timeout, output_hook=forward_notebook_output if output_hook is None else output_hook)
+        except (KeyboardInterrupt, TimeoutError):
+            self.manager.interrupt_kernel()
+            raise
+        content = reply['content']
+        if content['status'] != 'ok':
+            raise RuntimeError(f"La celda aislada fallo: {content.get('ename')}: {content.get('evalue')}")
+        return content
+
+    def close(self):
+        with contextlib.suppress(Exception):
+            if self.client is not None:
+                self.client.stop_channels()
+        with contextlib.suppress(Exception):
+            if self.manager.has_kernel:
+                self.manager.shutdown_kernel(now=True)
+
+
+def prepare_notebook_runtime(root=None, executable=None):
+    previous = globals().get('_escope_session')
+    if previous is not None:
+        previous.close()
+    return IsolatedNotebookSession(create_notebook_environment(root, executable))
+
+
+def _escope_magic(line, cell):
+    if line.strip():
+        raise ValueError('Usa %%escope sin argumentos y escribe el codigo debajo.')
+    _escope_session.execute(cell)
+
+
+_escope_session = prepare_notebook_runtime()
+get_ipython().register_magic_function(_escope_magic, magic_kind='cell', magic_name='escope')
+print('Entorno listo. Continua con la siguiente celda, sin reiniciar la sesion.')
+
+# %% [escope]
+get_ipython().run_line_magic('matplotlib', 'inline')
 from pathlib import Path
 import copy
 import hashlib
@@ -160,6 +234,7 @@ from sklearn.metrics import average_precision_score
 from sklearn.model_selection import StratifiedGroupKFold
 from torch import nn
 from torch.nn import functional as F
+from IPython.display import display
 
 FEATURE_NAMES = ('tangential', 'elongation', 'angular_span', 'radial_coherence', 'contrast')
 INITIAL_REGION_WEIGHTS = (0.30, 0.20, 0.25, 0.15, 0.10)
@@ -263,6 +338,48 @@ def cutout_path(row, base):
     return Path(base) / tile / f'{tile}_{file_id}_gz_arcsinh_vis_only.jpg'
 
 # %% [markdown]
+# ## Prueba tecnica sin datos privados
+# Debe terminar con **PRUEBA TECNICA: OK**. Usa una imagen sintetica, no una
+# lente real: comprueba el detector, los imports, Parquet, PyTorch y los graficos,
+# pero no valida cientificamente el score. No requiere Drive ni GPU.
+
+# %% [escope]
+from tempfile import TemporaryDirectory
+
+with TemporaryDirectory() as smoke_folder:
+    smoke_folder = Path(smoke_folder)
+    smoke_detector = load_detector(smoke_folder / 'detector.py')
+    yy, xx = np.mgrid[:160, :160]
+    smoke_gray = np.clip(15 + 130 * np.exp(-((xx - 80)**2 + (yy - 80)**2) / 162), 0, 255).astype('uint8')
+    smoke_image = cv2.cvtColor(smoke_gray, cv2.COLOR_GRAY2RGB)
+    cv2.ellipse(smoke_image, (80, 80), (42, 42), 0, 20, 130, (225, 225, 225), 3)
+    smoke_result = smoke_detector.analyze_image(smoke_image)
+    assert smoke_result['score'] is not None and smoke_result['accepted']
+    smoke_ids = pd.DataFrame({'object_id': ['2700244936644435563', '-610719047485205149']})
+    smoke_ids.to_parquet(smoke_folder / 'ids.parquet', index=False)
+    assert pd.read_parquet(smoke_folder / 'ids.parquet').equals(smoke_ids)
+    smoke_model = nn.Linear(5, 1)
+    with torch.no_grad():
+        smoke_model.weight.fill_(.1)
+        smoke_model.bias.fill_(.1)
+    smoke_optimizer = torch.optim.SGD(smoke_model.parameters(), lr=.01)
+    smoke_before = smoke_model.weight.detach().clone()
+    smoke_loss = smoke_model(torch.ones(2, 5)).square().mean()
+    smoke_loss.backward()
+    smoke_optimizer.step()
+    assert not torch.equal(smoke_before, smoke_model.weight.detach())
+    assert torch.tensor([1.0]).numpy().tolist() == [1.0]
+    fig, axes = plt.subplots(1, 2, figsize=(7, 3))
+    for ax, image, title in zip(axes, (smoke_image, smoke_result['overlay']),
+                               ('Imagen sintetica', 'Regiones del detector')):
+        ax.imshow(image)
+        ax.set_title(title)
+        ax.axis('off')
+    fig.tight_layout()
+    plt.show()
+print('PRUEBA TECNICA: OK. Imports, detector, Parquet, entrenamiento y graficos.')
+
+# %% [markdown]
 # ## 1. Datos y protocolo fijados antes de mirar resultados
 # En Colab se usa Drive; tambien se pueden cambiar las rutas por copias locales.
 # Todos los grupos usan el mismo JPG morfologico VIS completo, sin reescalar ni
@@ -284,6 +401,7 @@ except ImportError:
 if drive is not None and not os.path.ismount('/content/drive'):
     drive.mount('/content/drive')
 
+# %% [escope]
 ROOT = Path('/content/drive/MyDrive/catalogues')
 MORPH_PATH = ROOT / 'morphology_catalogue/morphology_catalogue.parquet'
 LENS_PATH = ROOT / 'strong_lensing_catalogue/q1_discovery_engine_lens_catalog.csv'
@@ -320,7 +438,7 @@ display(cases.groupby(['grade', 'primary_pool', 'near_control']).size().rename('
 # arcos rechazados o ausentes: esto afina la combinacion, no el segmentador.
 # El cache incluye los bytes, el detector y las versiones de NumPy/OpenCV.
 
-# %%
+# %% [escope]
 def extract_record(rgb, detector_module):
     result = detector_module.analyze_image(rgb)
     record = {key: result.get(key) for key in ('status', 'score', 'pair_agreement', 'quality_flag')}
@@ -446,7 +564,7 @@ print('Faltan/fallan imagenes:', int((~frame['valid_image']).sum()))
 # violar ese supuesto por seleccion visual y contaminacion de las etiquetas.
 # Por ello los resultados son de recuperacion de referencias, no pureza real.
 
-# %%
+# %% [escope]
 class InterpretableScoreNet(nn.Module):
     def __init__(self):
         super().__init__()
@@ -561,7 +679,7 @@ def predict_scores(model, x, mask, geometry, valid):
 # astrofisica**. C se conserva para evaluacion por grado, no se convierte en negativo.
 # Las repeticiones muestran sensibilidad del ajuste, no intervalos de confianza.
 
-# %%
+# %% [escope]
 initial_model = InterpretableScoreNet()
 initial_float = predict_scores(initial_model, region_features, region_mask, pair, frame['valid_image'])
 valid = frame['valid_image'].to_numpy()
@@ -612,7 +730,7 @@ display(candidates)
 # No reutilizar este test para modificar los pesos; una nueva iteracion exige
 # datos externos o una nueva evaluacion reservada declarada de antemano.
 
-# %%
+# %% [escope]
 def grouped_recall_difference(frame, original, learned, groups, positive_grades,
                               fraction, repeats, seed):
     rng = np.random.default_rng(seed)
@@ -675,7 +793,7 @@ pd.DataFrame(redshift_rows).to_csv(OUTPUT_DIR / 'redshift_stratified_retrieval.c
 # semillas antes de trasladar una regla a ESCOPE. Esta version no cambia
 # automaticamente el score desplegado ni demuestra que un peso sea optimo.
 
-# %%
+# %% [escope]
 fig, axes = plt.subplots(1, 2, figsize=(11, 4))
 for ax, level, initial in zip(axes, ('region', 'aggregation'), (INITIAL_REGION_WEIGHTS, INITIAL_POOL_WEIGHTS)):
     chosen = selected_model.weights()[level]
@@ -760,7 +878,7 @@ for object_id in frame.loc[test].sort_values('learned_score', ascending=False).h
 # para estimar pureza poblacional. No convertir cercania ni ausencia de arco
 # evidente en una confirmacion automatica de no-lente.
 
-# %%
+# %% [escope]
 frame.to_csv(OUTPUT_DIR / 'all_predictions.csv', index=False)
 unknown_test = frame[test & frame['grade'].eq('Unknown')]
 audit_random = unknown_test.sample(n=min(50, len(unknown_test)), random_state=SEED)
