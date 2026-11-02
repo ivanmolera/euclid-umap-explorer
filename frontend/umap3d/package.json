@@ -1,0 +1,11 @@
+{
+  "name": "escope-umap3d-build",
+  "private": true,
+  "scripts": {
+    "build": "NODE_PATH=node_modules esbuild ../../euclid_umap_explorer/umap_3d.js --bundle --minify --format=esm --target=es2020 --outfile=../../euclid_umap_explorer/umap_3d.bundle.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.11",
+    "three": "0.180.0"
+  }
+}

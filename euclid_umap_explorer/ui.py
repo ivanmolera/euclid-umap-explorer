@@ -128,6 +128,7 @@ from .umap import (
     compute_semisupervised_umap_embedding,
     compute_umap_embedding,
 )
+from .umap_3d import render_umap_3d
 
 
 def request_umap_computation() -> None:
@@ -159,6 +160,16 @@ def request_subclustering() -> None:
 def request_semisupervised_umap() -> None:
     st.session_state["semisupervised_umap_requested"] = True
     st.session_state["semisupervised_umap_expanded"] = True
+
+
+def request_umap_dimension_change() -> None:
+    if st.session_state.get("umap_signature") is not None:
+        request_umap_computation()
+
+
+def request_semi_dimension_change() -> None:
+    if st.session_state.get("semisupervised_umap_signature") is not None:
+        request_semisupervised_umap()
 
 
 CLUSTER_DERIVED_STATE_KEYS = (
@@ -194,6 +205,8 @@ def clear_selected_cluster_analysis(*, clear_selection: bool) -> None:
     st.session_state["pca_filter_count"] = 0
     # Assign rather than pop so Streamlit also resets the mounted toggle.
     st.session_state["show_object_multivariate"] = False
+    st.session_state["umap_3d"] = False
+    st.session_state["semi_umap_3d"] = False
     if clear_selection:
         st.session_state.pop("analysis_cluster_id", None)
 
@@ -568,18 +581,19 @@ def render_cluster_umap_interaction(
 ) -> None:
     plot_col, detail_col = st.columns([2, 1])
     with plot_col:
-        event = st.plotly_chart(
-            fig,
-            use_container_width=True,
-            config={
-                "displaylogo": False,
-                "scrollZoom": True,
-                "doubleClick": "reset",
-            },
-            on_select="rerun",
-            selection_mode=("points", "box", "lasso"),
-            key="umap_selection",
-        )
+        is_3d = "umap_3" in embedding_df.columns
+        if is_3d:
+            event = render_umap_3d(embedding_df, key="umap_3d_chart",
+                                   signature=st.session_state.get("umap_signature"))
+        else:
+            event = st.plotly_chart(
+                fig,
+                use_container_width=True,
+                config={"displaylogo": False, "scrollZoom": True, "doubleClick": "reset"},
+                on_select="rerun",
+                selection_mode=("points", "box", "lasso"),
+                key="umap_selection",
+            )
 
         selected_indices = selected_point_indices(event)
         umap_source_df = (
@@ -596,13 +610,16 @@ def render_cluster_umap_interaction(
         download_col, help_col = st.columns([1, 2])
         with download_col:
             st.download_button(
-                "Download object selection",
+                "" if is_3d else "Download object selection",
+                icon=":material/download:" if is_3d else None,
+                help="Download object selection" if is_3d else None,
                 data=dataframe_to_csv_bytes(prepared_df),
                 file_name=f"cluster_{selected_cluster}_umap_objects.csv",
                 mime="text/csv",
             )
         with help_col:
-            st.caption("Use box or lasso selection to restrict the export")
+            if not is_3d:
+                st.caption("Use box or lasso selection to restrict the export")
         st.caption(
             f"Downloads {min(len(umap_source_df), DOWNLOAD_MAX_UMAP_ROWS):,} "
             f"of {len(umap_source_df):,} selected or loaded UMAP objects."
@@ -611,7 +628,7 @@ def render_cluster_umap_interaction(
     selected_index = selected_point_index(event)
     selected_row = (
         embedding_df.loc[selected_index]
-        if selected_index is not None
+        if selected_index is not None and selected_index in embedding_df.index
         else None
     )
     with detail_col:
@@ -635,18 +652,20 @@ def render_semisupervised_umap_interaction(
 ) -> None:
     semi_plot_col, semi_detail_col = st.columns([2, 1])
     with semi_plot_col:
-        semi_event = st.plotly_chart(
-            semi_fig,
-            use_container_width=True,
-            config={
-                "displaylogo": False,
-                "scrollZoom": True,
-                "doubleClick": "reset",
-            },
-            on_select="rerun",
-            selection_mode=("points", "box", "lasso"),
-            key="semisupervised_umap_chart",
-        )
+        is_3d = "umap_3" in semi_display_df.columns
+        if is_3d:
+            semi_event = render_umap_3d(semi_display_df, key="semi_umap_3d_chart",
+                                        signature=semi_signature, height=520,
+                                        label_column="semi_supervised_label")
+        else:
+            semi_event = st.plotly_chart(
+                semi_fig,
+                use_container_width=True,
+                config={"displaylogo": False, "scrollZoom": True, "doubleClick": "reset"},
+                on_select="rerun",
+                selection_mode=("points", "box", "lasso"),
+                key="semisupervised_umap_chart",
+            )
 
         semi_selected_indices = selected_point_indices(semi_event)
         semi_source_df = (
@@ -665,7 +684,9 @@ def render_semisupervised_umap_interaction(
         semi_download_col, semi_help_col = st.columns([1, 2])
         with semi_download_col:
             st.download_button(
-                "Download object selection",
+                "" if is_3d else "Download object selection",
+                icon=":material/download:" if is_3d else None,
+                help="Download object selection" if is_3d else None,
                 data=dataframe_to_csv_bytes(prepared_semi_df),
                 file_name=(
                     f"subcluster_{selected_semi_subcluster}_"
@@ -674,7 +695,8 @@ def render_semisupervised_umap_interaction(
                 mime="text/csv",
             )
         with semi_help_col:
-            st.caption("Use box or lasso selection to restrict the export")
+            if not is_3d:
+                st.caption("Use box or lasso selection to restrict the export")
         st.caption(
             f"Downloads {min(len(semi_source_df), DOWNLOAD_MAX_UMAP_ROWS):,} "
             f"of {len(semi_source_df):,} selected or loaded UMAP objects."
@@ -683,7 +705,7 @@ def render_semisupervised_umap_interaction(
     semi_selected_index = selected_point_index(semi_event)
     semi_selected_row = (
         semi_display_df.loc[semi_selected_index]
-        if semi_selected_index is not None
+        if semi_selected_index is not None and semi_selected_index in semi_display_df.index
         else None
     )
     with semi_detail_col:
@@ -1313,6 +1335,10 @@ This analysis uses Euclid Q1 catalogue products available at:
         "UMAP",
         expanded=st.session_state.get("umap_parameters_expanded", True),
     ):
+        n_components = 3 if st.toggle(
+            "3D projection", key="umap_3d", on_change=request_umap_dimension_change,
+            help="Fit a new UMAP in three dimensions. Switching off refits in two dimensions. PCA subclusters are unchanged.",
+        ) else 2
         with st.form("umap_parameters_form"):
             umap_param_cols = st.columns([1, 1, 1])
             with umap_param_cols[0]:
@@ -1354,6 +1380,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 min_dist=min_dist,
                 max_objects=int(max_objects),
                 cluster_params=params,
+                n_components=n_components,
             )
             stored_signature = st.session_state.get("umap_signature")
             needs_recalculation = stored_signature != umap_signature
@@ -1439,6 +1466,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 n_neighbors=int(n_neighbors),
                 min_dist=float(min_dist),
                 max_objects=int(max_objects),
+                n_components=n_components,
             )
 
             if len(display_df) < 3:
@@ -1450,6 +1478,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 selected_features,
                 n_neighbors=n_neighbors,
                 min_dist=min_dist,
+                n_components=n_components,
             )
         except AlgorithmTimeoutError as exc:
             log_app_event(
@@ -1505,7 +1534,7 @@ This analysis uses Euclid Q1 catalogue products available at:
     umap_processing_seconds = embedding_df.attrs.get("processing_seconds")
 
     subclustering_signature = build_subclustering_signature(
-        umap_signature,
+        umap_signature[:-1],  # Ward uses PCA, independently of UMAP dimensionality.
         selected_features,
         n_subclusters,
         max_subcluster_objects,
@@ -1698,6 +1727,10 @@ This analysis uses Euclid Q1 catalogue products available at:
             "Semi-supervised UMAP",
             expanded=st.session_state.get("semisupervised_umap_expanded", False),
         ):
+            semi_components = 3 if st.toggle(
+                "3D projection", key="semi_umap_3d", on_change=request_semi_dimension_change,
+                help="Fit a new semi-supervised UMAP in three dimensions. Switching off refits in two dimensions.",
+            ) else 2
             st.caption(
                 "Supervised labels guide the projection as A=2, B=1, C=0, "
                 "and unknown objects=-1."
@@ -1779,6 +1812,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                 int(semi_n_neighbors),
                 round(float(semi_min_dist), 4),
                 round(float(semi_target_weight), 4),
+                semi_components,
             )
             semi_df = st.session_state.get("semisupervised_umap_df")
             if st.session_state.get("semisupervised_umap_signature") != semi_signature:
@@ -1804,6 +1838,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                         semi_n_neighbors,
                         semi_min_dist,
                         semi_target_weight,
+                        n_components=semi_components,
                     )
                 except AlgorithmTimeoutError as exc:
                     log_app_event(
@@ -1855,6 +1890,8 @@ This analysis uses Euclid Q1 catalogue products available at:
                 semi_display_df["point_index"] = semi_display_df.index
                 semi_display_df["umap_1"] = semi_display_df["semi_umap_1"]
                 semi_display_df["umap_2"] = semi_display_df["semi_umap_2"]
+                if semi_components == 3:
+                    semi_display_df["umap_3"] = semi_display_df["semi_umap_3"]
                 semi_hover_columns = [
                     column
                     for column in (

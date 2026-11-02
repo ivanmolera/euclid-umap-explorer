@@ -2261,6 +2261,7 @@ def show_selected_object_summary(row: pd.Series) -> None:
         "dist_to_cluster_centroid": row.get("dist_to_cluster_centroid", np.nan),
         "umap_1": row.get("umap_1", np.nan),
         "umap_2": row.get("umap_2", np.nan),
+        **({"umap_3": row["umap_3"]} if "umap_3" in row else {}),
     }
     st.dataframe(
         pd.DataFrame([
