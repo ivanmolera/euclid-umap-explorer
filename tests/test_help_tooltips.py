@@ -117,8 +117,8 @@ class HelpTooltipTests(unittest.TestCase):
             "optional multivariate views",
             "original cluster metrics remain unchanged",
             "Default: 2D",
-            "switching 2D/3D refits UMAP, not Ward",
-            "Ward in PCA space",
+            "switching 2D/3D refits UMAP, not hierarchical subclustering",
+            "Optionally apply hierarchical subclustering in PCA space, then semi-supervised UMAP within a subcluster.",
             "semi-supervised UMAP within a subcluster",
             "Select regions in 2D or multiple points in 3D",
             "Scores, enrichment and proximity do not confirm lensing",
@@ -126,6 +126,7 @@ class HelpTooltipTests(unittest.TestCase):
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, flow)
+        self.assertNotIn("Ward", flow)
 
     def test_grades_are_catalogue_metadata_not_an_application_score_cut(self):
         with TemporaryDirectory() as tmp, patch.object(storage, "USE_LOCAL_CACHE", False):

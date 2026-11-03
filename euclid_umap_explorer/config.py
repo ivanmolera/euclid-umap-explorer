@@ -283,8 +283,8 @@ ANALYSIS_FLOW_STEPS = (
     "Select a cluster; inspect cutouts, PCA/physical distributions and optional multivariate views.",
     "Apply PCA/physical filters or label-based recommended cuts; original cluster metrics remain unchanged.",
     "Fit UMAP on selected standardized PCA components, sampling at Maximum objects if needed. "
-    "Default: 2D; switching 2D/3D refits UMAP, not Ward.",
-    "Optionally run Ward in PCA space, then semi-supervised UMAP within a subcluster.",
+    "Default: 2D; switching 2D/3D refits UMAP, not hierarchical subclustering.",
+    "Optionally apply hierarchical subclustering in PCA space, then semi-supervised UMAP within a subcluster.",
     "Select regions in 2D or multiple points in 3D; export selected or loaded objects, "
     f"up to {DOWNLOAD_MAX_UMAP_ROWS:,} rows.",
     "Inspect selected cutouts and Aladin. Scores, enrichment and proximity do not confirm lensing; "
