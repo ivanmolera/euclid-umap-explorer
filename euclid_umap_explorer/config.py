@@ -276,14 +276,17 @@ RECOMMENDED_FILTER_HELP = (
 )
 ANALYSIS_FLOW_STEPS = (
     "Run BIRCH on the chosen catalogue using all 40 standardized PCA components, "
-    "without lens labels. Matching cached results are reused.",
-    "Inspect reference-supported clusters by A+B enrichment, A count and canonical score; "
+    "without labels; reuse matching cached results.",
+    "Automatically compute canonical scores for all clusters (not lens probabilities). "
+    "Prioritize reference-supported clusters by A+B enrichment, A count and canonical score; "
     "then morphology exploration by score. Other clusters remain listed.",
-    "Review cutouts, property distributions and label-based recommended cuts.",
-    "Apply PCA/physical filters to select a subset; original cluster metrics stay unchanged.",
-    "Fit UMAP on selected standardized PCA components, sampling at Maximum objects if needed.",
-    "Optionally run Ward clustering in PCA space, then label-guided UMAP on a subcluster.",
-    "Export selected or loaded UMAP objects (labelled and Unknown), "
+    "Select a cluster; inspect cutouts, PCA/physical distributions and optional multivariate views.",
+    "Apply PCA/physical filters or label-based recommended cuts; original cluster metrics remain unchanged.",
+    "Fit UMAP on selected standardized PCA components, sampling at Maximum objects if needed. "
+    "Default: 2D; switching 2D/3D refits UMAP, not Ward.",
+    "Optionally run Ward in PCA space, then semi-supervised UMAP within a subcluster.",
+    "Select regions in 2D or multiple points in 3D; export selected or loaded objects, "
     f"up to {DOWNLOAD_MAX_UMAP_ROWS:,} rows.",
-    "Inspect cutouts and Aladin positions. Neither enrichment nor map proximity confirms lensing.",
+    "Inspect selected cutouts and Aladin. Scores, enrichment and proximity do not confirm lensing; "
+    "semi-supervised proximity is label-guided.",
 )

@@ -108,6 +108,25 @@ class HelpTooltipTests(unittest.TestCase):
         self.assertIn(f"{config.DOWNLOAD_MAX_UMAP_ROWS:,} rows", markup)
         self.assertNotIn("Export Unknown objects close", markup)
 
+    def test_flow_covers_current_scoring_multivariate_and_projection_workflow(self):
+        self.assertEqual(len(config.ANALYSIS_FLOW_STEPS), 8)
+        flow = " ".join(config.ANALYSIS_FLOW_STEPS)
+        for phrase in (
+            "Automatically compute canonical scores for all clusters",
+            "not lens probabilities",
+            "optional multivariate views",
+            "original cluster metrics remain unchanged",
+            "Default: 2D",
+            "switching 2D/3D refits UMAP, not Ward",
+            "Ward in PCA space",
+            "semi-supervised UMAP within a subcluster",
+            "Select regions in 2D or multiple points in 3D",
+            "Scores, enrichment and proximity do not confirm lensing",
+            "semi-supervised proximity is label-guided",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, flow)
+
     def test_grades_are_catalogue_metadata_not_an_application_score_cut(self):
         with TemporaryDirectory() as tmp, patch.object(storage, "USE_LOCAL_CACHE", False):
             path = Path(tmp) / "lenses.csv"
