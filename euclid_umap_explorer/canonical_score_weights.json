@@ -1,0 +1,20 @@
+{
+  "selected_model": "pi0.01_seed20261033",
+  "weights": {
+    "region": {
+      "tangential": 0.16853350400924683,
+      "elongation": 0.09369231760501862,
+      "angular_span": 0.1661592572927475,
+      "radial_coherence": 0.19052448868751526,
+      "contrast": 0.381090372800827
+    },
+    "aggregation": {
+      "best_region": 0.33515334129333496,
+      "second_region": 0.5778163075447083,
+      "geometry": 0.08703026920557022
+    }
+  },
+  "detector_commit": "d25e4c4feeecf4c369bceb8798882ad4d5b25eef",
+  "detector_sha256": "b45f1d4e8866aa5ad2805ea6205c1a138abf4da3459ecd116b44511a822600a4",
+  "interpretation": "Learned visual ranking index, NOT calibrated lens probability."
+}

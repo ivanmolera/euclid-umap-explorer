@@ -6,10 +6,30 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from euclid_umap_explorer.canonical_cache import CanonicalScoreStore
+from euclid_umap_explorer.lens_plausibility import score_image_bytes as manual_score
 from tests.test_cluster_diagnostics import png, test_images
 
 
 class CanonicalCacheTests(unittest.TestCase):
+    def test_learned_model_does_not_reuse_manual_cache_entries(self):
+        with tempfile.TemporaryDirectory() as folder:
+            image = Path(folder) / "cutout.png"
+            image.write_bytes(png(test_images()[0]))
+            base = str(Path(folder) / "cache")
+            old = CanonicalScoreStore(cache_base=base)
+            old.detector.pop("scoring")
+            with patch("euclid_umap_explorer.canonical_cache.score_image_bytes", side_effect=manual_score):
+                previous, _ = old.score_candidates([str(image)])
+            current = CanonicalScoreStore(cache_base=base)
+            learned, cached = current.score_candidates([str(image)])
+            self.assertFalse(cached)
+            self.assertEqual(learned["manual_score"], previous["score"])
+            self.assertNotEqual(learned["score"], previous["score"])
+            self.assertTrue(current.score_candidates([str(image)])[1])
+            changed = CanonicalScoreStore(cache_base=base)
+            changed.detector["scoring"]["weights_sha256"] = "another-model"
+            self.assertFalse(changed.score_candidates([str(image)])[1])
+
     def test_persistent_cache_source_and_detector_invalidation_and_corruption(self):
         with tempfile.TemporaryDirectory() as folder:
             image = Path(folder) / "cutout.png"

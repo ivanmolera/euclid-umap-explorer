@@ -13,7 +13,8 @@ import numpy as np
 import PIL
 
 from .config import CACHE_DIR
-from .lens_plausibility import DETECTOR_CONFIG, DETECTOR_VERSION, score_image_bytes
+from .lens_plausibility import DETECTOR_CONFIG, DETECTOR_VERSION
+from .canonical_scoring import score_image_bytes, scoring_fingerprint
 from .storage import is_gcs_path
 
 
@@ -26,6 +27,7 @@ DETERMINISTIC_STATUSES = {
 
 def detector_fingerprint():
     return {"version": DETECTOR_VERSION, "config": DETECTOR_CONFIG,
+            "scoring": scoring_fingerprint(),
             "opencv": cv2.__version__, "numpy": np.__version__, "pillow": PIL.__version__}
 
 

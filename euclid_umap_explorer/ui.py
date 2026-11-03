@@ -1205,7 +1205,7 @@ This analysis uses Euclid Q1 catalogue products available at:
                     "Entropy",
                 ),
                 "canonical_score": st.column_config.NumberColumn(
-                    "Canonical score", format="%.0f",
+                    "Canonical score", format="%.1f",
                     help=CANONICAL_SCORE_HELP,
                 ),
             },

@@ -21,6 +21,7 @@ from .components import render_help_label
 from .canonical_scores import CANONICAL_SCORE_HELP, cached_visual_evidence, load_canonical_evidence as _load_canonical_evidence
 from .images import load_image_bytes
 from .lens_plausibility import DETECTOR_CONFIG, DETECTOR_VERSION
+from .canonical_scoring import SCORING_KEY, scoring_fingerprint
 from .runtime import log_app_event
 
 
@@ -101,7 +102,8 @@ def _export_diagnostics(frame, state, *, grades, exclude_canonical, score_thresh
     manifest = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "detector_version": DETECTOR_VERSION, "detector_config": DETECTOR_CONFIG,
-        "score_semantics": "uncalibrated geometric evidence in a morphology JPEG, not P(lens)",
+        "scoring_model": scoring_fingerprint(),
+        "score_semantics": "experimental learned visual index in a morphology JPEG, not P(lens)",
         "scope": scope_label, "group_column": group_column,
         "membership_features_labels_sha256": state["signature"],
         "reference_features_labels_sha256": state["reference_signature"],
@@ -206,7 +208,8 @@ def render_cluster_diagnostics(data, features, *, reference=None, group_column="
     state_key = f"{prefix}_state"
     state = st.session_state.get(state_key)
     if (state is None or state["_data"] is not data or state["_reference"] is not reference
-            or state["features"] != features or state.get("canonical_features") != canonical_features):
+            or state["features"] != features or state.get("canonical_features") != canonical_features
+            or state.get("scoring_key") != SCORING_KEY):
         try:
             with st.spinner("Preparing canonical profiles..."):
                 profiles, canonicals = build_diagnostic_profiles(
@@ -215,6 +218,7 @@ def render_cluster_diagnostics(data, features, *, reference=None, group_column="
                 )
             state = {"_data": data, "_reference": reference, "features": features,
                      "canonical_features": canonical_features,
+                     "scoring_key": SCORING_KEY,
                      "profiles": profiles, "canonicals": canonicals,
                      "signature": diagnostic_signature(data, features, group_column),
                      "reference_signature": diagnostic_signature(reference, features),

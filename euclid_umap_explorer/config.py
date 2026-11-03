@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APP_TITLE_LINE_1 = "Euclid Strong-lensing Candidate Observation"
 APP_TITLE_LINE_2 = "and Projection Explorer"
 APP_TITLE = f"{APP_TITLE_LINE_1} {APP_TITLE_LINE_2}"
-APP_VERSION = "v0.1.31"
+APP_VERSION = "v0.1.32"
 EUCLID_LOGO_PATH = PROJECT_ROOT / "assets" / "euclid_logo.png"
 EUCLID_FAVICON_PATH = PROJECT_ROOT / "assets" / "favicon.png"
 LENS_GRADE_EXAMPLE_PATHS = {
@@ -277,7 +277,7 @@ RECOMMENDED_FILTER_HELP = (
 ANALYSIS_FLOW_STEPS = (
     "Run BIRCH on the chosen catalogue using all 40 standardized PCA components, "
     "without labels; reuse matching cached results.",
-    "Automatically compute canonical scores for all clusters (not lens probabilities). "
+    "Automatically compute canonical scores for all clusters using learned weights (not lens probabilities). "
     "Prioritize reference-supported clusters by A+B enrichment, A count and canonical score; "
     "then morphology exploration by score. Other clusters remain listed.",
     "Select a cluster; inspect cutouts, PCA/physical distributions and optional multivariate views.",

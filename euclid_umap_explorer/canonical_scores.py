@@ -17,18 +17,24 @@ from .cluster_diagnostics import add_canonical_scores
 from .canonical_cache import CanonicalScoreStore, detector_fingerprint
 from .config import MAX_ALGORITHM_SECONDS
 from .images import load_image_bytes, morphology_cutout_candidates, object_image_path
-from .lens_plausibility import DETECTOR_VERSION, score_image_bytes
+from .lens_plausibility import DETECTOR_VERSION
+from .canonical_scoring import (
+    MODEL_NAME, MODEL_SHA256, POOL_WEIGHTS, REGION_WEIGHTS, SCORING_KEY, SCORING_VERSION,
+    score_image_bytes,
+)
 from .runtime import log_app_event
 from .storage import is_gcs_path
 
 
 CANONICAL_SCORE_HELP = (
-    "Uncalibrated geometric evidence (0-100), not P(lens). Bright residual regions "
-    "are scored by tangential alignment (30%), angular extent (25%), elongation (20%), "
-    "radial coherence (15%) and contrast (10%). Total: up to 65 points for the best "
-    "region, 20 for a second and 15 for their geometry. No catalogue labels enter "
-    "the score. Spirals, neighbours, centring, noise and artifacts can affect it. "
-    "A low score does not exclude a lens. The cyan circle is not an Einstein radius."
+    "Experimental learned visual index (0-100), not P(lens). Region weights: "
+    f"contrast {REGION_WEIGHTS['contrast']:.1%}, radial coherence {REGION_WEIGHTS['radial_coherence']:.1%}, "
+    f"tangential alignment {REGION_WEIGHTS['tangential']:.1%}, angular extent {REGION_WEIGHTS['angular_span']:.1%}, "
+    f"elongation {REGION_WEIGHTS['elongation']:.1%}. Final weights: best region {POOL_WEIGHTS['best_region']:.1%}, "
+    f"second {POOL_WEIGHTS['second_region']:.1%}, geometry {POOL_WEIGHTS['geometry']:.1%}. "
+    "Rescores the original detector's top six regions. Fitted using A/B references and Unknowns; "
+    "labels are not inference inputs. Not independently calibrated. A low score does not exclude "
+    "lensing; the cyan circle is not an Einstein radius."
 )
 STATE_KEY = "canonical_preview_scores"
 DETAIL_STATE_KEY = "canonical_image_details"
@@ -46,9 +52,11 @@ def score_canonical_row(store, row):
 
 
 @st.cache_data(show_spinner=False, max_entries=256)
-def cached_visual_evidence(image_bytes: bytes, detector_version: str) -> dict:
+def cached_visual_evidence(image_bytes: bytes, detector_version: str, scoring_key: str) -> dict:
     if detector_version != DETECTOR_VERSION:
         raise ValueError("Detector version mismatch.")
+    if scoring_key != SCORING_KEY:
+        raise ValueError("Canonical scoring model mismatch.")
     return score_image_bytes(image_bytes)
 
 
@@ -59,7 +67,7 @@ def load_canonical_evidence(row):
     image_bytes = load_image_bytes(path)
     with Image.open(BytesIO(image_bytes)) as image:
         mime = Image.MIME.get(image.format, "image/jpeg")
-    return {**cached_visual_evidence(image_bytes, DETECTOR_VERSION),
+    return {**cached_visual_evidence(image_bytes, DETECTOR_VERSION, SCORING_KEY),
             "image_path": path, "image_sha256": hashlib.sha256(image_bytes).hexdigest(),
             "original_bytes": image_bytes, "original_mime": mime}
 
@@ -69,8 +77,9 @@ def ensure_preview_canonical_scores(view_model, data, canonical_features):
     ids = tuple(dict.fromkeys(str(value) for value in view_model["cluster_download_df"].canonical if str(value)))
     features = tuple(canonical_features)
     state = st.session_state.get(STATE_KEY)
+    fingerprint = detector_fingerprint()
     if (state is not None and state["_data"] is data and state["canonical_features"] == features
-            and state["ids"] == ids and state["detector_version"] == DETECTOR_VERSION):
+            and state["ids"] == ids and state.get("detector_fingerprint") == fingerprint):
         return
     rows_by_id = data.set_index(data.object_id.astype(str), drop=False)
     rows = [rows_by_id.loc[object_id] for object_id in ids]
@@ -78,7 +87,7 @@ def ensure_preview_canonical_scores(view_model, data, canonical_features):
     store = CanonicalScoreStore(filesystem=score_filesystem() if any(is_gcs_path(p) for p in candidates) else None)
     evidence = {}
     state = {"_data": data, "canonical_features": features, "ids": ids,
-             "detector_version": DETECTOR_VERSION, "evidence": evidence}
+             "detector_version": DETECTOR_VERSION, "detector_fingerprint": fingerprint, "evidence": evidence}
     st.session_state[STATE_KEY] = state
     st.session_state[DETAIL_STATE_KEY] = {}
     progress = st.progress(0., text=f"Canonical scores: 0 / {len(rows)}")
@@ -118,11 +127,14 @@ def ensure_preview_canonical_scores(view_model, data, canonical_features):
 
 
 def preview_canonical_evidence(row):
-    item = st.session_state.get(STATE_KEY, {}).get("evidence", {}).get(str(row.object_id))
+    state = st.session_state.get(STATE_KEY, {})
+    if state.get("detector_fingerprint") != detector_fingerprint():
+        return None
+    item = state.get("evidence", {}).get(str(row.object_id))
     if item is None:
         return None
     details = st.session_state.setdefault(DETAIL_STATE_KEY, {})
-    key = (str(row.object_id), item.get("image_sha256"))
+    key = (str(row.object_id), item.get("image_sha256"), SCORING_KEY)
     if key not in details:
         try:
             detail = load_canonical_evidence(row)
@@ -138,12 +150,16 @@ def preview_canonical_evidence(row):
 
 def summary_with_preview_scores(summary, data, canonical_features):
     state = st.session_state.get(STATE_KEY, {})
-    matches = state.get("_data") is data and state.get("canonical_features") == tuple(canonical_features)
+    matches = (state.get("_data") is data and state.get("canonical_features") == tuple(canonical_features)
+               and state.get("detector_fingerprint") == detector_fingerprint())
     result = add_canonical_scores(summary, state.get("evidence", {}) if matches else {})
     evidence = state.get("evidence", {}) if matches else {}
     for field in ("image_path", "image_sha256"):
         result[f"canonical_{field}"] = [evidence.get(str(value), {}).get(field, "") for value in result.canonical]
     result["canonical_detector_version"] = DETECTOR_VERSION
+    result["canonical_scoring_version"] = SCORING_VERSION
+    result["canonical_scoring_model"] = MODEL_NAME
+    result["canonical_weights_sha256"] = MODEL_SHA256
     result["canonical_detector_fingerprint"] = json.dumps(detector_fingerprint(), sort_keys=True)
     result["canonical_source_signature"] = [json.dumps(evidence.get(str(value), {}).get("source_signature", {}), sort_keys=True)
                                              for value in result.canonical]
@@ -158,7 +174,7 @@ def summary_with_preview_scores(summary, data, canonical_features):
 
 def canonical_score_label(evidence):
     score = evidence.get("score")
-    return f"{score:.0f} / 100" if score is not None else "N/A"
+    return f"{score:.1f} / 100" if score is not None else "N/A"
 
 
 def score_help_html(label):
@@ -182,11 +198,16 @@ def canonical_detail_html(evidence, fallback_src):
               ("elongation", "Elongation"), ("radius_px", "Radius (px)"), ("radial_cv", "Radial CV"),
               ("contrast_ratio", "Contrast"), ("component_score", "Region score (0-1)")]
     regions = evidence.get("regions", [])
+    if regions and "learned_rank" in regions[0]:
+        fields = [("learned_rank", "Learned rank"), *fields,
+                  ("region_contribution_points", "Contribution (points)")]
     table = ""
     if regions:
         headers = "<th>Region</th>" + "".join(f"<th>{title}</th>" for _, title in fields)
         body = "".join(
-            f"<tr><td>{index}</td>" + "".join(f"<td>{float(region[key]):.3f}</td>" for key, _ in fields) + "</tr>"
+            f"<tr><td>{index}</td>" + "".join(
+                f"<td>{format(float(region[key]), '.0f' if key == 'learned_rank' else '.3f')}</td>"
+                for key, _ in fields) + "</tr>"
             for index, region in enumerate(regions, 1)
         )
         table = f'<div class="canonical-region-table"><table><thead><tr>{headers}</tr></thead><tbody>{body}</tbody></table></div>'

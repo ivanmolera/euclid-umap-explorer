@@ -10,6 +10,36 @@ from euclid_umap_explorer.lens_plausibility import score_image_bytes
 
 
 class CanonicalPreviewScoresTests(unittest.TestCase):
+    def test_scoring_fingerprint_invalidates_session_and_summary(self):
+        data = fixture()
+        profiles, _ = build_diagnostic_profiles(data, FEATURES)
+        model = {"cluster_download_df": profiles}
+        state = {}
+        with patch.object(scores.st, "session_state", state), patch.object(scores, "score_filesystem"), \
+                patch.object(scores, "score_canonical_row", return_value=({"score": 79.7, "status": "exploratory_visual_only"}, False)) as load:
+            scores.ensure_preview_canonical_scores(model, data, FEATURES)
+            summary = scores.summary_with_preview_scores(profiles, data, FEATURES)
+            self.assertEqual(summary.canonical_scoring_model.unique().tolist(), [scores.MODEL_NAME])
+            self.assertEqual(summary.canonical_weights_sha256.unique().tolist(), [scores.MODEL_SHA256])
+            self.assertEqual(summary.canonical_score.tolist(), [79.7] * 4)
+            fingerprint = {**scores.detector_fingerprint(), "scoring": {"version": "changed"}}
+            with patch.object(scores, "detector_fingerprint", return_value=fingerprint):
+                self.assertTrue(scores.summary_with_preview_scores(profiles, data, FEATURES).canonical_score.isna().all())
+                self.assertIsNone(scores.preview_canonical_evidence(data.iloc[0]))
+                scores.ensure_preview_canonical_scores(model, data, FEATURES)
+                self.assertEqual(load.call_count, 8)
+
+    def test_help_and_modal_describe_the_active_learned_model(self):
+        from euclid_umap_explorer.canonical_scoring import score_image_bytes
+
+        for phrase in ("Experimental learned", "38.1%", "57.8%", "A/B references", "not inference inputs", "not P(lens)"):
+            self.assertIn(phrase, scores.CANONICAL_SCORE_HELP)
+        evidence = score_image_bytes(png(test_images()[0]))
+        markup = scores.canonical_detail_html(evidence, "original.jpg")
+        self.assertIn("Learned rank", markup)
+        self.assertIn("Contribution (points)", markup)
+        self.assertEqual(scores.canonical_score_label({"score": 79.7}), "79.7 / 100")
+
     def test_scores_all_clusters_once_and_invalidates_changed_catalogue(self):
         data = pd.concat([fixture(), fixture().assign(object_id=lambda frame: frame.object_id + "1")], ignore_index=True)
         model = {"cluster_download_df": pd.DataFrame({"canonical": data.object_id.iloc[:22]})}
