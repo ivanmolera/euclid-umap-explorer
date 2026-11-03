@@ -268,39 +268,80 @@ def load_detector(destination):
     return module
 
 
-def exact_ids(values):
+def exact_ids(values, source='object_id'):
     if any(isinstance(value, (float, np.floating)) for value in values):
-        raise ValueError('Identificadores float: recargar como texto, sin redondearlos.')
+        raise ValueError(f'{source}: identificadores float; recargar como texto, sin redondearlos.')
     clean = pd.Series(values, dtype='string').str.strip()
-    if clean.isna().any() or not clean.str.fullmatch(r'-?\d+').all():
-        raise ValueError('object_id ausente o no entero exacto.')
+    invalid = clean.isna() | ~clean.str.fullmatch(r'-?\d+', na=False)
+    if invalid.any():
+        examples = clean[invalid].head(5).tolist()
+        raise ValueError(f'{source}: {int(invalid.sum())} IDs ausentes o no enteros exactos; ejemplos: {examples!r}.')
     return clean
 
 
-def load_catalogue(morph_path, lens_path, physical_path=None):
+def load_reference_labels(lens_path, morphology, audit_dir=None):
+    lenses = pd.read_csv(lens_path, dtype={'object_id': 'string', 'id_str': 'string'})
+    total = len(lenses)
+    lenses['grade'] = lenses['grade'].astype('string').str.strip().str.upper()
+    lenses = lenses[lenses['grade'].isin(['A', 'B', 'C'])].copy()
+    original = lenses['object_id'].str.strip().replace('', pd.NA)
+    reference_id_str = (lenses['id_str'].astype('string').str.strip() if 'id_str' in lenses
+                        else pd.Series(pd.NA, index=lenses.index, dtype='string'))
+    # Only a full, exact morphology id_str match can recover a missing ID.
+    by_id_str = reference_id_str.map(morphology.set_index('id_str')['object_id'])
+    missing_before = original.isna()
+    lenses['object_id'] = original.fillna(by_id_str)
+    usable = lenses['object_id'].notna()
+    lenses.loc[usable, 'object_id'] = exact_ids(lenses.loc[usable, 'object_id'], 'CSV de candidatos/object_id')
+    conflict = original.notna() & by_id_str.notna() & original.ne(by_id_str).fillna(False)
+    if conflict.any():
+        raise ValueError('CSV de candidatos: object_id contradice una coincidencia exacta de id_str.')
+    if lenses.loc[usable].groupby('object_id')['grade'].nunique().gt(1).any():
+        raise ValueError('Grados de referencia contradictorios.')
+    recovered = missing_before & usable
+    matched = usable & lenses['object_id'].isin(morphology['object_id'])
+    audit = pd.DataFrame({'csv_row': lenses.index + 2, 'reference_id_str': reference_id_str,
+                          'original_object_id': original, 'resolved_object_id': lenses['object_id'],
+                          'grade': lenses['grade']})
+    audit['status'] = np.where(~usable, 'missing_object_id',
+        np.where(~matched, 'outside_morphology', np.where(recovered, 'matched_id_str', 'matched_object_id')))
+    report = {'input_rows': total, 'abc_rows': len(lenses),
+              'blank_object_id_rows': int(missing_before.sum()),
+              'recovered_from_id_str': int(recovered.sum()),
+              'unresolved_reference_rows': int((~usable).sum()),
+              'outside_morphology_rows': int((usable & ~matched).sum()),
+              'matched_reference_rows': int(matched.sum()),
+              'matched_unique_objects': int(lenses.loc[matched, 'object_id'].nunique()),
+              'matched_objects_by_grade': {str(k): int(v) for k, v in lenses.loc[matched]
+                  .drop_duplicates(['object_id', 'grade'])['grade'].value_counts().items()}}
+    if audit_dir is not None:
+        audit_dir = Path(audit_dir)
+        audit_dir.mkdir(exist_ok=True, parents=True)
+        audit.to_csv(audit_dir / 'reference_catalogue_audit.csv', index=False)
+        (audit_dir / 'reference_catalogue_report.json').write_text(json.dumps(report, indent=2))
+    print('Cruce del catalogo de candidatos:', json.dumps(report), flush=True)
+    return lenses.loc[usable, ['object_id', 'grade']].drop_duplicates(), report
+
+
+def load_catalogue(morph_path, lens_path, physical_path=None, audit_dir=None):
     schema = pq.ParquetFile(morph_path).schema_arrow.names
     columns = ['id_str'] + (['object_id'] if 'object_id' in schema else [])
     columns += [name for name in ('segmentation_area', 'cutout_width_arcsec') if name in schema]
     frame = pd.read_parquet(morph_path, columns=columns)
     frame['id_str'] = frame['id_str'].astype('string').str.strip()
     suffix = frame['id_str'].str.rsplit('_', n=1).str[-1]
-    frame['object_id'] = exact_ids(frame['object_id'] if 'object_id' in frame else suffix)
+    frame['object_id'] = exact_ids(frame['object_id'] if 'object_id' in frame else suffix, 'Parquet morfologico/object_id')
     if not frame['object_id'].eq(suffix).all() or frame['object_id'].duplicated().any():
         raise ValueError('id_str inconsistente o object_id duplicados en morfologia.')
     frame['tile'] = frame['id_str'].str.rsplit('_', n=2).str[-2]
-    lenses = pd.read_csv(lens_path, dtype={'object_id': 'string'})
-    lenses['object_id'] = exact_ids(lenses['object_id'])
-    lenses['grade'] = lenses['grade'].astype('string').str.strip().str.upper()
-    lenses = lenses[lenses['grade'].isin(['A', 'B', 'C'])].copy()
-    if lenses.groupby('object_id')['grade'].nunique().gt(1).any():
-        raise ValueError('Grados de referencia contradictorios.')
-    frame = frame.merge(lenses[['object_id', 'grade']].drop_duplicates(),
+    lenses, reference_report = load_reference_labels(lens_path, frame, audit_dir)
+    frame = frame.merge(lenses,
                         on='object_id', how='left', validate='one_to_one')
     frame['grade'] = frame['grade'].fillna('Unknown')
     frame['valid_phz'] = np.nan
     if physical_path is not None:
         physical = pd.read_parquet(physical_path, columns=['object_id', 'phz_median', 'phz_flags'])
-        physical['object_id'] = exact_ids(physical['object_id'])
+        physical['object_id'] = exact_ids(physical['object_id'], 'Parquet fisico/object_id')
         if physical['object_id'].duplicated().any():
             raise ValueError('Redshifts duplicados: resolver antes de unir.')
         z = pd.to_numeric(physical['phz_median'], errors='coerce')
@@ -308,6 +349,7 @@ def load_catalogue(morph_path, lens_path, physical_path=None):
         physical['valid_phz'] = z.where(np.isfinite(z) & z.ge(0) & flags.eq(0))
         frame = frame.drop(columns='valid_phz').merge(
             physical[['object_id', 'valid_phz']], on='object_id', how='left', validate='one_to_one')
+    frame.attrs['reference_catalogue_report'] = reference_report
     return frame
 
 
@@ -419,7 +461,7 @@ RECALL_FRACTION, BOOTSTRAPS = 0.05, 500
 torch.set_num_threads(1)
 torch.use_deterministic_algorithms(True)
 detector = load_detector(OUTPUT_DIR / 'frozen_lens_plausibility.py')
-catalogue = load_catalogue(MORPH_PATH, LENS_PATH, PHYSICAL_PATH if N_NEAR_CONTROLS else None)
+catalogue = load_catalogue(MORPH_PATH, LENS_PATH, PHYSICAL_PATH if N_NEAR_CONTROLS else None, audit_dir=OUTPUT_DIR)
 cases = sample_cases(catalogue, N_UNKNOWN, N_NEAR_CONTROLS, NEAR_Z_MAX, SEED)
 cases.to_csv(OUTPUT_DIR / 'sample_before_image_loading.csv', index=False)
 display(cases.groupby(['grade', 'primary_pool', 'near_control']).size().rename('objects').reset_index())
@@ -896,6 +938,7 @@ manifest = {
               if path is not None and Path(path).is_file()},
     'selected_model': selected_key, 'positive_grades': POSITIVE_GRADES,
     'unknown_are_negatives': False, 'nearby_are_negatives': False,
+    'reference_catalogue_report': catalogue.attrs['reference_catalogue_report'],
     'near_z_max': NEAR_Z_MAX, 'n_random_unknown': N_UNKNOWN, 'n_extra_near': N_NEAR_CONTROLS,
     'sample_sha256': sha256_file(OUTPUT_DIR / 'sample_and_split.csv'),
     'model_sha256': sha256_file(OUTPUT_DIR / 'selected_weights.pt'),

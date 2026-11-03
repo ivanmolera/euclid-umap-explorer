@@ -237,6 +237,63 @@ class CanonicalLearningNotebookTests(unittest.TestCase):
         self.assertTrue(self.np.isnan(frame.valid_phz.iloc[3]))
         self.assertEqual(frame.valid_phz.iloc[0], .02)
 
+    def test_missing_reference_ids_are_audited_and_only_exact_id_str_can_recover_them(self):
+        pd = self.pd
+        ids = ['2700244936644435563', '-610719047485205149', '1', '2', '3']
+        id_strs = ['Q1_R1_100_' + value for value in ids]
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            pd.DataFrame({'id_str': id_strs, 'object_id': ids}).to_parquet(folder / 'm.parquet')
+            references = pd.DataFrame({
+                'object_id': [None, None, None, '999', '1', '  ', None],
+                'id_str': [id_strs[0], '1', 'SAS_OTF_RELEASE_100_NEG610719047485205149',
+                           'outside', id_strs[2], id_strs[1], id_strs[4]],
+                'grade': ['A', 'B', 'C', 'A', 'C', 'B', 'X'],
+            })
+            references.to_csv(folder / 'l.csv', index=False)
+            before = (folder / 'l.csv').read_bytes()
+            frame = self.nb.load_catalogue(folder / 'm.parquet', folder / 'l.csv', audit_dir=folder)
+            self.assertEqual(before, (folder / 'l.csv').read_bytes())
+            audit = pd.read_csv(folder / 'reference_catalogue_audit.csv', dtype='string')
+            report = json.loads((folder / 'reference_catalogue_report.json').read_text())
+        self.assertEqual(frame.object_id.tolist(), ids)
+        self.assertEqual(frame.grade.tolist(), ['A', 'B', 'C', 'Unknown', 'Unknown'])
+        self.assertEqual(report['input_rows'], 7)
+        self.assertEqual(report['abc_rows'], 6)
+        self.assertEqual(report['blank_object_id_rows'], 4)
+        self.assertEqual(report['recovered_from_id_str'], 2)
+        self.assertEqual(report['unresolved_reference_rows'], 2)
+        self.assertEqual(report['outside_morphology_rows'], 1)
+        self.assertEqual(report['matched_unique_objects'], 3)
+        self.assertEqual(audit.status.tolist(), ['matched_id_str', 'missing_object_id', 'missing_object_id',
+                                               'outside_morphology', 'matched_object_id', 'matched_id_str'])
+        self.assertEqual(audit.csv_row.tolist(), ['2', '3', '4', '5', '6', '7'])
+        self.assertEqual(frame.attrs['reference_catalogue_report'], report)
+
+    def test_invalid_nonempty_reference_ids_and_conflicting_grades_still_fail(self):
+        pd = self.pd
+        morphology = pd.DataFrame({'id_str': ['Q1_R1_100_2700244936644435563'],
+                                   'object_id': ['2700244936644435563']})
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'l.csv'
+            for bad in ('2.7002449366444356e18', '2700244936644435563.0', 'broken'):
+                pd.DataFrame({'object_id': [bad], 'grade': ['A']}).to_csv(path, index=False)
+                with self.assertRaisesRegex(ValueError, 'CSV de candidatos/object_id'):
+                    self.nb.load_reference_labels(path, morphology)
+            pd.DataFrame({'object_id': ['2700244936644435563'] * 2,
+                          'grade': ['A', 'B']}).to_csv(path, index=False)
+            with self.assertRaisesRegex(ValueError, 'Grados de referencia contradictorios'):
+                self.nb.load_reference_labels(path, morphology)
+
+    def test_explicit_reference_id_must_agree_with_an_exact_id_str_match(self):
+        pd = self.pd
+        morphology = pd.DataFrame({'id_str': ['Q1_R1_100_1', 'Q1_R1_100_2'], 'object_id': ['1', '2']})
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'l.csv'
+            pd.DataFrame({'object_id': ['1'], 'id_str': ['Q1_R1_100_2'], 'grade': ['A']}).to_csv(path, index=False)
+            with self.assertRaisesRegex(ValueError, 'contradice una coincidencia exacta'):
+                self.nb.load_reference_labels(path, morphology)
+
     def test_nearby_controls_are_audit_only_and_c_are_not_unknown(self):
         frame = self.pd.DataFrame({'object_id': [str(i) for i in range(200)],
                                   'grade': ['A', 'B', 'C'] + ['Unknown'] * 197,

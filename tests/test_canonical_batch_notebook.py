@@ -52,6 +52,7 @@ class BatchNotebookTests(unittest.TestCase):
             self.assertNotIn('%%escope', source)
         self.assertIn('subprocess.Popen', code_cells()[0])
         self.assertIn('PACKAGES_BEFORE', code_cells()[0])
+        self.assertIn('un fallo de datos no requiere reiniciar Colab', code_cells()[0])
         self.assertIn('packages_unchanged', sources[len(code_cells())])
 
     def test_bundle_is_self_contained_and_detector_is_frozen(self):
@@ -134,7 +135,8 @@ class BatchOfflineIntegrationTests(unittest.TestCase):
         output = self.demo
         expected = ('manifest.json', 'all_predictions.csv', 'heldout_reference_metrics.csv',
                     'selected_weights.pt', 'selected_weights.json', 'region_measurements.csv',
-                    'manual_vs_learned_weights.png', 'blind_visual_audit.csv')
+                    'manual_vs_learned_weights.png', 'blind_visual_audit.csv',
+                    'reference_catalogue_audit.csv', 'reference_catalogue_report.json')
         for filename in expected:
             self.assertTrue((output / filename).is_file(), filename)
         manifest = json.loads((output / 'manifest.json').read_text())
@@ -149,13 +151,29 @@ class BatchOfflineIntegrationTests(unittest.TestCase):
             self.assertGreater((output / 'report' / row['path']).stat().st_size, 100)
 
     def test_real_data_code_path_on_fixture_with_no_physical_catalogue(self):
+        import pandas as pd
         data = self.demo / 'synthetic_data'
+        references = pd.read_csv(data / 'strong_lensing_catalogue/q1_discovery_engine_lens_catalog.csv',
+                                 dtype={'object_id': 'string'})
+        morphology = pd.read_parquet(data / 'morphology_catalogue/morphology_catalogue.parquet')
+        references = references.merge(morphology[['object_id', 'id_str']], on='object_id', how='left')
+        references.loc[0, 'object_id'] = pd.NA
+        references = pd.concat([references, pd.DataFrame({'object_id': [None, None],
+            'id_str': ['12345', 'SAS_OTF_RELEASE_100_NEG99999'], 'grade': ['A', 'C']})], ignore_index=True)
+        lens_path = self.root / 'reference_with_missing_ids.csv'
+        references.to_csv(lens_path, index=False)
         output = self.execute_worker('real', {'root': str(data), 'n_unknown': 120, 'n_near': 0,
+                                             'lens_path': str(lens_path),
                                              'physical_path': str(data / 'not-needed.parquet'),
                                              'priors': [.005], 'fit_seeds': [20261031],
                                              'epochs': 10, 'bootstraps': 20})
         manifest = json.loads((output / 'manifest.json').read_text())
         self.assertEqual(manifest['n_extra_near'], 0)
+        report = manifest['reference_catalogue_report']
+        self.assertEqual(report['blank_object_id_rows'], 3)
+        self.assertEqual(report['recovered_from_id_str'], 1)
+        self.assertEqual(report['unresolved_reference_rows'], 2)
+        self.assertEqual(report['matched_unique_objects'], 240)
         self.assertFalse(json.loads((output / 'result.json').read_text())['synthetic_only'])
 
     def test_missing_data_error_is_persisted_without_installing_anything(self):

@@ -116,7 +116,7 @@ def run_experiment(mode, config=None, output=None):
         raise RuntimeError(f'El proceso termino sin resultado (codigo {{returncode}}). Ver {{output / "execution.log"}}')
     result = json.loads(result_file.read_text())
     if returncode or result['status'] != 'ok':
-        print('No se ha instalado ni reparado ningun paquete. Si fallan imports, usa un entorno Colab nuevo.')
+        print('No se han cambiado librerias. Revisa el error y execution.log; un fallo de datos no requiere reiniciar Colab.')
         raise RuntimeError(result.get('error', 'Error del proceso') + f'\\nLog: {{output / "execution.log"}}')
     report = output / 'report'
     for entry in json.loads((report / 'index.json').read_text()):
@@ -136,6 +136,8 @@ print('Ejecutor listo. Python:', sys.version.split()[0])
 Tras completar la demostracion, cambia `RUN_REAL_DATA` a `True`, revisa las rutas y ejecuta las secciones 4-5. Se necesitan el Parquet morfologico (`id_str`, y `object_id` si existe), el CSV de candidatos (`object_id`, `grade`) y los JPG VIS completos. Cada JPG debe estar en `<cutout_base>/<tile>/<tile>_<object_id>_gz_arcsinh_vis_only.jpg`; para IDs negativos, el nombre usa `NEG` en lugar del signo menos. No se necesitan embeddings ni GPU.
 
 Por defecto no se exige el Parquet de propiedades fisicas. Para incluir controles cercanos, indica `physical_path` y aumenta `n_near`; debe contener `object_id`, `phz_median`, `phz_flags`. Esos controles son solo de auditoria. Los Unknown y los objetos cercanos **no son negativos confirmados**.
+
+El CSV de candidatos puede tener filas sin `object_id`. Solo se recuperan cuando su `id_str` coincide exactamente con el catalogo morfologico; las restantes quedan fuera del cruce y se registran en `reference_catalogue_audit.csv`. `reference_catalogue_report.json` resume la cobertura. No se convierten otros identificadores ni se redondean IDs, y no se modifica el CSV original.
 
 La red ajusta cinco pesos de regiones y tres de agregacion; no aprende a segmentar nuevos arcos. A/B son referencias positivas, C se evalua aparte y Unknown se trata mediante aprendizaje positivo-no etiquetado. Se mantienen el detector fijo, la separacion por tiles/imagenes duplicadas y la seleccion en validacion antes del test. Los priors son hipotesis, no prevalencias medidas. El resultado es un indice de evidencia visual, **no una probabilidad calibrada de lente**.
 ''')
