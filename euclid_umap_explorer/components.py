@@ -2533,13 +2533,15 @@ def render_euclid_object_search(object_id: str) -> None:
     mosaic_summary = result["mosaic_summary"]
 
     with st.container(border=True):
+        for warning in result.get("warnings", []):
+            st.warning(warning)
         ra_degrees = float(object_summary["right_ascension"])
         dec_degrees = float(object_summary["declination"])
         metric_cols = st.columns([2.4, 1, 1, 1])
         metric_cols[0].metric("object_id", str(result["object_id"]))
         metric_cols[1].metric("RA", f"{ra_degrees:.6f}")
         metric_cols[2].metric("Dec", f"{dec_degrees:.6f}")
-        metric_cols[3].metric("Tile", str(mosaic_summary.get("tile_index", "")))
+        metric_cols[3].metric("Tile", str(result.get("tile_index") or mosaic_summary.get("tile_index", "")))
 
         image_col, summary_col = st.columns([1, 1])
         with image_col:
@@ -2586,10 +2588,13 @@ def render_euclid_object_search(object_id: str) -> None:
         catalogue_col, physical_col = st.columns([1, 1])
         with catalogue_col:
             st.markdown("**Mosaic summary**")
-            mosaic_display = pd.DataFrame(
-                [{"field": field, "value": value} for field, value in mosaic_summary.items()]
-            )
-            st.dataframe(mosaic_display, use_container_width=True, hide_index=True)
+            if mosaic_summary:
+                mosaic_display = pd.DataFrame(
+                    [{"field": field, "value": value} for field, value in mosaic_summary.items()]
+                )
+                st.dataframe(mosaic_display, use_container_width=True, hide_index=True)
+            else:
+                st.info("No live mosaic metadata is available.")
 
             st.markdown("**Morphology catalogue features**")
             if morphology_df.empty:

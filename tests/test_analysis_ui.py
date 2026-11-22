@@ -8,6 +8,7 @@ import pandas as pd
 from streamlit.testing.v1 import AppTest
 
 from euclid_umap_explorer import components, ui
+from euclid_umap_explorer.euclid_search import EuclidArchiveError
 from euclid_umap_explorer.subclustering import _compute_hierarchical_subclusters_impl
 
 
@@ -338,6 +339,58 @@ render_euclid_object_search('-625302350493849139')
         self.assertEqual(render_table.call_args_list[2].kwargs["height"], components.OBJECT_DETAIL_TABLE_HEIGHT)
         self.assertEqual(render_table.call_args_list[3].kwargs["height"], "stretch")
         self.assertIn("flux_detection_total", set(app.dataframe[3].value["field"]))
+
+    def test_object_search_renders_catalogue_fallback_without_live_mosaic(self):
+        object_id = "-608794490472715426"
+        app = AppTest.from_string(f"""
+from euclid_umap_explorer.components import render_euclid_object_search
+render_euclid_object_search({object_id!r})
+""")
+        app.session_state["euclid_search_result"] = {
+            "requested_object_id": object_id,
+            "result": {
+                "object_id": object_id,
+                "object_summary": {
+                    "object_id": object_id, "right_ascension": 60.879449,
+                    "declination": -47.271543, "data_source": "ESCOPE Q1 morphology catalogue",
+                },
+                "mosaic_summary": {}, "tile_index": "102021984",
+                "cutout_path": "/original.jpg",
+                "warnings": ["Live Euclid archive data could not be retrieved."],
+            },
+            "morphology_df": pd.DataFrame(), "physical_df": pd.DataFrame(),
+            "lens_candidate_summary": {},
+        }
+        with patch.object(components, "show_detectable_image") as image:
+            app.run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.metric[3].value, "102021984")
+        self.assertEqual(len(app.warning), 1)
+        self.assertTrue(any("No live mosaic metadata" in item.value for item in app.info))
+        self.assertTrue(any("data_source" in table.value["field"].values for table in app.dataframe))
+        image.assert_called_once()
+
+    def test_main_handles_archive_outage_as_a_warning_without_traceback(self):
+        app = AppTest.from_string("from euclid_umap_explorer.ui import main\nmain()")
+        app.session_state["euclid_search_object_id"] = "-608794490472715426"
+        with patch.object(ui, "path_exists", return_value=True):
+            with patch.object(ui, "render_euclid_object_search",
+                              side_effect=EuclidArchiveError("Archive unavailable; try again later.")):
+                app.run(timeout=30)
+        self.assertFalse(app.exception)
+        self.assertFalse(app.error)
+        self.assertTrue(any("Archive unavailable" in item.value for item in app.warning))
+
+    def test_explicit_search_clears_cached_result_to_allow_retry(self):
+        app = AppTest.from_string("from euclid_umap_explorer.ui import main\nmain()")
+        app.session_state["euclid_search_result"] = {"result": {"warnings": ["Archive unavailable"]}}
+        with patch.object(ui, "path_exists", return_value=True):
+            with patch.object(ui, "render_euclid_object_search"):
+                app.run(timeout=30)
+                app.text_input(key="object_id_search_value").set_value("-608794490472715426").run(timeout=30)
+                next(button for button in app.button if button.label == "Search").click().run(timeout=30)
+        self.assertFalse(app.exception)
+        self.assertNotIn("euclid_search_result", app.session_state)
 
     def test_object_search_keeps_aladin_without_cutout_or_morphology(self):
         object_id = "-610719047485205149"

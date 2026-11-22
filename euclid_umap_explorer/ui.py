@@ -98,7 +98,7 @@ from .downloads import (
     selected_point_indices,
     umap_download_df,
 )
-from .euclid_search import is_valid_search_object_id, selected_point_index
+from .euclid_search import EuclidArchiveError, is_valid_search_object_id, selected_point_index
 from .cluster_graph_ui import render_morphology_graph
 from .canonical_scores import (CANONICAL_SCORE_HELP, STATE_KEY as CANONICAL_STATE_KEY,
                                ensure_preview_canonical_scores, summary_with_preview_scores)
@@ -790,6 +790,7 @@ def main() -> None:
     )
     if search_submitted:
         st.session_state["euclid_search_object_id"] = search_object_id
+        st.session_state.pop("euclid_search_result", None)
 
     with st.sidebar:
         st.markdown(
@@ -909,7 +910,7 @@ This analysis uses Euclid Q1 catalogue products available at:
     if searched_object_id:
         try:
             render_euclid_object_search(searched_object_id)
-        except ValueError as exc:
+        except (ValueError, EuclidArchiveError) as exc:
             log_app_event("object_search_failed", error_type=type(exc).__name__)
             st.warning(str(exc))
         except ImportError as exc:
