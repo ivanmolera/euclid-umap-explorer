@@ -29,7 +29,7 @@ class EuclidSearchTests(unittest.TestCase):
                     "astroquery.esa.euclid": SimpleNamespace(Euclid=euclid),
                 }):
                     with self.assertRaises(search.EuclidArchiveError):
-                        search.query_archive("SELECT object_id FROM catalogue.mer_catalogue")
+                        search.query_archive("SELECT object_id FROM q1.mer_catalogue")
 
     def test_query_wraps_launch_and_result_failures(self):
         for euclid in (
@@ -53,6 +53,16 @@ class EuclidSearchTests(unittest.TestCase):
             "astroquery.esa.euclid": SimpleNamespace(Euclid=euclid),
         }):
             self.assertIs(search.query_archive("SELECT 1"), table)
+
+    def test_object_query_uses_current_q1_schema_and_exact_identifier(self):
+        with patch.object(search, "query_archive", side_effect=search.EuclidArchiveError("unavailable")) as query:
+            with patch.object(search, "morphology_search_fallback", return_value=None):
+                with self.assertRaises(search.EuclidArchiveError):
+                    search.fetch_euclid_object_summary(OBJECT_ID)
+        query.assert_called_once()
+        self.assertIn("FROM q1.mer_catalogue", query.call_args.args[0])
+        self.assertNotIn("catalogue.mer_catalogue", query.call_args.args[0])
+        self.assertIn(f"WHERE object_id = {OBJECT_ID}", query.call_args.args[0])
 
     def test_failed_archive_uses_exact_catalogue_record_and_original_cutout(self):
         with patch.object(search, "query_archive", side_effect=search.EuclidArchiveError("HTTP 500")) as query:
@@ -97,7 +107,7 @@ class EuclidSearchTests(unittest.TestCase):
     def test_absent_object_with_successful_empty_query_is_reported_as_not_found(self):
         with patch.object(search, "query_archive", return_value=Table(names=["object_id"])):
             with patch.object(search, "load_morphology_object", return_value=pd.DataFrame()):
-                with self.assertRaisesRegex(ValueError, "was not found"):
+                with self.assertRaisesRegex(ValueError, "was not found in q1.mer_catalogue"):
                     search.fetch_euclid_object_summary(OBJECT_ID)
 
     def test_mosaic_failures_do_not_hide_object_or_existing_cutout(self):
@@ -127,13 +137,15 @@ class EuclidSearchTests(unittest.TestCase):
             "file_name": ["vis.fits"], "file_path": ["/q1"],
             "tile_index": [102021984], "instrument_name": ["VIS"],
         })
-        with patch.object(search, "query_archive", side_effect=[objects, mosaics]):
+        with patch.object(search, "query_archive", side_effect=[objects, mosaics]) as query:
             with patch.object(search, "morphology_cutout_path", return_value="/original.jpg"):
                 with patch.object(search, "load_morphology_object") as load:
                     result = search.fetch_euclid_object_summary(OBJECT_ID)
         self.assertEqual(result["file_path"], "/q1/vis.fits")
         self.assertEqual(result["warnings"], [])
         self.assertEqual(result["tile_index"], "102021984")
+        self.assertIn("FROM q1.mer_catalogue", query.call_args_list[0].args[0])
+        self.assertIn("FROM q1.mosaic_product", query.call_args_list[1].args[0])
         load.assert_not_called()
 
     def test_fallback_rejects_missing_or_invalid_coordinates(self):

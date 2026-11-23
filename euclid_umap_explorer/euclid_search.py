@@ -127,7 +127,7 @@ SELECT
     flux_vis_sersic,
     vis_det,
     det_quality_flag
-FROM catalogue.mer_catalogue
+FROM q1.mer_catalogue
 WHERE object_id = {normalized_object_id}
 """
 
@@ -155,7 +155,7 @@ WHERE object_id = {normalized_object_id}
                 "The Euclid archive is unavailable and no usable Q1 morphology record "
                 "was found for this object_id. Please try again later."
             ) from archive_error
-        raise ValueError(f"object_id {normalized_object_id} was not found in catalogue.mer_catalogue "
+        raise ValueError(f"object_id {normalized_object_id} was not found in q1.mer_catalogue "
                          "or the Q1 morphology catalogue.")
 
     object_row = object_result[0]
