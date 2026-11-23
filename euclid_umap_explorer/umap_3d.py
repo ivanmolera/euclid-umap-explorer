@@ -53,18 +53,17 @@ def _selection_changed():
     pass
 
 
-def render_umap_3d(data, *, key, signature, height=680, label_column="umap_point_label"):
+def render_umap_3d(
+    data, *, key, signature, height=680, label_column="umap_point_label",
+    selection_generation=0,
+):
     token = hashlib.sha256(repr(signature).encode()).hexdigest()[:16]
     chart_key = f"{key}_{token}"
     reset_key = f"{chart_key}_reset"
     with st.container(horizontal=True, gap="small"):
         if st.button("", icon=":material/restart_alt:", help="Reset 3D camera", key=f"{chart_key}_camera"):
             st.session_state[reset_key] = st.session_state.get(reset_key, 0) + 1
-        clear = st.button("", icon=":material/deselect:", help="Clear object selection", key=f"{chart_key}_clear")
     generation = st.session_state.get(reset_key, 0)
-    if clear:
-        st.session_state[f"{chart_key}_selection_generation"] = st.session_state.get(f"{chart_key}_selection_generation", 0) + 1
-    selection_generation = st.session_state.get(f"{chart_key}_selection_generation", 0)
     widget_key = f"{chart_key}_{selection_generation}"
     previous = st.session_state.get(widget_key, {}).get("selection", {"points": []})
     payload = build_3d_payload(data, label_column=label_column,

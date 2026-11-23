@@ -129,6 +129,7 @@ from .umap import (
     compute_umap_embedding,
 )
 from .umap_3d import render_umap_3d
+from .umap_selection_highlight import render_umap_2d_selection_highlight
 
 
 def request_umap_computation() -> None:
@@ -172,6 +173,17 @@ def request_semi_dimension_change() -> None:
         request_semisupervised_umap()
 
 
+def clear_umap_selection(key: str) -> None:
+    # A new chart identity clears Streamlit's read-only selection on the next render.
+    generation_key = f"{key}_generation"
+    st.session_state[generation_key] = st.session_state.get(generation_key, 0) + 1
+
+
+def umap_selection_widget_key(key: str, signature: object) -> str:
+    token = hashlib.sha256(repr(signature).encode()).hexdigest()[:16]
+    return f"{key}_{token}_{st.session_state.get(f'{key}_generation', 0)}"
+
+
 CLUSTER_DERIVED_STATE_KEYS = (
     "umap_requested",
     "umap_running",
@@ -193,6 +205,8 @@ CLUSTER_DERIVED_STATE_KEYS = (
     "pending_recommended_physical_filter",
     "umap_chart",
     "semisupervised_umap_chart",
+    "umap_selection_generation",
+    "semisupervised_umap_chart_generation",
 )
 
 
@@ -582,9 +596,13 @@ def render_cluster_umap_interaction(
     plot_col, detail_col = st.columns([2, 1])
     with plot_col:
         is_3d = "umap_3" in embedding_df.columns
+        signature = st.session_state.get("umap_signature")
+        chart_key = umap_selection_widget_key("umap_selection", signature)
         if is_3d:
-            event = render_umap_3d(embedding_df, key="umap_3d_chart",
-                                   signature=st.session_state.get("umap_signature"))
+            event = render_umap_3d(
+                embedding_df, key="umap_3d_chart", signature=signature,
+                selection_generation=st.session_state.get("umap_selection_generation", 0),
+            )
         else:
             event = st.plotly_chart(
                 fig,
@@ -592,9 +610,17 @@ def render_cluster_umap_interaction(
                 config={"displaylogo": False, "scrollZoom": True, "doubleClick": "reset"},
                 on_select="rerun",
                 selection_mode=("points", "box", "lasso"),
-                key="umap_selection",
+                key=chart_key,
             )
 
+        selected_index = selected_point_index(event)
+        selected_row = (
+            embedding_df.loc[selected_index]
+            if selected_index is not None and selected_index in embedding_df.index
+            else None
+        )
+        if not is_3d:
+            render_umap_2d_selection_highlight(chart_key, selected_row, namespace="umap")
         selected_indices = selected_point_indices(event)
         umap_source_df = (
             embedding_df.loc[embedding_df.index.intersection(selected_indices)]
@@ -607,8 +633,7 @@ def render_cluster_umap_interaction(
             selected_indices,
             physical_df=physical_df,
         )
-        download_col, help_col = st.columns([1, 2])
-        with download_col:
+        with st.container(horizontal=True, gap="small", vertical_alignment="center"):
             st.download_button(
                 "" if is_3d else "Download object selection",
                 icon=":material/download:" if is_3d else None,
@@ -617,20 +642,18 @@ def render_cluster_umap_interaction(
                 file_name=f"cluster_{selected_cluster}_umap_objects.csv",
                 mime="text/csv",
             )
-        with help_col:
-            if not is_3d:
-                st.caption("Use box or lasso selection to restrict the export")
+            st.button(
+                "Clear selection", icon=":material/deselect:",
+                key="clear_umap_selection", disabled=not selected_indices,
+                on_click=clear_umap_selection, args=("umap_selection",),
+            )
+        if not is_3d:
+            st.caption("Use box or lasso selection to restrict the export")
         st.caption(
             f"Downloads {min(len(umap_source_df), DOWNLOAD_MAX_UMAP_ROWS):,} "
             f"of {len(umap_source_df):,} selected or loaded UMAP objects."
         )
 
-    selected_index = selected_point_index(event)
-    selected_row = (
-        embedding_df.loc[selected_index]
-        if selected_index is not None and selected_index in embedding_df.index
-        else None
-    )
     with detail_col:
         if selected_row is None:
             st.info("Select a point on the map to view its details and image.")
@@ -653,10 +676,13 @@ def render_semisupervised_umap_interaction(
     semi_plot_col, semi_detail_col = st.columns([2, 1])
     with semi_plot_col:
         is_3d = "umap_3" in semi_display_df.columns
+        chart_key = umap_selection_widget_key("semisupervised_umap_chart", semi_signature)
         if is_3d:
-            semi_event = render_umap_3d(semi_display_df, key="semi_umap_3d_chart",
-                                        signature=semi_signature, height=520,
-                                        label_column="semi_supervised_label")
+            semi_event = render_umap_3d(
+                semi_display_df, key="semi_umap_3d_chart", signature=semi_signature,
+                height=520, label_column="semi_supervised_label",
+                selection_generation=st.session_state.get("semisupervised_umap_chart_generation", 0),
+            )
         else:
             semi_event = st.plotly_chart(
                 semi_fig,
@@ -664,9 +690,19 @@ def render_semisupervised_umap_interaction(
                 config={"displaylogo": False, "scrollZoom": True, "doubleClick": "reset"},
                 on_select="rerun",
                 selection_mode=("points", "box", "lasso"),
-                key="semisupervised_umap_chart",
+                key=chart_key,
             )
 
+        semi_selected_index = selected_point_index(semi_event)
+        semi_selected_row = (
+            semi_display_df.loc[semi_selected_index]
+            if semi_selected_index is not None and semi_selected_index in semi_display_df.index
+            else None
+        )
+        if not is_3d:
+            render_umap_2d_selection_highlight(
+                chart_key, semi_selected_row, namespace="semisupervised_umap",
+            )
         semi_selected_indices = selected_point_indices(semi_event)
         semi_source_df = (
             semi_display_df.loc[
@@ -681,8 +717,7 @@ def render_semisupervised_umap_interaction(
             semi_selected_indices,
             physical_df=physical_df,
         )
-        semi_download_col, semi_help_col = st.columns([1, 2])
-        with semi_download_col:
+        with st.container(horizontal=True, gap="small", vertical_alignment="center"):
             st.download_button(
                 "" if is_3d else "Download object selection",
                 icon=":material/download:" if is_3d else None,
@@ -694,20 +729,18 @@ def render_semisupervised_umap_interaction(
                 ),
                 mime="text/csv",
             )
-        with semi_help_col:
-            if not is_3d:
-                st.caption("Use box or lasso selection to restrict the export")
+            st.button(
+                "Clear selection", icon=":material/deselect:",
+                key="clear_semisupervised_umap_selection", disabled=not semi_selected_indices,
+                on_click=clear_umap_selection, args=("semisupervised_umap_chart",),
+            )
+        if not is_3d:
+            st.caption("Use box or lasso selection to restrict the export")
         st.caption(
             f"Downloads {min(len(semi_source_df), DOWNLOAD_MAX_UMAP_ROWS):,} "
             f"of {len(semi_source_df):,} selected or loaded UMAP objects."
         )
 
-    semi_selected_index = selected_point_index(semi_event)
-    semi_selected_row = (
-        semi_display_df.loc[semi_selected_index]
-        if semi_selected_index is not None and semi_selected_index in semi_display_df.index
-        else None
-    )
     with semi_detail_col:
         if semi_selected_row is None:
             st.info("Select a point on the map to view its details and image.")
