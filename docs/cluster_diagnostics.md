@@ -8,11 +8,13 @@ unevaluable images stay blank in the summary and show N/A in the preview.
 
 Clicking a canonical opens the existing cutout modal with the original and
 annotated images, contributing-region measurements, score contributions and a
-help tooltip. The ID copy control and Aladin link are preserved. Other cutout
-modals are unchanged. Scores are reused on reruns and modal opening; changing
+help tooltip. The ID copy control and Aladin link are preserved. The on-demand
+`Score` button uses the same analysis for object search and UMAP selections.
+Scores are reused on reruns and modal opening; changing
 the catalogue or representative PCA selection selects the corresponding scores.
 Compact results are persisted by cutout generation (or local file size/mtime),
-detector configuration/version and OpenCV/NumPy/Pillow versions. GCS results live
+detector and scoring fingerprints and OpenCV/NumPy/Pillow versions. A score
+from a previous model is not reused under the new rules. GCS results live
 under `analysis_cache/canonical_scores/v1/` in the cutout bucket; override with
 `EUCLID_CANONICAL_CACHE_BASE`. Eight workers load and score without accessing
 Streamlit state. Only 32 visible-preview image details are retained per session.
@@ -57,14 +59,28 @@ score is distinguishable from an unscored or unevaluable image.
 
 ## Image Score
 
-The fixed detector is ported from the visual-evidence cell of
+The frozen segmentation is ported from the visual-evidence cell of
 `notebooks/escope_lens_plausibility_review_colab.ipynb`. It uses the original
 morphology JPEG, not a resized thumbnail or the reference-catalogue RGB image.
 It normalizes contrast, estimates a centre, thresholds positive residuals in an
 annulus and measures tangential alignment, elongation, angular extent, radial
 coherence and contrast. Long border lines are masked as possible artifacts.
-The score combines the best region (up to 65), a second region (up to 20) and
-multi-region geometry (up to 15). No catalogue labels enter this calculation.
+The active `curve-aware-visual-evidence-1` model measures the region radius
+as the median distance of its pixels from the estimated centre. It can
+recover a coherent, tangential arc whose centroid is inside the inner radius.
+Extended arc-like regions must also have a consistent radius to avoid
+boosting wide, straight tangential streaks.
+For ring-like regions it checks occupied and contiguous 10-degree sectors
+(out of 36), radial coherence and contrast without an elongation requirement.
+The full rules and source hash are included in the scoring fingerprint.
+
+Arc-like regions retain the learned per-feature weights; the ring branch and
+aggregation are explicit heuristics, not a newly fitted model. Up to six
+regions are ranked by their component scores. The best region can contribute
+up to 80 points, the second up to 15 and agreement between arc-like regions
+up to 5. This allows a single strong arc to score highly. No catalogue labels
+are used at inference. The earlier learned model remains available for
+comparison in `canonical_scoring.py`.
 
 The 0-100 result is **uncalibrated geometric evidence, not a lens probability**.
 It is not Cheng et al.'s manual assumed-probability classification, nor a
@@ -74,8 +90,10 @@ a false positive, and a low score does not exclude a lens. Missing, undersized
 or insufficient-contrast images are not evaluable, rather than scored as zero.
 
 The detail view preserves the original cutout next to a separate annotated copy:
-red regions and numbers, a yellow estimated centre, a cyan median marked radius,
-and orange excluded lines. The cyan circle is **not an Einstein-radius estimate**.
+red regions and numbers, a yellow estimated centre and a cyan circle at the
+median pixel radius of the top-scoring region. Excluded border lines are drawn with a
+thick orange stroke; orange only appears in the legend if lines were excluded.
+The cyan circle is **not an Einstein-radius estimate**.
 Region measurements and score contributions are included for inspection.
 
 ## Groups and Sampling

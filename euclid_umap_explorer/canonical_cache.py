@@ -14,7 +14,7 @@ import PIL
 
 from .config import CACHE_DIR
 from .lens_plausibility import DETECTOR_CONFIG, DETECTOR_VERSION
-from .canonical_scoring import score_image_bytes, scoring_fingerprint
+from .morphology_scoring import score_image_bytes, scoring_fingerprint
 from .storage import is_gcs_path
 
 

@@ -113,7 +113,7 @@ class HelpTooltipTests(unittest.TestCase):
         flow = " ".join(config.ANALYSIS_FLOW_STEPS)
         for phrase in (
             "Automatically compute canonical scores for all clusters",
-            "using learned weights",
+            "from arc-like and ring-like evidence",
             "not lens probabilities",
             "optional multivariate views",
             "original cluster metrics remain unchanged",

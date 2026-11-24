@@ -6,28 +6,29 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from euclid_umap_explorer.canonical_cache import CanonicalScoreStore
-from euclid_umap_explorer.lens_plausibility import score_image_bytes as manual_score
+from euclid_umap_explorer import canonical_scoring as legacy, morphology_scoring
 from tests.test_cluster_diagnostics import png, test_images
 
 
 class CanonicalCacheTests(unittest.TestCase):
-    def test_learned_model_does_not_reuse_manual_cache_entries(self):
+    def test_curve_aware_model_does_not_reuse_legacy_learned_scores(self):
         with tempfile.TemporaryDirectory() as folder:
             image = Path(folder) / "cutout.png"
             image.write_bytes(png(test_images()[0]))
             base = str(Path(folder) / "cache")
             old = CanonicalScoreStore(cache_base=base)
-            old.detector.pop("scoring")
-            with patch("euclid_umap_explorer.canonical_cache.score_image_bytes", side_effect=manual_score):
+            old.detector["scoring"] = legacy.scoring_fingerprint()
+            with patch("euclid_umap_explorer.canonical_cache.score_image_bytes", side_effect=legacy.score_image_bytes):
                 previous, _ = old.score_candidates([str(image)])
             current = CanonicalScoreStore(cache_base=base)
-            learned, cached = current.score_candidates([str(image)])
+            updated, cached = current.score_candidates([str(image)])
             self.assertFalse(cached)
-            self.assertEqual(learned["manual_score"], previous["score"])
-            self.assertNotEqual(learned["score"], previous["score"])
+            self.assertEqual(previous["scoring_model"], legacy.scoring_fingerprint())
+            self.assertEqual(updated["scoring_model"], morphology_scoring.scoring_fingerprint())
+            self.assertNotEqual(updated["score"], previous["score"])
             self.assertTrue(current.score_candidates([str(image)])[1])
             changed = CanonicalScoreStore(cache_base=base)
-            changed.detector["scoring"]["weights_sha256"] = "another-model"
+            changed.detector["scoring"]["rules_sha256"] = "changed-rules"
             self.assertFalse(changed.score_candidates([str(image)])[1])
 
     def test_persistent_cache_source_and_detector_invalidation_and_corruption(self):

@@ -8,7 +8,7 @@ from streamlit.testing.v1 import AppTest
 
 from euclid_umap_explorer import canonical_scores as scores
 from euclid_umap_explorer import components
-from euclid_umap_explorer.canonical_scoring import score_image_bytes as learned_score
+from euclid_umap_explorer.morphology_scoring import score_image_bytes as active_score
 from tests.test_cluster_diagnostics import FEATURES, fixture, png, test_images
 from euclid_umap_explorer.cluster_diagnostics import build_diagnostic_profiles
 from euclid_umap_explorer.lens_plausibility import score_image_bytes
@@ -34,15 +34,15 @@ class CanonicalPreviewScoresTests(unittest.TestCase):
                 scores.ensure_preview_canonical_scores(model, data, FEATURES)
                 self.assertEqual(load.call_count, 8)
 
-    def test_help_and_modal_describe_the_active_learned_model(self):
-        from euclid_umap_explorer.canonical_scoring import score_image_bytes
-
-        for phrase in ("Experimental learned", "38.1%", "57.8%", "A/B references", "not inference inputs", "not P(lens)"):
+    def test_help_and_modal_describe_the_active_curve_aware_model(self):
+        for phrase in ("learned feature weights", "80%", "15%", "5%", "Ring-like", "median pixel distance", "not P(lens)"):
             self.assertIn(phrase, scores.CANONICAL_SCORE_HELP)
-        evidence = score_image_bytes(png(test_images()[0]))
+        evidence = active_score(png(test_images()[0]))
         markup = scores.canonical_detail_html(evidence, "original.jpg")
-        self.assertIn("Learned rank", markup)
+        self.assertIn("Shape", markup)
+        self.assertIn("Median radius (px)", markup)
         self.assertIn("Contribution (points)", markup)
+        self.assertNotIn("Orange: excluded border lines.", markup)
         self.assertEqual(scores.canonical_score_label({"score": 79.7}), "79.7 / 100")
 
     def test_scores_all_clusters_once_and_invalidates_changed_catalogue(self):
@@ -120,10 +120,10 @@ show_detectable_image(
                 self.assertFalse(app.exception)
                 load.assert_called_once_with(str(path))
             detail = next(element.proto.body for element in app.get("html") if 'class="canonical-analysis"' in element.proto.body)
-            value = learned_score(image)["score"]
+            value = active_score(image)["score"]
             self.assertIn(f"Score: {value:.1f} / 100", detail)
             self.assertNotIn("Canonical score:", detail)
-            for expected in ("Original cutout", "Annotated cutout", "Learned rank",
+            for expected in ("Original cutout", "Annotated cutout", "Arc-like",
                              "Contribution (points)", "Multi-region geometry", "not P(lens)"):
                 self.assertIn(expected, detail)
             self.assertNotIn(scores.STATE_KEY, app.session_state)

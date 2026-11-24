@@ -18,10 +18,13 @@ from .cluster_diagnostics import (
     read_validation_labels, select_diagnostic_cohort,
 )
 from .components import render_help_label
-from .canonical_scores import CANONICAL_SCORE_HELP, cached_visual_evidence, load_canonical_evidence as _load_canonical_evidence
+from .canonical_scores import (
+    CANONICAL_SCORE_HELP, cached_visual_evidence, load_canonical_evidence as _load_canonical_evidence,
+    score_overlay_legend,
+)
 from .images import load_image_bytes
 from .lens_plausibility import DETECTOR_CONFIG, DETECTOR_VERSION
-from .canonical_scoring import SCORING_KEY, scoring_fingerprint
+from .morphology_scoring import SCORING_KEY, scoring_fingerprint
 from .runtime import log_app_event
 
 
@@ -167,7 +170,8 @@ def _render_detail(frame, evidence, prefix):
         score_label = f"Visual evidence: {item['score']:.0f} / 100" if item.get("score") is not None else "Visual evidence"
         render_help_label(score_label, SCORE_HELP)
         st.image(item.get("overlay_png", image_bytes), width="stretch")
-    st.caption("Red: contributing regions. Yellow: assumed centre. Cyan: median marked radius. Orange: excluded border lines.")
+    if item.get("overlay_png"):
+        st.caption(score_overlay_legend(item))
     if row.score_status != "exploratory_visual_only":
         st.info(f"Not scored: {row.score_status.replace('_', ' ')}.")
     if item.get("quality_flag"):

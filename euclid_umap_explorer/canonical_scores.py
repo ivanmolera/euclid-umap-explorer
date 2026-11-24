@@ -18,8 +18,8 @@ from .canonical_cache import CanonicalScoreStore, detector_fingerprint
 from .config import MAX_ALGORITHM_SECONDS
 from .images import load_image_bytes, morphology_cutout_candidates, object_image_path
 from .lens_plausibility import DETECTOR_VERSION
-from .canonical_scoring import (
-    MODEL_NAME, MODEL_SHA256, POOL_WEIGHTS, REGION_WEIGHTS, SCORING_KEY, SCORING_VERSION,
+from .morphology_scoring import (
+    MODEL_NAME, MODEL_SHA256, POOL_WEIGHTS, SCORING_KEY, SCORING_VERSION,
     score_image_bytes,
 )
 from .runtime import log_app_event
@@ -27,14 +27,13 @@ from .storage import is_gcs_path
 
 
 CANONICAL_SCORE_HELP = (
-    "Experimental learned visual index (0-100), not P(lens). Region weights: "
-    f"contrast {REGION_WEIGHTS['contrast']:.1%}, radial coherence {REGION_WEIGHTS['radial_coherence']:.1%}, "
-    f"tangential alignment {REGION_WEIGHTS['tangential']:.1%}, angular extent {REGION_WEIGHTS['angular_span']:.1%}, "
-    f"elongation {REGION_WEIGHTS['elongation']:.1%}. Final weights: best region {POOL_WEIGHTS['best_region']:.1%}, "
-    f"second {POOL_WEIGHTS['second_region']:.1%}, geometry {POOL_WEIGHTS['geometry']:.1%}. "
-    "Rescores the original detector's top six regions. Fitted using A/B references and Unknowns; "
-    "labels are not inference inputs. Not independently calibrated. A low score does not exclude "
-    "lensing; the cyan circle is not an Einstein radius."
+    "Experimental visual index (0-100), not P(lens). Arc-like regions use learned feature weights "
+    "for shape, contrast and radial coherence. Ring-like regions use continuous angular coverage "
+    "at a consistent radius, without requiring elongation. Radius is the median pixel distance "
+    "from the estimated centre. Final score: "
+    f"{POOL_WEIGHTS['best_region']:.0%} best region, {POOL_WEIGHTS['second_region']:.0%} second region, "
+    f"{POOL_WEIGHTS['multi_region_geometry']:.0%} arc-pair geometry. "
+    "A low score does not exclude lensing; the cyan circle is not an Einstein radius."
 )
 STATE_KEY = "canonical_preview_scores"
 DETAIL_STATE_KEY = "canonical_image_details"
@@ -225,6 +224,15 @@ def score_help_html(label):
             f'<span class="concept-popover">{html.escape(CANONICAL_SCORE_HELP)}</span></span>')
 
 
+def score_overlay_legend(evidence):
+    parts = ["Yellow: estimated centre."]
+    if evidence.get("regions"):
+        parts = ["Red: scored regions.", *parts, "Cyan: median radius of the top-scoring region."]
+    if evidence.get("artifact_lines"):
+        parts.append("Orange: excluded border lines.")
+    return " ".join(parts)
+
+
 def canonical_detail_html(evidence, fallback_src, *, score_title="Canonical score"):
     def source(content, mime):
         return f"data:{mime};base64,{base64.b64encode(content).decode()}"
@@ -244,12 +252,22 @@ def canonical_detail_html(evidence, fallback_src, *, score_title="Canonical scor
     if regions and "learned_rank" in regions[0]:
         fields = [("learned_rank", "Learned rank"), *fields,
                   ("region_contribution_points", "Contribution (points)")]
+    elif regions and "shape" in regions[0]:
+        fields = [("shape", "Shape"), ("angular_coverage_deg", "Coverage (deg)"), *fields,
+                  ("region_contribution_points", "Contribution (points)")]
+        fields = [(key, "Median radius (px)" if key == "radius_px" else title) for key, title in fields]
+
+    def format_region_value(region, key):
+        if key == "shape":
+            return html.escape(region[key])
+        return format(float(region[key]), ".0f" if key in ("learned_rank", "angular_coverage_deg") else ".3f")
+
     table = ""
     if regions:
         headers = "<th>Region</th>" + "".join(f"<th>{title}</th>" for _, title in fields)
         body = "".join(
             f"<tr><td>{index}</td>" + "".join(
-                f"<td>{format(float(region[key]), '.0f' if key == 'learned_rank' else '.3f')}</td>"
+                f"<td>{format_region_value(region, key)}</td>"
                 for key, _ in fields) + "</tr>"
             for index, region in enumerate(regions, 1)
         )
@@ -268,8 +286,7 @@ def canonical_detail_html(evidence, fallback_src, *, score_title="Canonical scor
     if evidence.get("score") is None:
         status = f'<p class="canonical-note">Not evaluable: {html.escape(evidence.get("status", "unavailable").replace("_", " "))}.</p>'
     legend = (
-        '<p class="canonical-note">Red: contributing regions. Yellow: assumed centre. '
-        'Cyan: median marked radius. Orange: excluded border lines.</p>'
+        f'<p class="canonical-note">{score_overlay_legend(evidence)}</p>'
         if annotated else ""
     )
     return (

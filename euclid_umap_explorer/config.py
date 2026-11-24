@@ -277,7 +277,7 @@ RECOMMENDED_FILTER_HELP = (
 ANALYSIS_FLOW_STEPS = (
     "Run BIRCH on the chosen catalogue using all 40 standardized PCA components, "
     "without labels; reuse matching cached results.",
-    "Automatically compute canonical scores for all clusters using learned weights (not lens probabilities). "
+    "Automatically compute canonical scores for all clusters from arc-like and ring-like evidence (not lens probabilities). "
     "Prioritize reference-supported clusters by A+B enrichment, A count and canonical score; "
     "then morphology exploration by score. Other clusters remain listed.",
     "Select a cluster; inspect cutouts, PCA/physical distributions and optional multivariate views.",
