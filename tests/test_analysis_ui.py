@@ -303,6 +303,8 @@ else:
                 self.assertEqual(summary["cluster"], "506")
                 self.assertEqual(summary["umap_1"], "2.5")
                 image.assert_called_once()
+                self.assertEqual(image.call_args.kwargs["score_object_id"], "-625302350493849139")
+                self.assertIn("umap", image.call_args.args[2])
 
     def test_object_search_aligns_mosaic_and_physical_in_a_separate_row(self):
         app = AppTest.from_string("""
@@ -369,6 +371,7 @@ render_euclid_object_search({object_id!r})
         self.assertTrue(any("No live mosaic metadata" in item.value for item in app.info))
         self.assertTrue(any("data_source" in table.value["field"].values for table in app.dataframe))
         image.assert_called_once()
+        self.assertEqual(image.call_args.kwargs["score_object_id"], object_id)
 
     def test_main_handles_archive_outage_as_a_warning_without_traceback(self):
         app = AppTest.from_string("from euclid_umap_explorer.ui import main\nmain()")
@@ -444,6 +447,7 @@ render_euclid_object_search({object_id!r})
                     self.assertTrue(links[0].proto.allow_html)
                     self.assertTrue(any("No precomputed JPEG" in info.value for info in app.info))
                     self.assertEqual(app.metric[0].value, object_id)
+                    self.assertFalse(any(button.label == "Score" for button in app.button))
                     image.assert_not_called()
                     if cached:
                         fetch.assert_not_called()

@@ -39,6 +39,45 @@ CANONICAL_SCORE_HELP = (
 STATE_KEY = "canonical_preview_scores"
 DETAIL_STATE_KEY = "canonical_image_details"
 
+SCORE_DETAIL_CSS = """
+.canonical-analysis .score-detail-label {
+    font-size: 0.9rem;
+    margin-bottom: 0.45rem;
+}
+.canonical-image-pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+.canonical-image-pair figure { margin: 0; min-width: 0; }
+.canonical-image-pair figcaption {
+    font-size: 0.85rem;
+    margin-bottom: 0.35rem;
+}
+.canonical-image-pair img { display: block; width: 100%; height: auto; }
+.canonical-note {
+    font-size: 0.78rem;
+    line-height: 1.4;
+    margin: 0.75rem 0;
+    opacity: 0.82;
+}
+.canonical-region-table { overflow-x: auto; max-width: 100%; }
+.canonical-region-table table {
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    width: 100%;
+}
+.canonical-region-table th, .canonical-region-table td {
+    border: 1px solid var(--score-table-border, var(--border-color, #7f88936b));
+    padding: 0.35rem 0.5rem;
+    text-align: right;
+    white-space: nowrap;
+}
+@media (max-width: 640px) {
+    .canonical-image-pair { grid-template-columns: minmax(0, 1fr); }
+}
+"""
+
 
 @st.cache_resource(show_spinner=False)
 def score_filesystem():
@@ -64,6 +103,10 @@ def load_canonical_evidence(row):
     path = object_image_path(row)
     if path is None:
         return {"status": "missing_cutout", "score": None}
+    return load_cutout_evidence(path)
+
+
+def load_cutout_evidence(path: str) -> dict:
     image_bytes = load_image_bytes(path)
     with Image.open(BytesIO(image_bytes)) as image:
         mime = Image.MIME.get(image.format, "image/jpeg")
@@ -182,14 +225,14 @@ def score_help_html(label):
             f'<span class="concept-popover">{html.escape(CANONICAL_SCORE_HELP)}</span></span>')
 
 
-def canonical_detail_html(evidence, fallback_src):
+def canonical_detail_html(evidence, fallback_src, *, score_title="Canonical score"):
     def source(content, mime):
         return f"data:{mime};base64,{base64.b64encode(content).decode()}"
 
     original = (source(evidence["original_bytes"], evidence.get("original_mime", "image/jpeg"))
                 if evidence.get("original_bytes") else fallback_src)
-    annotated = source(evidence["overlay_png"], "image/png") if evidence.get("overlay_png") else original
-    label = score_help_html(f"Canonical score: {canonical_score_label(evidence)}")
+    annotated = source(evidence["overlay_png"], "image/png") if evidence.get("overlay_png") else None
+    label = score_help_html(f"{score_title}: {canonical_score_label(evidence)}")
     image_pair = "".join(
         f'<figure><figcaption>{title}</figcaption><img src="{html.escape(src or "")}" alt="{title}" /></figure>'
         for title, src in (("Original cutout", original), ("Annotated cutout", annotated)) if src
@@ -224,10 +267,13 @@ def canonical_detail_html(evidence, fallback_src):
     status = ""
     if evidence.get("score") is None:
         status = f'<p class="canonical-note">Not evaluable: {html.escape(evidence.get("status", "unavailable").replace("_", " "))}.</p>'
-    return (
-        f'<div class="canonical-analysis"><div class="thumb-modal-meta">{label}</div>{status}'
-        f'<div class="canonical-image-pair">{image_pair}</div>'
+    legend = (
         '<p class="canonical-note">Red: contributing regions. Yellow: assumed centre. '
         'Cyan: median marked radius. Orange: excluded border lines.</p>'
-        f'{table}{contributions}</div>'
+        if annotated else ""
+    )
+    return (
+        f'<style>{SCORE_DETAIL_CSS}</style>'
+        f'<div class="canonical-analysis"><div class="score-detail-label">{label}</div>{status}'
+        f'<div class="canonical-image-pair">{image_pair}</div>{legend}{table}{contributions}</div>'
     )

@@ -26,7 +26,13 @@ from .catalogs import (
     load_physical_measurement_object,
     normalize_object_ids,
 )
-from .canonical_scores import canonical_detail_html, canonical_score_label, preview_canonical_evidence, score_help_html
+from .canonical_scores import (
+    canonical_detail_html,
+    canonical_score_label,
+    load_cutout_evidence,
+    preview_canonical_evidence,
+    score_help_html,
+)
 from .config import (
     ANALYSIS_FLOW_STEPS,
     CLUSTER_EXTREME_HELP,
@@ -922,42 +928,9 @@ def show_thumbnail(
             width: min(400px, calc(100vw - 6rem - 2px));
         }}
         #{modal_id} .canonical-analysis {{
+            --score-table-border: #343943;
+            color: #f8fafc;
             width: min(900px, calc(100vw - 6rem - 2px));
-        }}
-        #{modal_id} .canonical-image-pair {{
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 0.75rem;
-        }}
-        #{modal_id} .canonical-image-pair figure {{ margin: 0; min-width: 0; }}
-        #{modal_id} .canonical-image-pair figcaption {{
-            color: #f8fafc;
-            font-size: 0.85rem;
-            margin-bottom: 0.35rem;
-        }}
-        #{modal_id} .canonical-image-pair img {{ display: block; width: 100%; height: auto; }}
-        #{modal_id} .canonical-note {{
-            color: #cbd5e1;
-            font-size: 0.78rem;
-            line-height: 1.4;
-            margin: 0.75rem 0;
-        }}
-        #{modal_id} .canonical-region-table {{ overflow-x: auto; max-width: 100%; }}
-        #{modal_id} .canonical-region-table table {{
-            border-collapse: collapse;
-            color: #f8fafc;
-            font-size: 0.78rem;
-            width: 100%;
-        }}
-        #{modal_id} .canonical-region-table th,
-        #{modal_id} .canonical-region-table td {{
-            border: 1px solid #343943;
-            padding: 0.35rem 0.5rem;
-            text-align: right;
-            white-space: nowrap;
-        }}
-        @media (max-width: 640px) {{
-            #{modal_id} .canonical-image-pair {{ grid-template-columns: minmax(0, 1fr); }}
         }}
         .thumb-link img {{
             cursor: pointer;
@@ -2152,12 +2125,49 @@ def show_lens_status(row: pd.Series) -> None:
     )
 
 
+@st.dialog("Morphology analysis", width="large")
+def show_morphology_score(path: str, object_id: str, fallback_src: str) -> None:
+    st.markdown(f"Object ID: `{object_id}`")
+    try:
+        with st.spinner("Analysing morphology..."):
+            evidence = load_cutout_evidence(path)
+    except Exception as exc:
+        log_app_event("object_morphology_score_failed", error_type=type(exc).__name__)
+        evidence = {"status": "image analysis failed", "score": None}
+    st.html(canonical_detail_html(evidence, fallback_src, score_title="Score"))
+
+
+def render_cutout_score_actions(
+    caption: str, caption_html: str | None, *, path: str, image_src: str, object_id: str, key: str
+) -> None:
+    with st.container(horizontal=True, horizontal_alignment="center", vertical_alignment="center", gap="small"):
+        content = caption_html or f'<span style="opacity:0.65">{html.escape(caption)}</span>'
+        st.html(f'<div style="font-size:0.875rem">{content}</div>', width="content")
+        clicked = st.button(
+            "Score", icon=":material/biotech:", help="Analyse morphology",
+            key=f"{key}_morphology_score_{object_id}", width="content",
+        )
+    if clicked:
+        show_morphology_score(path, object_id, image_src)
+
+
 def show_detectable_image(
     path: str,
     caption: str,
     label: str,
     caption_markdown: str | None = None,
+    *,
+    score_object_id: str | None = None,
 ) -> None:
+    def render_caption(image_caption: str, image_src: str, *, active: bool = False) -> None:
+        if score_object_id is None:
+            render_image_caption(image_caption, caption_markdown if not active else None)
+        else:
+            render_cutout_score_actions(
+                image_caption, caption_markdown, path=path, image_src=image_src,
+                object_id=score_object_id, key=label,
+            )
+
     if not ENABLE_ARC_LIKE_STRUCTURE_DETECTION:
         try:
             image_src = display_image_src(path)
@@ -2165,7 +2175,7 @@ def show_detectable_image(
             st.warning(f"Could not open the image: {exc}")
             return
         render_image_src(image_src, caption)
-        render_image_caption(caption, caption_markdown)
+        render_caption(caption, image_src)
         return
 
     key_digest = hashlib.sha1(str(path).encode("utf-8")).hexdigest()[:12]
@@ -2191,7 +2201,7 @@ def show_detectable_image(
         image_caption = caption
 
     render_image_src(image_src, image_caption)
-    render_image_caption(image_caption, caption_markdown if not active else None)
+    render_caption(image_caption, image_src, active=active)
 
     button_label = "Show original image" if active else "Detect arc-like structures"
     if st.button(button_label, key=button_key, type="secondary"):
@@ -2213,6 +2223,7 @@ def selected_umap_cutout_path(row: pd.Series) -> str | None:
 
 
 def show_object_details(row: pd.Series, *, key: str) -> None:
+    object_id = str(row.get("object_id", ""))
     st.subheader("Selected object")
     with st.container(key=f"{key}_object_id"):
         label_col, value_col = st.columns(
@@ -2221,11 +2232,11 @@ def show_object_details(row: pd.Series, *, key: str) -> None:
         with label_col:
             st.markdown("**Object ID**")
         with value_col:
-            st.code(str(row.get("object_id", "")), language=None, wrap_lines=True)
+            st.code(object_id, language=None, wrap_lines=True)
     show_lens_status(row)
     if ENABLE_SLED_CHECK and not bool(row.get("is_lens", False)):
-        ra, dec = object_sky_coordinates(str(row.get("object_id", "")))
-        render_sled_check(str(row.get("object_id", "")), ra, dec, key=key)
+        ra, dec = object_sky_coordinates(object_id)
+        render_sled_check(object_id, ra, dec, key=key)
 
     cutout_path = selected_umap_cutout_path(row)
     lens_path = lens_image_path(row.get("lens_id_str"))
@@ -2239,11 +2250,9 @@ def show_object_details(row: pd.Series, *, key: str) -> None:
             show_detectable_image(
                 cutout_path,
                 "Morphology cutout",
-                "selected_morphology",
-                caption_markdown=aladin_caption_for_object(
-                    "Morphology cutout",
-                    row.get("object_id", ""),
-                ),
+                f"{key}_selected_morphology",
+                caption_markdown=aladin_caption_for_object("Morphology cutout", object_id),
+                score_object_id=object_id,
             )
         if lens_path is not None:
             show_detectable_image(lens_path, "Strong-lens image", "selected_lens")
@@ -2556,6 +2565,7 @@ def render_euclid_object_search(object_id: str) -> None:
                     "Euclid VIS cutout",
                     "search_cutout",
                     caption_markdown=aladin_caption("Euclid VIS cutout", ra_degrees, dec_degrees),
+                    score_object_id=str(result["object_id"]),
                 )
             else:
                 st.info(

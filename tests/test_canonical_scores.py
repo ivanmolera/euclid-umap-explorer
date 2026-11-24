@@ -1,9 +1,14 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import pandas as pd
+from streamlit.testing.v1 import AppTest
 
 from euclid_umap_explorer import canonical_scores as scores
+from euclid_umap_explorer import components
+from euclid_umap_explorer.canonical_scoring import score_image_bytes as learned_score
 from tests.test_cluster_diagnostics import FEATURES, fixture, png, test_images
 from euclid_umap_explorer.cluster_diagnostics import build_diagnostic_profiles
 from euclid_umap_explorer.lens_plausibility import score_image_bytes
@@ -90,6 +95,46 @@ class CanonicalPreviewScoresTests(unittest.TestCase):
         missing = scores.canonical_detail_html({"score": None, "status": "insufficient_contrast"}, "original.jpg")
         self.assertIn("Canonical score: N/A", missing)
         self.assertIn("insufficient contrast", missing)
+        self.assertNotIn("Annotated cutout", missing)
+
+    def test_selected_cutout_opens_score_dialog_only_on_request(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "original.png"
+            image = png(test_images()[0])
+            path.write_bytes(image)
+            app = AppTest.from_string(f"""
+from euclid_umap_explorer.components import aladin_caption, show_detectable_image
+show_detectable_image(
+    {str(path)!r}, "Morphology cutout", "test_cutout",
+    caption_markdown=aladin_caption("Morphology cutout", 12.5, -4.0),
+    score_object_id="-604185454503177752",
+)
+""")
+            with patch.object(components, "ENABLE_ARC_LIKE_STRUCTURE_DETECTION", False), \
+                    patch.object(components, "load_cutout_evidence", wraps=scores.load_cutout_evidence) as load:
+                app.run()
+                self.assertFalse(app.exception)
+                load.assert_not_called()
+                self.assertTrue(any("View in Aladin" in element.proto.body for element in app.get("html")))
+                app.button(key="test_cutout_morphology_score_-604185454503177752").click().run()
+                self.assertFalse(app.exception)
+                load.assert_called_once_with(str(path))
+            detail = next(element.proto.body for element in app.get("html") if 'class="canonical-analysis"' in element.proto.body)
+            value = learned_score(image)["score"]
+            self.assertIn(f"Score: {value:.1f} / 100", detail)
+            self.assertNotIn("Canonical score:", detail)
+            for expected in ("Original cutout", "Annotated cutout", "Learned rank",
+                             "Contribution (points)", "Multi-region geometry", "not P(lens)"):
+                self.assertIn(expected, detail)
+            self.assertNotIn(scores.STATE_KEY, app.session_state)
+
+            with patch.object(components, "load_cutout_evidence", side_effect=OSError("unreadable")):
+                app.button(key="test_cutout_morphology_score_-604185454503177752").click().run()
+            self.assertFalse(app.exception)
+            detail = next(element.proto.body for element in app.get("html") if 'class="canonical-analysis"' in element.proto.body)
+            self.assertIn("Score: N/A", detail)
+            self.assertIn("image analysis failed", detail)
+            self.assertNotIn("Annotated cutout", detail)
 
     def test_thumbnail_adds_diagnostics_only_for_the_canonical_and_preserves_controls(self):
         from euclid_umap_explorer import components

@@ -191,10 +191,11 @@ def render_image_src(image_src: str, caption: str) -> None:
                 alt="{html.escape(caption)}"
                 style="
                     display: block;
-                    height: {DISPLAY_IMAGE_RENDER_SIZE_PX}px;
+                    aspect-ratio: 1;
+                    height: auto;
                     margin: 0 auto;
                     object-fit: contain;
-                    width: {DISPLAY_IMAGE_RENDER_SIZE_PX}px;
+                    width: min({DISPLAY_IMAGE_RENDER_SIZE_PX}px, 100%);
                 "
             />
         </div>
