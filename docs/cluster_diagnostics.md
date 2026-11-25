@@ -65,7 +65,7 @@ morphology JPEG, not a resized thumbnail or the reference-catalogue RGB image.
 It normalizes contrast, estimates a centre, thresholds positive residuals in an
 annulus and measures tangential alignment, elongation, angular extent, radial
 coherence and contrast. Long border lines are masked as possible artifacts.
-The active `curve-aware-visual-evidence-2` model measures the region radius
+The active `curve-aware-visual-evidence-3` model measures the region radius
 as the median distance of its pixels from the estimated centre. It can
 recover a coherent, tangential arc whose centroid is inside the inner radius.
 Extended arc-like regions must also have a consistent radius to avoid
@@ -74,17 +74,21 @@ For ring-like regions it checks occupied and contiguous 10-degree sectors
 (out of 36), radial coherence and contrast without an elongation requirement.
 The full rules and source hash are included in the scoring fingerprint.
 
-Arc-like regions retain the learned per-feature weights; the ring branch,
-radial weighting and aggregation are explicit heuristics, not a newly fitted
-model. Before ranking, the innermost region with a raw score of at least 0.60
-and 60 degrees of contiguous angular coverage sets a reference radius.
-Regions out to 1.6 times that radius retain full weight; beyond it the
-weight decreases linearly to 25% at 2.5 times that radius and stays there.
-Without a qualifying region there is no radial penalty. Pair geometry is
-scaled by the lower radial weight of its two regions. The modal table shows
-the radial weight applied to each reported region.
+Arc-like and other regions retain the learned per-feature weights; the ring
+branch, distance filter and aggregation are explicit heuristics, not a newly
+fitted model. To count as an arc, a region must pass the legacy or recovered
+arc gate and also show at least 40 degrees of contiguous sector coverage,
+30 degrees of angular extent, 0.75 tangential alignment, radial CV at most
+0.18 and contrast ratio at least 1.15. Other accepted regions are marked
+`Other`. The innermost recognized arc or ring scoring at least 0.60 with at
+least 60 degrees of contiguous coverage sets a reference radius. Only
+`Other` regions beyond 1.6 times that radius are excluded. A recognized outer
+arc or ring is not penalized or removed by this relative filter. Without a
+qualifying reference, no additional radial filtering is applied. The
+underlying segmentation annulus and border/area vetoes remain unchanged.
+The modal reports the reference radius and the number of excluded regions.
 
-Up to six regions are ranked by their adjusted scores. The best region can contribute
+The six highest scoring retained regions are shown. The best region can contribute
 up to 80 points, the second up to 15 and agreement between arc-like regions
 up to 5. This allows a single strong arc to score highly. No catalogue labels
 are used at inference. The earlier learned model remains available for

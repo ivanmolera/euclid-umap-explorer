@@ -41,7 +41,7 @@ def _weight_percent(weight):
 
 def _score_help_text() -> str:
     model = scoring_fingerprint()
-    radial = model["radial_weighting"]
+    radial = model["radial_filter"]
 
     def weighted_terms(weights):
         def term(key, weight):
@@ -54,14 +54,13 @@ def _score_help_text() -> str:
 
     return "\n\n".join((
         "Experimental visual index (0-100), not P(lens).",
-        f"Arc-like regions (learned weights): {weighted_terms(model['arc_feature_model']['region_weights'])}.",
+        f"Arc-like and other regions (learned weights): {weighted_terms(model['arc_feature_model']['region_weights'])}.",
         f"Ring-like regions: {weighted_terms(model['ring_weights'])}. No elongation requirement.",
-        "Radial weight: the innermost region scoring "
+        "Distance filter: the innermost arc or ring scoring "
         f"at least {radial['anchor_min_score']:g} with {radial['anchor_min_contiguous_deg']:g} degrees "
-        "of continuous coverage sets the reference radius. Outside "
-        f"{radial['full_weight_radius_ratio']:g}x that radius, the weight drops to "
-        f"{_weight_percent(radial['min_weight'])} at {radial['min_weight_radius_ratio']:g}x. "
-        "Without a qualifying region, there is no radial penalty.",
+        "of continuous coverage sets the reference radius. Only regions marked Other beyond "
+        f"{radial['max_other_radius_ratio']:g}x that radius are excluded. "
+        "Recognized arcs and rings are never excluded by this distance filter.",
         f"Final score: {weighted_terms(model['aggregation_weights'])}.",
         "A low score does not exclude lensing. Cyan marks the median pixel radius of the top region, "
         "not an Einstein radius.",
@@ -291,14 +290,10 @@ def canonical_detail_html(evidence, fallback_src, *, score_title="Canonical scor
         fields = [("shape", "Shape"), ("angular_coverage_deg", "Coverage (deg)"), *fields,
                   ("region_contribution_points", "Contribution (points)")]
         fields = [(key, "Median radius (px)" if key == "radius_px" else title) for key, title in fields]
-        if "radial_weight" in regions[0]:
-            fields.insert(-2, ("radial_weight", "Radial weight"))
 
     def format_region_value(region, key):
         if key == "shape":
             return html.escape(region[key])
-        if key == "radial_weight":
-            return f"{region[key]:.0%}"
         return format(float(region[key]), ".0f" if key in ("learned_rank", "angular_coverage_deg") else ".3f")
 
     table = ""
@@ -316,11 +311,13 @@ def canonical_detail_html(evidence, fallback_src, *, score_title="Canonical scor
     parts = evidence.get("contributions", {})
     reference_radius = evidence.get("radial_reference_radius_px")
     reference_note = f" | Radial reference: {reference_radius:.2f} px" if reference_radius is not None else ""
+    excluded = evidence.get("radial_excluded_count", 0)
+    excluded_note = f" | Distant regions excluded: {excluded}" if excluded else ""
     contributions = (
         '<p class="canonical-note">' + " | ".join(
             f"{title}: {parts[key]:.1f}" for key, title in (
                 ("best_region", "Best region"), ("second_region", "Second region"),
-                ("multi_region_geometry", "Multi-region geometry"))) + reference_note + "</p>"
+                ("multi_region_geometry", "Multi-region geometry"))) + reference_note + excluded_note + "</p>"
         if parts else ""
     )
     status = ""

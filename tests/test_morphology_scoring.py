@@ -18,25 +18,20 @@ def galaxy():
 
 
 class CurveAwareScoringTests(unittest.TestCase):
-    def test_bright_outer_region_is_downweighted_only_with_a_credible_inner_reference(self):
-        inner = {"component_score": .62, "radius_px": 10., "contiguous_coverage_deg": 70.}
-        adjacent = {"component_score": .68, "radius_px": 15., "contiguous_coverage_deg": 45.}
-        intermediate = {"component_score": .72, "radius_px": 20., "contiguous_coverage_deg": 50.}
-        far = {"component_score": .94, "radius_px": 27., "contiguous_coverage_deg": 30.}
-        regions = [region.copy() for region in (inner, adjacent, intermediate, far)]
-        self.assertEqual(scoring._apply_radial_weights(regions), 10.)
-        self.assertEqual([r["radial_weight"] for r in regions[:2]], [1., 1.])
-        self.assertGreater(regions[2]["radial_weight"], .25)
-        self.assertLess(regions[2]["radial_weight"], 1.)
-        self.assertEqual(regions[-1]["radial_weight"], .25)
-        self.assertAlmostEqual(regions[-1]["component_score"], .94 * .25)
-        self.assertEqual(regions[-1]["raw_component_score"], .94)
-        self.assertLess(regions[-1]["component_score"], regions[0]["component_score"])
+    def test_only_distant_other_regions_are_removed_when_there_is_a_reference(self):
+        inner = {"shape": "Arc-like", "component_score": .62, "radius_px": 10., "contiguous_coverage_deg": 70.}
+        adjacent = {"shape": "Other", "component_score": .68, "radius_px": 16., "contiguous_coverage_deg": 30.}
+        far = {**adjacent, "component_score": .94, "radius_px": 27.}
+        outer_arc = {**inner, "radius_px": 31., "contiguous_coverage_deg": 50.}
+        outer_ring = {**inner, "shape": "Ring-like", "radius_px": 42., "contiguous_coverage_deg": 260.}
+        kept, reference = scoring._exclude_distant_other_regions([inner, adjacent, far, outer_arc, outer_ring])
+        self.assertEqual(reference, 10.)
+        self.assertEqual(kept, [inner, adjacent, outer_arc, outer_ring])
+        self.assertEqual([region["component_score"] for region in kept], [.62, .68, .62, .62])
 
-        weak_inner = {**inner, "component_score": .4}
-        self.assertIsNone(scoring._apply_radial_weights([weak_inner, far]))
-        self.assertEqual(far["radial_weight"], 1.)
-        self.assertEqual(far["component_score"], .94)
+        ambiguous_inner = {**inner, "shape": "Other", "component_score": .99}
+        regions = [ambiguous_inner, far, outer_arc]
+        self.assertEqual(scoring._exclude_distant_other_regions(regions), (regions, None))
 
     def test_a_lone_outer_arc_is_not_penalized(self):
         rgb = galaxy()
@@ -44,9 +39,28 @@ class CurveAwareScoringTests(unittest.TestCase):
         result = scoring.score_image_bytes(png(rgb), include_overlay=False)
         self.assertEqual(len(result["regions"]), 1)
         arc = result["regions"][0]
+        self.assertEqual(arc["shape"], "Arc-like")
         self.assertAlmostEqual(arc["radius_px"], 52., delta=1.)
-        self.assertEqual(arc["radial_weight"], 1.)
-        self.assertAlmostEqual(arc["component_score"], arc["raw_component_score"])
+        self.assertEqual(result["radial_excluded_count"], 0)
+        self.assertAlmostEqual(result["score"], 80 * arc["component_score"])
+
+    def test_a_distant_arc_or_ring_scores_even_with_an_inner_ring(self):
+        for outer_shape in ("Arc-like", "Ring-like"):
+            with self.subTest(outer_shape=outer_shape):
+                rgb = galaxy()
+                cv2.circle(rgb, (80, 80), 21, (145,) * 3, 2)
+                if outer_shape == "Arc-like":
+                    cv2.ellipse(rgb, (80, 80), (52, 52), 0, 28, 159, (132,) * 3, 2)
+                else:
+                    cv2.circle(rgb, (80, 80), 52, (132,) * 3, 2)
+                result = scoring.score_image_bytes(png(rgb))
+                self.assertAlmostEqual(result["radial_reference_radius_px"], 21., delta=1.)
+                self.assertEqual(result["radial_excluded_count"], 0)
+                self.assertEqual(len(result["regions"]), 2)
+                outer = max(result["regions"], key=lambda region: region["radius_px"])
+                self.assertEqual(outer["shape"], outer_shape)
+                self.assertAlmostEqual(outer["radius_px"], 52., delta=1.)
+                self.assertGreater(outer["region_contribution_points"], 0.)
 
     def test_recovers_inner_centroid_arc_and_scores_single_region(self):
         rgb = galaxy()

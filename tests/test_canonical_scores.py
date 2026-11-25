@@ -40,7 +40,7 @@ class CanonicalPreviewScoresTests(unittest.TestCase):
             "38.11% contrast", "19.05% radial coherence", "16.85% tangential alignment",
             "16.62% angular extent", "9.37% elongation", "35% occupied angular sectors",
             "30% radial coherence", "20% contrast", "15% continuous angular coverage",
-            "1.6x that radius", "25% at 2.5x", "Without a qualifying region",
+            "Only regions marked Other beyond 1.6x", "Recognized arcs and rings are never excluded",
             "80% best region", "15% second region", "5% arc-pair geometry", "not P(lens)",
         ):
             self.assertIn(phrase, scores.CANONICAL_SCORE_HELP)
@@ -50,7 +50,7 @@ class CanonicalPreviewScoresTests(unittest.TestCase):
         markup = scores.canonical_detail_html(evidence, "original.jpg")
         self.assertIn("Shape", markup)
         self.assertIn("Median radius (px)", markup)
-        self.assertIn("Radial weight", markup)
+        self.assertNotIn("Radial weight", markup)
         self.assertIn("Contribution (points)", markup)
         self.assertNotIn("Orange: excluded border lines.", markup)
         self.assertEqual(scores.canonical_score_label({"score": 79.7}), "79.7 / 100")
@@ -59,11 +59,19 @@ class CanonicalPreviewScoresTests(unittest.TestCase):
         with patch.dict(morphology_scoring.POOL_WEIGHTS, best_region=.775, second_region=.175), \
                 patch.dict(morphology_scoring.RING_WEIGHTS, coverage=.325, continuity=.175), \
                 patch.dict(morphology_scoring.legacy.REGION_WEIGHTS, contrast=.4), \
-                patch.dict(morphology_scoring.RADIAL_WEIGHTING, min_weight=.275, min_weight_radius_ratio=2.75):
+                patch.dict(morphology_scoring.RADIAL_FILTER, max_other_radius_ratio=2.75):
             help_text = scores._score_help_text()
         for value in ("77.5% best region", "17.5% second region", "32.5% occupied angular sectors",
-                      "17.5% continuous angular coverage", "40% contrast", "27.5% at 2.75x"):
+                      "17.5% continuous angular coverage", "40% contrast", "beyond 2.75x"):
             self.assertIn(value, help_text)
+
+    def test_modal_reports_distant_exclusions_separately_from_border_lines(self):
+        image = png(test_images()[0])
+        evidence = {**active_score(image), "radial_reference_radius_px": 10.51, "radial_excluded_count": 2}
+        markup = scores.canonical_detail_html(evidence, "original.jpg")
+        self.assertIn("Radial reference: 10.51 px", markup)
+        self.assertIn("Distant regions excluded: 2", markup)
+        self.assertNotIn("Orange: excluded border lines.", markup)
 
     def test_scores_all_clusters_once_and_invalidates_changed_catalogue(self):
         data = pd.concat([fixture(), fixture().assign(object_id=lambda frame: frame.object_id + "1")], ignore_index=True)
