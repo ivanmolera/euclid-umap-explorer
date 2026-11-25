@@ -41,7 +41,8 @@ class CanonicalPreviewScoresTests(unittest.TestCase):
             "16.62% angular extent", "9.37% elongation", "35% occupied angular sectors",
             "30% radial coherence", "20% contrast", "15% continuous angular coverage",
             "Only regions marked Other beyond 1.6x", "Recognized arcs and rings are never excluded",
-            "80% best region", "15% second region", "5% arc-pair geometry", "not P(lens)",
+            "80% best region", "15% second region", "5% arc-pair geometry",
+            "95% of the best arc or ring alone", "not P(lens)",
         ):
             self.assertIn(phrase, scores.CANONICAL_SCORE_HELP)
             for label in ("Score", "Canonical score"):
@@ -59,11 +60,22 @@ class CanonicalPreviewScoresTests(unittest.TestCase):
         with patch.dict(morphology_scoring.POOL_WEIGHTS, best_region=.775, second_region=.175), \
                 patch.dict(morphology_scoring.RING_WEIGHTS, coverage=.325, continuity=.175), \
                 patch.dict(morphology_scoring.legacy.REGION_WEIGHTS, contrast=.4), \
-                patch.dict(morphology_scoring.RADIAL_FILTER, max_other_radius_ratio=2.75):
+                patch.dict(morphology_scoring.RADIAL_FILTER, max_other_radius_ratio=2.75), \
+                patch.object(morphology_scoring, "SINGLE_CURVE_WEIGHT", .925):
             help_text = scores._score_help_text()
         for value in ("77.5% best region", "17.5% second region", "32.5% occupied angular sectors",
-                      "17.5% continuous angular coverage", "40% contrast", "beyond 2.75x"):
+                      "17.5% continuous angular coverage", "40% contrast", "beyond 2.75x",
+                      "92.5% of the best arc or ring alone"):
             self.assertIn(value, help_text)
+
+    def test_modal_identifies_the_winning_single_curve_route(self):
+        evidence = {
+            "score": 65.17, "score_basis": "single_curve",
+            "contributions": {"best_region": 65.17, "second_region": 0., "multi_region_geometry": 0.},
+        }
+        markup = scores.canonical_detail_html(evidence, "original.jpg")
+        self.assertIn("Dominant arc or ring: 65.2 points", markup)
+        self.assertNotIn("Second region:", markup)
 
     def test_modal_reports_distant_exclusions_separately_from_border_lines(self):
         image = png(test_images()[0])
@@ -148,12 +160,14 @@ show_detectable_image(
                 self.assertFalse(app.exception)
                 load.assert_called_once_with(str(path))
             detail = next(element.proto.body for element in app.get("html") if 'class="canonical-analysis"' in element.proto.body)
-            value = active_score(image)["score"]
-            self.assertIn(f"Score: {value:.1f} / 100", detail)
+            evidence = active_score(image)
+            self.assertIn(f"Score: {evidence['score']:.1f} / 100", detail)
             self.assertNotIn("Canonical score:", detail)
             for expected in ("Original cutout", "Annotated cutout", "Arc-like",
-                             "Contribution (points)", "Multi-region geometry", "not P(lens)"):
+                             "Contribution (points)", "not P(lens)"):
                 self.assertIn(expected, detail)
+            summary = "Dominant arc or ring" if evidence["score_basis"] == "single_curve" else "Multi-region geometry"
+            self.assertIn(summary, detail)
             self.assertNotIn(scores.STATE_KEY, app.session_state)
 
             with patch.object(components, "load_cutout_evidence", side_effect=OSError("unreadable")):

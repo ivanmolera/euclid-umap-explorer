@@ -42,7 +42,33 @@ class CurveAwareScoringTests(unittest.TestCase):
         self.assertEqual(arc["shape"], "Arc-like")
         self.assertAlmostEqual(arc["radius_px"], 52., delta=1.)
         self.assertEqual(result["radial_excluded_count"], 0)
-        self.assertAlmostEqual(result["score"], 80 * arc["component_score"])
+        self.assertEqual(result["score_basis"], "single_curve")
+        self.assertAlmostEqual(result["score"], 100 * scoring.SINGLE_CURVE_WEIGHT * arc["component_score"])
+
+    def test_single_curve_outscores_a_weak_neighbour_without_counting_it(self):
+        ring = {"shape": "Ring-like", "component_score": .686}
+        other = {"shape": "Other", "component_score": .29}
+        regions, contributions, geometry, basis = scoring._aggregate_regions([other, ring], (0, 0))
+        self.assertEqual(regions, [ring, other])
+        self.assertEqual(basis, "single_curve")
+        self.assertAlmostEqual(contributions["best_region"], 65.17)
+        self.assertEqual(contributions["second_region"], 0.)
+        self.assertEqual(contributions["multi_region_geometry"], 0.)
+
+    def test_an_other_region_has_no_single_curve_bonus(self):
+        other = {"shape": "Other", "component_score": .9}
+        _, contributions, _, basis = scoring._aggregate_regions([other], (0, 0))
+        self.assertEqual(basis, "region_pool")
+        self.assertAlmostEqual(sum(contributions.values()), 72.)
+
+    def test_two_compatible_arcs_can_outscore_the_dominant_arc(self):
+        arc = {"shape": "Arc-like", "component_score": .9, "radius_px": 15.,
+               "centroid_x": 15., "centroid_y": 0.}
+        second = {**arc, "component_score": .84, "centroid_x": -15.}
+        _, contributions, geometry, basis = scoring._aggregate_regions([arc, second], (0, 0))
+        self.assertEqual(basis, "region_pool")
+        self.assertEqual(geometry, 1.)
+        self.assertAlmostEqual(sum(contributions.values()), 89.6)
 
     def test_a_distant_arc_or_ring_scores_even_with_an_inner_ring(self):
         for outer_shape in ("Arc-like", "Ring-like"):
@@ -74,7 +100,8 @@ class CurveAwareScoringTests(unittest.TestCase):
         arc = scored["regions"][0]
         self.assertEqual(arc["shape"], "Arc-like")
         self.assertGreater(arc["radius_px"], 14.4)
-        self.assertAlmostEqual(scored["score"], 80 * arc["component_score"])
+        self.assertEqual(scored["score_basis"], "single_curve")
+        self.assertAlmostEqual(scored["score"], 100 * scoring.SINGLE_CURVE_WEIGHT * arc["component_score"])
         self.assertGreater(scored["score"], 55.)
 
     def test_recovers_round_ring_without_global_elongation(self):

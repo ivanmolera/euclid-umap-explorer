@@ -20,7 +20,7 @@ from .cluster_diagnostics import (
 from .components import render_help_label
 from .canonical_scores import (
     CANONICAL_SCORE_HELP, cached_visual_evidence, load_canonical_evidence as _load_canonical_evidence,
-    score_overlay_legend,
+    score_contribution_text, score_overlay_legend,
 )
 from .images import load_image_bytes
 from .lens_plausibility import DETECTOR_CONFIG, DETECTOR_VERSION
@@ -183,13 +183,9 @@ def _render_detail(frame, evidence, prefix):
             )}} for index, region in enumerate(item["regions"], start=1)
         ])
         st.dataframe(measurements, hide_index=True, width="stretch")
-    contributions = item.get("contributions", {})
+    contributions = score_contribution_text(item)
     if contributions:
-        st.caption(
-            f"Best region: {contributions['best_region']:.1f}. "
-            f"Second region: {contributions['second_region']:.1f}. "
-            f"Multi-region geometry: {contributions['multi_region_geometry']:.1f}."
-        )
+        st.caption(contributions)
 
 
 def summary_with_canonical_scores(summary, data, features, canonical_features=None):

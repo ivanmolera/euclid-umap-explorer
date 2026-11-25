@@ -65,7 +65,7 @@ morphology JPEG, not a resized thumbnail or the reference-catalogue RGB image.
 It normalizes contrast, estimates a centre, thresholds positive residuals in an
 annulus and measures tangential alignment, elongation, angular extent, radial
 coherence and contrast. Long border lines are masked as possible artifacts.
-The active `curve-aware-visual-evidence-3` model measures the region radius
+The active `curve-aware-visual-evidence-4` model measures the region radius
 as the median distance of its pixels from the estimated centre. It can
 recover a coherent, tangential arc whose centroid is inside the inner radius.
 Extended arc-like regions must also have a consistent radius to avoid
@@ -88,13 +88,17 @@ qualifying reference, no additional radial filtering is applied. The
 underlying segmentation annulus and border/area vetoes remain unchanged.
 The modal reports the reference radius and the number of excluded regions.
 
-The six highest scoring retained regions are shown. The best region can contribute
-up to 80 points, the second up to 15 and agreement between arc-like regions
-up to 5. This allows a single strong arc to score highly. No catalogue labels
+The combined score uses the best region (up to 80 points), the second
+(up to 15) and agreement between arc-like regions (up to 5).
+A single recognized arc or ring can contribute up to 95 points on its own.
+The final score takes the higher of these two routes; the contributions
+reported in the modal are from the route that won. The scorer annotates up to
+six retained regions, with the winning curve marked first on the single-curve
+route. An `Other` region cannot use the single-curve route. No catalogue labels
 are used at inference. The earlier learned model remains available for
 comparison in `canonical_scoring.py`.
-The Score and Canonical score tooltips list all three weight groups from the
-active scoring fingerprint. Update the shared help when changing the meaning
+The Score and Canonical score tooltips list the weight groups from the active
+scoring fingerprint. Update the shared help when changing the meaning
 of a feature or the scoring procedure itself.
 
 The 0-100 result is **uncalibrated geometric evidence, not a lens probability**.

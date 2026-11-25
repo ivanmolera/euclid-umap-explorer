@@ -13,12 +13,13 @@ from . import canonical_scoring as legacy
 from . import lens_plausibility as detector
 
 
-SCORING_VERSION = "curve-aware-visual-evidence-3"
+SCORING_VERSION = "curve-aware-visual-evidence-4"
 MODEL_NAME = "curve-aware-heuristic"
 MODEL_SHA256 = legacy.MODEL_SHA256
 _RULES_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 SCORING_KEY = f"{SCORING_VERSION}:{MODEL_SHA256}:{_RULES_SHA256}"
 POOL_WEIGHTS = {"best_region": 0.80, "second_region": 0.15, "multi_region_geometry": 0.05}
+SINGLE_CURVE_WEIGHT = 0.95
 RING_WEIGHTS = {"coverage": 0.35, "coherence": 0.30, "contrast": 0.20, "continuity": 0.15}
 RADIAL_FILTER = {
     "anchor_min_score": 0.60,
@@ -36,6 +37,7 @@ def scoring_fingerprint():
         "rules_sha256": _RULES_SHA256,
         "arc_feature_model": legacy.scoring_fingerprint(),
         "aggregation_weights": dict(POOL_WEIGHTS),
+        "single_curve_weight": SINGLE_CURVE_WEIGHT,
         "ring_weights": dict(RING_WEIGHTS),
         "radial_filter": dict(RADIAL_FILTER),
         "angular_sectors": SECTORS,
@@ -154,6 +156,28 @@ def _exclude_distant_other_regions(regions):
     return [r for r in regions if r["shape"] != "Other" or r["radius_px"] <= max_radius], anchor_radius
 
 
+def _aggregate_regions(regions, center):
+    ranked = sorted(regions, key=lambda r: -r["component_score"])
+    top = ranked[:REGION_CAP]
+    arcs = [r for r in top if r["shape"] == "Arc-like"]
+    geometry = detector.pair_agreement(arcs, center)
+    contributions = {
+        "best_region": 100 * POOL_WEIGHTS["best_region"] * top[0]["component_score"] if top else 0.,
+        "second_region": 100 * POOL_WEIGHTS["second_region"] * top[1]["component_score"] if len(top) > 1 else 0.,
+        "multi_region_geometry": 100 * POOL_WEIGHTS["multi_region_geometry"] * geometry,
+    }
+    # Take the stronger route so extra weak regions cannot lower a convincing curve's score.
+    curve_index = next((i for i, r in enumerate(ranked) if r["shape"] in ("Arc-like", "Ring-like")), None)
+    if curve_index is not None:
+        curve = ranked[curve_index]
+        single_points = 100 * SINGLE_CURVE_WEIGHT * curve["component_score"]
+        if single_points > sum(contributions.values()):
+            ranked.insert(0, ranked.pop(curve_index))
+            contributions = {"best_region": single_points, "second_region": 0., "multi_region_geometry": 0.}
+            return ranked[:REGION_CAP], contributions, geometry, "single_curve"
+    return top, contributions, geometry, "region_pool"
+
+
 def score_image_bytes(image_bytes: bytes, *, include_overlay: bool = True) -> dict:
     with Image.open(BytesIO(image_bytes)) as image:
         if image.width * image.height > 10_000_000:
@@ -173,15 +197,7 @@ def score_image_bytes(image_bytes: bytes, *, include_overlay: bool = True) -> di
     n_regions = len(regions)
     regions, anchor_radius = _exclude_distant_other_regions(regions)
     excluded_count = n_regions - len(regions)
-    regions.sort(key=lambda r: -r["component_score"])
-    del regions[REGION_CAP:]
-    arcs = [r for r in regions if r["shape"] == "Arc-like"]
-    geometry = detector.pair_agreement(arcs, center)
-    contributions = {
-        "best_region": 100 * POOL_WEIGHTS["best_region"] * regions[0]["component_score"] if regions else 0.,
-        "second_region": 100 * POOL_WEIGHTS["second_region"] * regions[1]["component_score"] if len(regions) > 1 else 0.,
-        "multi_region_geometry": 100 * POOL_WEIGHTS["multi_region_geometry"] * geometry,
-    }
+    regions, contributions, geometry, basis = _aggregate_regions(regions, center)
     artifact_lines = baseline["artifact_lines"]
     for rank, region in enumerate(regions):
         region["region_contribution_points"] = (
@@ -191,6 +207,7 @@ def score_image_bytes(image_bytes: bytes, *, include_overlay: bool = True) -> di
         score=min(100., sum(contributions.values())),
         center=center,
         contributions=contributions,
+        score_basis=basis,
         pair_agreement=geometry,
         radial_reference_radius_px=anchor_radius,
         radial_excluded_count=excluded_count,

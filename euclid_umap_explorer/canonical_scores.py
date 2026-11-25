@@ -61,7 +61,8 @@ def _score_help_text() -> str:
         "of continuous coverage sets the reference radius. Only regions marked Other beyond "
         f"{radial['max_other_radius_ratio']:g}x that radius are excluded. "
         "Recognized arcs and rings are never excluded by this distance filter.",
-        f"Final score: {weighted_terms(model['aggregation_weights'])}.",
+        f"Final score: use the higher of {_weight_percent(model['single_curve_weight'])} of the best "
+        f"arc or ring alone, or the combined score ({weighted_terms(model['aggregation_weights'])}).",
         "A low score does not exclude lensing. Cyan marks the median pixel radius of the top region, "
         "not an Einstein radius.",
     ))
@@ -267,6 +268,28 @@ def score_overlay_legend(evidence):
     return " ".join(parts)
 
 
+def score_contribution_text(evidence):
+    parts = evidence.get("contributions")
+    if not parts:
+        return ""
+    if evidence.get("score_basis") == "single_curve":
+        notes = [f"Dominant arc or ring: {parts['best_region']:.1f} points"]
+    else:
+        notes = [
+            f"{title}: {parts[key]:.1f}" for key, title in (
+                ("best_region", "Best region"), ("second_region", "Second region"),
+                ("multi_region_geometry", "Multi-region geometry"),
+            )
+        ]
+    reference_radius = evidence.get("radial_reference_radius_px")
+    if reference_radius is not None:
+        notes.append(f"Radial reference: {reference_radius:.2f} px")
+    excluded = evidence.get("radial_excluded_count", 0)
+    if excluded:
+        notes.append(f"Distant regions excluded: {excluded}")
+    return " | ".join(notes)
+
+
 def canonical_detail_html(evidence, fallback_src, *, score_title="Canonical score"):
     def source(content, mime):
         return f"data:{mime};base64,{base64.b64encode(content).decode()}"
@@ -308,18 +331,8 @@ def canonical_detail_html(evidence, fallback_src, *, score_title="Canonical scor
         table = f'<div class="canonical-region-table"><table><thead><tr>{headers}</tr></thead><tbody>{body}</tbody></table></div>'
     else:
         table = '<p class="canonical-note">No contributing regions detected.</p>'
-    parts = evidence.get("contributions", {})
-    reference_radius = evidence.get("radial_reference_radius_px")
-    reference_note = f" | Radial reference: {reference_radius:.2f} px" if reference_radius is not None else ""
-    excluded = evidence.get("radial_excluded_count", 0)
-    excluded_note = f" | Distant regions excluded: {excluded}" if excluded else ""
-    contributions = (
-        '<p class="canonical-note">' + " | ".join(
-            f"{title}: {parts[key]:.1f}" for key, title in (
-                ("best_region", "Best region"), ("second_region", "Second region"),
-                ("multi_region_geometry", "Multi-region geometry"))) + reference_note + excluded_note + "</p>"
-        if parts else ""
-    )
+    note = score_contribution_text(evidence)
+    contributions = f'<p class="canonical-note">{html.escape(note)}</p>' if note else ""
     status = ""
     if evidence.get("score") is None:
         status = f'<p class="canonical-note">Not evaluable: {html.escape(evidence.get("status", "unavailable").replace("_", " "))}.</p>'
