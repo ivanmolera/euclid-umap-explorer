@@ -18,6 +18,36 @@ def galaxy():
 
 
 class CurveAwareScoringTests(unittest.TestCase):
+    def test_bright_outer_region_is_downweighted_only_with_a_credible_inner_reference(self):
+        inner = {"component_score": .62, "radius_px": 10., "contiguous_coverage_deg": 70.}
+        adjacent = {"component_score": .68, "radius_px": 15., "contiguous_coverage_deg": 45.}
+        intermediate = {"component_score": .72, "radius_px": 20., "contiguous_coverage_deg": 50.}
+        far = {"component_score": .94, "radius_px": 27., "contiguous_coverage_deg": 30.}
+        regions = [region.copy() for region in (inner, adjacent, intermediate, far)]
+        self.assertEqual(scoring._apply_radial_weights(regions), 10.)
+        self.assertEqual([r["radial_weight"] for r in regions[:2]], [1., 1.])
+        self.assertGreater(regions[2]["radial_weight"], .25)
+        self.assertLess(regions[2]["radial_weight"], 1.)
+        self.assertEqual(regions[-1]["radial_weight"], .25)
+        self.assertAlmostEqual(regions[-1]["component_score"], .94 * .25)
+        self.assertEqual(regions[-1]["raw_component_score"], .94)
+        self.assertLess(regions[-1]["component_score"], regions[0]["component_score"])
+
+        weak_inner = {**inner, "component_score": .4}
+        self.assertIsNone(scoring._apply_radial_weights([weak_inner, far]))
+        self.assertEqual(far["radial_weight"], 1.)
+        self.assertEqual(far["component_score"], .94)
+
+    def test_a_lone_outer_arc_is_not_penalized(self):
+        rgb = galaxy()
+        cv2.ellipse(rgb, (80, 80), (52, 52), 0, 28, 159, (125,) * 3, 2)
+        result = scoring.score_image_bytes(png(rgb), include_overlay=False)
+        self.assertEqual(len(result["regions"]), 1)
+        arc = result["regions"][0]
+        self.assertAlmostEqual(arc["radius_px"], 52., delta=1.)
+        self.assertEqual(arc["radial_weight"], 1.)
+        self.assertAlmostEqual(arc["component_score"], arc["raw_component_score"])
+
     def test_recovers_inner_centroid_arc_and_scores_single_region(self):
         rgb = galaxy()
         cv2.ellipse(rgb, (80, 80), (17, 17), 0, 20, 181, (125,) * 3, 2)

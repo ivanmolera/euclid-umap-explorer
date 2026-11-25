@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 from io import BytesIO
+from itertools import combinations
 from pathlib import Path
 
 import cv2
@@ -13,13 +14,20 @@ from . import canonical_scoring as legacy
 from . import lens_plausibility as detector
 
 
-SCORING_VERSION = "curve-aware-visual-evidence-1"
+SCORING_VERSION = "curve-aware-visual-evidence-2"
 MODEL_NAME = "curve-aware-heuristic"
 MODEL_SHA256 = legacy.MODEL_SHA256
 _RULES_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 SCORING_KEY = f"{SCORING_VERSION}:{MODEL_SHA256}:{_RULES_SHA256}"
 POOL_WEIGHTS = {"best_region": 0.80, "second_region": 0.15, "multi_region_geometry": 0.05}
 RING_WEIGHTS = {"coverage": 0.35, "coherence": 0.30, "contrast": 0.20, "continuity": 0.15}
+RADIAL_WEIGHTING = {
+    "anchor_min_score": 0.60,
+    "anchor_min_contiguous_deg": 60.0,
+    "full_weight_radius_ratio": 1.6,
+    "min_weight_radius_ratio": 2.5,
+    "min_weight": 0.25,
+}
 SECTORS = 36
 REGION_CAP = 6
 
@@ -32,6 +40,7 @@ def scoring_fingerprint():
         "arc_feature_model": legacy.scoring_fingerprint(),
         "aggregation_weights": dict(POOL_WEIGHTS),
         "ring_weights": dict(RING_WEIGHTS),
+        "radial_weighting": dict(RADIAL_WEIGHTING),
         "angular_sectors": SECTORS,
         "region_cap": REGION_CAP,
     }
@@ -127,6 +136,28 @@ def _overlay_png(rgb, regions, center, artifact_lines):
     return buffer.getvalue()
 
 
+def _apply_radial_weights(regions):
+    rule = RADIAL_WEIGHTING
+    anchor_radius = min((
+        r["radius_px"] for r in regions
+        if r["component_score"] >= rule["anchor_min_score"]
+        and r["contiguous_coverage_deg"] >= rule["anchor_min_contiguous_deg"]
+    ), default=None)
+    for region in regions:
+        weight = 1.
+        if anchor_radius is not None:
+            ratio = region["radius_px"] / anchor_radius
+            progress = detector.unit_interval(
+                (ratio - rule["full_weight_radius_ratio"])
+                / (rule["min_weight_radius_ratio"] - rule["full_weight_radius_ratio"])
+            )
+            weight -= (1. - rule["min_weight"]) * progress
+        region["raw_component_score"] = region["component_score"]
+        region["radial_weight"] = weight
+        region["component_score"] *= weight
+    return anchor_radius
+
+
 def score_image_bytes(image_bytes: bytes, *, include_overlay: bool = True) -> dict:
     with Image.open(BytesIO(image_bytes)) as image:
         if image.width * image.height > 10_000_000:
@@ -143,10 +174,14 @@ def score_image_bytes(image_bytes: bytes, *, include_overlay: bool = True) -> di
         region = _score_region(component, center, rgb.shape[:2])
         if region is not None:
             regions.append(region)
+    anchor_radius = _apply_radial_weights(regions)
     regions.sort(key=lambda r: -r["component_score"])
     del regions[REGION_CAP:]
     arcs = [r for r in regions if r["shape"] == "Arc-like"]
-    geometry = detector.pair_agreement(arcs, center)
+    geometry = max((
+        detector.pair_agreement((left, right), center) * min(left["radial_weight"], right["radial_weight"])
+        for left, right in combinations(arcs, 2)
+    ), default=0.)
     contributions = {
         "best_region": 100 * POOL_WEIGHTS["best_region"] * regions[0]["component_score"] if regions else 0.,
         "second_region": 100 * POOL_WEIGHTS["second_region"] * regions[1]["component_score"] if len(regions) > 1 else 0.,
@@ -162,6 +197,7 @@ def score_image_bytes(image_bytes: bytes, *, include_overlay: bool = True) -> di
         center=center,
         contributions=contributions,
         pair_agreement=geometry,
+        radial_reference_radius_px=anchor_radius,
         quality_flag=baseline["quality_flag"],
         artifact_lines=[list(line) for line in artifact_lines],
         image_width=int(rgb.shape[1]),

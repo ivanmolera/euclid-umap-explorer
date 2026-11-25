@@ -19,22 +19,56 @@ from .config import MAX_ALGORITHM_SECONDS
 from .images import load_image_bytes, morphology_cutout_candidates, object_image_path
 from .lens_plausibility import DETECTOR_VERSION
 from .morphology_scoring import (
-    MODEL_NAME, MODEL_SHA256, POOL_WEIGHTS, SCORING_KEY, SCORING_VERSION,
-    score_image_bytes,
+    MODEL_NAME, MODEL_SHA256, SCORING_KEY, SCORING_VERSION, score_image_bytes, scoring_fingerprint,
 )
 from .runtime import log_app_event
 from .storage import is_gcs_path
 
 
-CANONICAL_SCORE_HELP = (
-    "Experimental visual index (0-100), not P(lens). Arc-like regions use learned feature weights "
-    "for shape, contrast and radial coherence. Ring-like regions use continuous angular coverage "
-    "at a consistent radius, without requiring elongation. Radius is the median pixel distance "
-    "from the estimated centre. Final score: "
-    f"{POOL_WEIGHTS['best_region']:.0%} best region, {POOL_WEIGHTS['second_region']:.0%} second region, "
-    f"{POOL_WEIGHTS['multi_region_geometry']:.0%} arc-pair geometry. "
-    "A low score does not exclude lensing; the cyan circle is not an Einstein radius."
-)
+_SCORE_WEIGHT_LABELS = {
+    "tangential": "tangential alignment",
+    "angular_span": "angular extent",
+    "coverage": "occupied angular sectors",
+    "coherence": "radial coherence",
+    "continuity": "continuous angular coverage",
+    "multi_region_geometry": "arc-pair geometry",
+}
+
+
+def _weight_percent(weight):
+    return f"{100 * weight:.2f}".rstrip("0").rstrip(".") + "%"
+
+
+def _score_help_text() -> str:
+    model = scoring_fingerprint()
+    radial = model["radial_weighting"]
+
+    def weighted_terms(weights):
+        def term(key, weight):
+            label = _SCORE_WEIGHT_LABELS.get(key, key.replace("_", " "))
+            return f"{_weight_percent(weight)} {label}"
+
+        return ", ".join(
+            term(key, weight) for key, weight in sorted(weights.items(), key=lambda item: -item[1])
+        )
+
+    return "\n\n".join((
+        "Experimental visual index (0-100), not P(lens).",
+        f"Arc-like regions (learned weights): {weighted_terms(model['arc_feature_model']['region_weights'])}.",
+        f"Ring-like regions: {weighted_terms(model['ring_weights'])}. No elongation requirement.",
+        "Radial weight: the innermost region scoring "
+        f"at least {radial['anchor_min_score']:g} with {radial['anchor_min_contiguous_deg']:g} degrees "
+        "of continuous coverage sets the reference radius. Outside "
+        f"{radial['full_weight_radius_ratio']:g}x that radius, the weight drops to "
+        f"{_weight_percent(radial['min_weight'])} at {radial['min_weight_radius_ratio']:g}x. "
+        "Without a qualifying region, there is no radial penalty.",
+        f"Final score: {weighted_terms(model['aggregation_weights'])}.",
+        "A low score does not exclude lensing. Cyan marks the median pixel radius of the top region, "
+        "not an Einstein radius.",
+    ))
+
+
+CANONICAL_SCORE_HELP = _score_help_text()
 STATE_KEY = "canonical_preview_scores"
 DETAIL_STATE_KEY = "canonical_image_details"
 
@@ -220,8 +254,9 @@ def canonical_score_label(evidence):
 
 
 def score_help_html(label):
+    help_html = html.escape(CANONICAL_SCORE_HELP).replace("\n", "<br>")
     return (f'<span class="concept-help" tabindex="0">{html.escape(label)}'
-            f'<span class="concept-popover">{html.escape(CANONICAL_SCORE_HELP)}</span></span>')
+            f'<span class="concept-popover">{help_html}</span></span>')
 
 
 def score_overlay_legend(evidence):
@@ -256,10 +291,14 @@ def canonical_detail_html(evidence, fallback_src, *, score_title="Canonical scor
         fields = [("shape", "Shape"), ("angular_coverage_deg", "Coverage (deg)"), *fields,
                   ("region_contribution_points", "Contribution (points)")]
         fields = [(key, "Median radius (px)" if key == "radius_px" else title) for key, title in fields]
+        if "radial_weight" in regions[0]:
+            fields.insert(-2, ("radial_weight", "Radial weight"))
 
     def format_region_value(region, key):
         if key == "shape":
             return html.escape(region[key])
+        if key == "radial_weight":
+            return f"{region[key]:.0%}"
         return format(float(region[key]), ".0f" if key in ("learned_rank", "angular_coverage_deg") else ".3f")
 
     table = ""
@@ -275,11 +314,13 @@ def canonical_detail_html(evidence, fallback_src, *, score_title="Canonical scor
     else:
         table = '<p class="canonical-note">No contributing regions detected.</p>'
     parts = evidence.get("contributions", {})
+    reference_radius = evidence.get("radial_reference_radius_px")
+    reference_note = f" | Radial reference: {reference_radius:.2f} px" if reference_radius is not None else ""
     contributions = (
         '<p class="canonical-note">' + " | ".join(
             f"{title}: {parts[key]:.1f}" for key, title in (
                 ("best_region", "Best region"), ("second_region", "Second region"),
-                ("multi_region_geometry", "Multi-region geometry"))) + "</p>"
+                ("multi_region_geometry", "Multi-region geometry"))) + reference_note + "</p>"
         if parts else ""
     )
     status = ""
